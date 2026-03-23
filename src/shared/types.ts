@@ -121,6 +121,18 @@ export interface CommandEvent {
   detail?: string;
 }
 
+// Prompt library types
+export type PromptId = string & { readonly __brand: "PromptId" };
+
+export interface Prompt {
+  id: PromptId;
+  filename: string; // e.g. "my-prompt.md"
+  title: string;
+  content: string;
+  createdAt: number;
+  updatedAt: number;
+}
+
 // Session editor types
 export interface GeminiProject {
   name: string;

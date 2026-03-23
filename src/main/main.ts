@@ -7,6 +7,7 @@ import { loadCommands } from "./command/persistence";
 import { registerTmuxHandlers } from "./ipc/tmux-handlers";
 import { registerCommandHandlers } from "./ipc/command-handlers";
 import { registerSessionHandlers } from "./ipc/session-handlers";
+import { registerPromptHandlers } from "./ipc/prompt-handlers";
 
 // Handle Squirrel events for Windows installer
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -55,6 +56,7 @@ app.whenReady().then(async () => {
   registerTmuxHandlers(tmuxState, outputManager);
   registerCommandHandlers(commandEngine);
   registerSessionHandlers();
+  registerPromptHandlers();
 
   await outputManager.init();
   tmuxState.start();

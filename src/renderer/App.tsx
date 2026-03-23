@@ -4,6 +4,7 @@ import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
 import { CommandsPage } from "./pages/Commands";
 import { SessionsPage } from "./pages/Sessions";
+import { PromptsPage } from "./pages/Prompts";
 import { TmuxTree } from "./components/TmuxTree";
 import { CommandBar } from "./components/CommandBar";
 import { LaunchToolDialog } from "./components/LaunchToolDialog";
@@ -48,6 +49,7 @@ function Sidebar() {
         <NavLink to="/">Panes</NavLink>
         <NavLink to="/commands">Commands</NavLink>
         <NavLink to="/sessions">Sessions</NavLink>
+        <NavLink to="/prompts">Prompts</NavLink>
         <NavLink to="/settings">Settings</NavLink>
       </div>
 
@@ -102,6 +104,7 @@ export function App() {
               <Route path="/" element={<Home />} />
               <Route path="/commands" element={<CommandsPage />} />
               <Route path="/sessions" element={<SessionsPage />} />
+              <Route path="/prompts" element={<PromptsPage />} />
               <Route path="/settings" element={<Settings />} />
             </Routes>
           </main>

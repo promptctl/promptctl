@@ -6,6 +6,7 @@ import type {
   PaneProcesses,
   Command,
   CommandEvent,
+  Prompt,
   GeminiProject,
   GeminiSessionInfo,
   GeminiMessageSummary,
@@ -44,6 +45,9 @@ export interface ElectronAPI {
     id: string,
     updates: Partial<Command>,
   ): Promise<void>;
+  invoke(channel: "prompt:list"): Promise<Prompt[]>;
+  invoke(channel: "prompt:save", prompt: Prompt): Promise<Prompt[]>;
+  invoke(channel: "prompt:delete", filename: string): Promise<Prompt[]>;
   invoke(channel: "session:list-projects"): Promise<GeminiProject[]>;
   invoke(
     channel: "session:list-sessions",
