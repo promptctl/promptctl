@@ -4,15 +4,17 @@ import { listProjects, listSessions } from "../sessions/discovery";
 import {
   loadSession,
   getMessageContent,
+  getMessagesContent,
   autoTrimSuggestions,
+  checkBackupExists,
   saveSession,
 } from "../sessions/editor";
 
 export function registerSessionHandlers(): void {
   ipcMain.handle("session:list-projects", () => listProjects());
 
-  ipcMain.handle("session:list-sessions", (_e, projectPath: string) =>
-    listSessions(projectPath),
+  ipcMain.handle("session:list-sessions", (_e, projectPaths: string[]) =>
+    listSessions(projectPaths),
   );
 
   ipcMain.handle("session:load", (_e, filePath: string) =>
@@ -23,7 +25,13 @@ export function registerSessionHandlers(): void {
     getMessageContent(index),
   );
 
+  ipcMain.handle("session:messages-content", (_e, indices: number[]) =>
+    getMessagesContent(indices),
+  );
+
   ipcMain.handle("session:auto-trim", () => autoTrimSuggestions());
+
+  ipcMain.handle("session:check-backup", () => checkBackupExists());
 
   ipcMain.handle(
     "session:save",

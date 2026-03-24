@@ -36,8 +36,9 @@ const createWindow = (): void => {
     },
   });
 
-  // Log renderer console to main process stdout
+  // Log renderer console to main process stdout (skip Electron noise)
   mainWindow.webContents.on("console-message", (e) => {
+    if (e.message.includes("Electron Security Warning")) return;
     console.log(`[renderer:${e.level}] ${e.message}`);
   });
 

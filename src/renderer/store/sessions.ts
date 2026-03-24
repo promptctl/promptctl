@@ -8,7 +8,7 @@ import type {
 interface SessionEditorState {
   // Tree view state
   projects: GeminiProject[];
-  sessionsByProject: Record<string, GeminiSessionInfo[]>; // keyed by project.path
+  sessionsByProject: Record<string, GeminiSessionInfo[]>; // keyed by project.name
   expandedProjects: Set<string>;
   loadingProjects: Set<string>;
 
@@ -25,8 +25,8 @@ interface SessionEditorState {
 
   // Actions
   loadProjects: () => Promise<void>;
-  toggleProject: (projectPath: string) => Promise<void>;
-  selectSession: (session: GeminiSessionInfo, projectPath: string) => Promise<void>;
+  toggleProject: (projectKey: string, projectPaths: string[]) => Promise<void>;
+  selectSession: (session: GeminiSessionInfo, projectKey: string) => Promise<void>;
   clearSession: () => void;
   toggleMessage: (index: number) => void;
   toggleRange: (startIndex: number, endIndex: number) => void;
@@ -38,6 +38,26 @@ interface SessionEditorState {
   runAutoTrim: () => Promise<void>;
   applyAutoTrim: () => void;
   save: () => Promise<string>;
+}
+
+const STORAGE_KEY = "session-editor-state";
+
+function persistSelection(session: GeminiSessionInfo | null, projectKey: string | null) {
+  if (session && projectKey) {
+    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ session, projectKey }));
+  } else {
+    sessionStorage.removeItem(STORAGE_KEY);
+  }
+}
+
+function loadPersistedSelection(): { session: GeminiSessionInfo; projectKey: string } | null {
+  try {
+    const raw = sessionStorage.getItem(STORAGE_KEY);
+    if (!raw) return null;
+    return JSON.parse(raw);
+  } catch {
+    return null;
+  }
 }
 
 export const useSessionStore = create<SessionEditorState>((set, get) => ({
@@ -61,46 +81,74 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       "session:list-projects",
     )) as GeminiProject[];
     set({ projects });
+
+    // Restore persisted selection
+    const persisted = loadPersistedSelection();
+    if (persisted) {
+      const project = projects.find((p) => p.name === persisted.projectKey);
+      if (project) {
+        // Expand the project and load its sessions
+        const expanded = new Set<string>([persisted.projectKey]);
+        set({ expandedProjects: expanded });
+
+        const sessions = (await window.electronAPI.invoke(
+          "session:list-sessions",
+          project.paths,
+        )) as GeminiSessionInfo[];
+        set({
+          sessionsByProject: { [persisted.projectKey]: sessions },
+        });
+
+        // Re-select the session if it still exists
+        const match = sessions.find(
+          (s) => s.sessionId === persisted.session.sessionId,
+        );
+        if (match) {
+          get().selectSession(match, persisted.projectKey);
+        }
+      }
+    }
   },
 
-  toggleProject: async (projectPath) => {
+  toggleProject: async (projectKey, projectPaths) => {
     const { expandedProjects, sessionsByProject, loadingProjects } = get();
 
-    if (expandedProjects.has(projectPath)) {
+    if (expandedProjects.has(projectKey)) {
       const next = new Set(expandedProjects);
-      next.delete(projectPath);
+      next.delete(projectKey);
       set({ expandedProjects: next });
       return;
     }
 
     // Expand and load sessions if not already loaded
     const nextExpanded = new Set(expandedProjects);
-    nextExpanded.add(projectPath);
+    nextExpanded.add(projectKey);
     set({ expandedProjects: nextExpanded });
 
-    if (!sessionsByProject[projectPath]) {
+    if (!sessionsByProject[projectKey]) {
       const nextLoading = new Set(loadingProjects);
-      nextLoading.add(projectPath);
+      nextLoading.add(projectKey);
       set({ loadingProjects: nextLoading });
 
       const sessions = (await window.electronAPI.invoke(
         "session:list-sessions",
-        projectPath,
+        projectPaths,
       )) as GeminiSessionInfo[];
 
       const doneLoading = new Set(get().loadingProjects);
-      doneLoading.delete(projectPath);
+      doneLoading.delete(projectKey);
       set({
-        sessionsByProject: { ...get().sessionsByProject, [projectPath]: sessions },
+        sessionsByProject: { ...get().sessionsByProject, [projectKey]: sessions },
         loadingProjects: doneLoading,
       });
     }
   },
 
-  selectSession: async (session, projectPath) => {
+  selectSession: async (session, projectKey) => {
+    persistSelection(session, projectKey);
     set({
       selectedSession: session,
-      selectedProjectPath: projectPath,
+      selectedProjectPath: projectKey,
       loading: true,
       markedForRemoval: new Set(),
       autoTrimIndices: [],
@@ -114,6 +162,7 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
   },
 
   clearSession: () => {
+    persistSelection(null, null);
     set({
       selectedSession: null,
       selectedProjectPath: null,

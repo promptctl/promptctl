@@ -134,10 +134,13 @@ export interface Prompt {
 }
 
 // Session editor types
+export type SessionProvider = "gemini" | "claude" | "codex";
+
 export interface GeminiProject {
   name: string;
-  path: string; // path to the project's gemini tmp dir
+  paths: string[]; // all tmp dirs for this project (merged duplicates)
   projectRoot: string; // the actual project directory
+  provider: SessionProvider;
 }
 
 export interface GeminiSessionInfo {
@@ -160,6 +163,7 @@ export interface GeminiMessageSummary {
   preview: string; // first ~200 chars of text content
   hasToolCalls: boolean;
   hasToolResults: boolean;
+  toolNames: string[];
   flags: GeminiMessageFlag[];
 }
 

@@ -1,4 +1,4 @@
-import { contextBridge, ipcRenderer } from "electron";
+import { contextBridge, ipcRenderer, clipboard } from "electron";
 
 contextBridge.exposeInMainWorld("electronAPI", {
   send: (channel: string, ...args: unknown[]) =>
@@ -11,4 +11,5 @@ contextBridge.exposeInMainWorld("electronAPI", {
     ipcRenderer.on(channel, subscription);
     return () => ipcRenderer.removeListener(channel, subscription);
   },
+  writeClipboard: (text: string) => clipboard.writeText(text),
 });

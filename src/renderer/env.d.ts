@@ -25,6 +25,11 @@ export interface ElectronAPI {
     pressEnter?: boolean,
   ): Promise<void>;
   invoke(
+    channel: "tmux:send-keys-literal",
+    paneId: string,
+    data: string,
+  ): Promise<void>;
+  invoke(
     channel: "tmux:capture-pane",
     paneId: string,
     start: number,
@@ -51,7 +56,7 @@ export interface ElectronAPI {
   invoke(channel: "session:list-projects"): Promise<GeminiProject[]>;
   invoke(
     channel: "session:list-sessions",
-    projectPath: string,
+    projectPaths: string[],
   ): Promise<GeminiSessionInfo[]>;
   invoke(
     channel: "session:load",
@@ -61,12 +66,18 @@ export interface ElectronAPI {
     channel: "session:message-content",
     index: number,
   ): Promise<string>;
+  invoke(
+    channel: "session:messages-content",
+    indices: number[],
+  ): Promise<string>;
   invoke(channel: "session:auto-trim"): Promise<number[]>;
+  invoke(channel: "session:check-backup"): Promise<{ exists: boolean; path: string; size: number }>;
   invoke(
     channel: "session:save",
     indicesToRemove: number[],
     outputPath?: string,
   ): Promise<string>;
+  writeClipboard(text: string): void;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
 
   on(

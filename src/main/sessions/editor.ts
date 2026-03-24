@@ -1,5 +1,5 @@
 // [LAW:single-enforcer] All session loading, analysis, and trimming logic lives here.
-import { readFile, writeFile, copyFile } from "node:fs/promises";
+import { readFile, writeFile, copyFile, stat } from "node:fs/promises";
 import type {
   GeminiMessageSummary,
   GeminiMessageFlag,
@@ -20,7 +20,7 @@ interface RawMessage {
   id: string;
   timestamp: string;
   type: string;
-  content?: RawContent[];
+  content?: string | RawContent[];
   displayContent?: unknown[];
   [key: string]: unknown;
 }
@@ -30,6 +30,11 @@ type RawContent =
   | { toolCalls: unknown[] }
   | { functionResponse: unknown }
   | Record<string, unknown>;
+
+function contentArray(msg: RawMessage): RawContent[] {
+  if (typeof msg.content === "string") return [{ text: msg.content }];
+  return msg.content ?? [];
+}
 
 let loadedSession: RawSession | null = null;
 let loadedPath: string | null = null;
@@ -48,6 +53,38 @@ export function getMessageContent(index: number): string {
   return JSON.stringify(msg, null, 2);
 }
 
+function extractText(msg: RawMessage): string {
+  const role = msg.type === "user" ? "User" : msg.type === "gemini" ? "Assistant" : msg.type;
+  const parts: string[] = [];
+  for (const c of contentArray(msg)) {
+    if ("text" in c && typeof c.text === "string") {
+      parts.push(c.text);
+    }
+  }
+  // toolCalls is a top-level message key
+  if ("toolCalls" in msg && Array.isArray(msg.toolCalls)) {
+    const calls = msg.toolCalls as Array<{ name?: string }>;
+    for (const tc of calls) {
+      parts.push(`[Tool call: ${tc.name ?? "unknown"}]`);
+    }
+  }
+  const body = parts.join("\n").trim();
+  return body ? `**${role}:**\n${body}` : "";
+}
+
+export function getMessagesContent(indices: number[]): string {
+  if (!loadedSession) return "";
+  const sorted = [...indices].sort((a, b) => a - b);
+  return sorted
+    .map((i) => {
+      const msg = loadedSession!.messages[i];
+      if (!msg) return "";
+      return extractText(msg);
+    })
+    .filter(Boolean)
+    .join("\n\n---\n\n");
+}
+
 function summarizeMessages(messages: RawMessage[]): GeminiMessageSummary[] {
   return messages.map((msg, index) => {
     const sizeBytes = JSON.stringify(msg).length;
@@ -55,6 +92,7 @@ function summarizeMessages(messages: RawMessage[]): GeminiMessageSummary[] {
     const flags = analyzeFlags(msg, sizeBytes);
     const hasToolCalls = hasToolCallContent(msg);
     const hasToolResults = hasToolResultContent(msg);
+    const toolNames = extractToolNames(msg);
 
     return {
       index,
@@ -65,36 +103,47 @@ function summarizeMessages(messages: RawMessage[]): GeminiMessageSummary[] {
       preview,
       hasToolCalls,
       hasToolResults,
+      toolNames,
       flags,
     };
   });
 }
 
 function extractPreview(msg: RawMessage): string {
-  const contents = msg.content ?? [];
+  const contents = contentArray(msg);
   for (const c of contents) {
     if ("text" in c && typeof c.text === "string") {
       return c.text.slice(0, 300).replace(/\n/g, " ");
     }
-    if ("toolCalls" in c) {
-      const calls = c.toolCalls as Array<{ name?: string }>;
-      const names = calls.map((tc) => tc.name ?? "unknown").join(", ");
-      return `[tool calls: ${names}]`;
-    }
+  }
+  // toolCalls is a top-level message key
+  if ("toolCalls" in msg && Array.isArray(msg.toolCalls)) {
+    const calls = msg.toolCalls as Array<{ name?: string }>;
+    const names = calls.map((tc) => tc.name ?? "unknown").join(", ");
+    return `[tool calls: ${names}]`;
   }
   return `[${msg.type}]`;
 }
 
+function extractToolNames(msg: RawMessage): string[] {
+  if (!("toolCalls" in msg) || !Array.isArray(msg.toolCalls)) return [];
+  const calls = msg.toolCalls as Array<{ name?: string }>;
+  const names = new Set<string>();
+  for (const tc of calls) {
+    if (tc.name) names.add(tc.name);
+  }
+  return [...names];
+}
+
 function hasToolCallContent(msg: RawMessage): boolean {
-  const contents = msg.content ?? [];
-  return contents.some((c) => "toolCalls" in c);
+  return "toolCalls" in msg && Array.isArray(msg.toolCalls);
 }
 
 function hasToolResultContent(msg: RawMessage): boolean {
-  const contents = msg.content ?? [];
-  return contents.some(
-    (c) => "functionResponse" in c || ("text" in c === false && "toolCalls" in c === false),
-  );
+  // Tool results appear as functionResponse in content or displayContent
+  const contents = contentArray(msg);
+  const display = (msg.displayContent ?? []) as RawContent[];
+  return [...contents, ...display].some((c) => "functionResponse" in c);
 }
 
 function analyzeFlags(msg: RawMessage, sizeBytes: number): GeminiMessageFlag[] {
@@ -104,25 +153,13 @@ function analyzeFlags(msg: RawMessage, sizeBytes: number): GeminiMessageFlag[] {
 
   if (msg.type === "info") flags.push("system-noise");
 
-  // Check for tool outputs in message content
-  const contents = msg.content ?? [];
-  for (const c of contents) {
-    if ("toolCalls" in c) {
-      flags.push("tool-output");
-      break;
-    }
-  }
-  // Also check for tool results in displayContent
-  const displayContents = (msg.displayContent ?? []) as RawContent[];
-  for (const c of displayContents) {
-    if ("functionResponse" in c) {
-      flags.push("tool-output");
-      break;
-    }
+  // toolCalls is a top-level message key in Gemini's format
+  if ("toolCalls" in msg && Array.isArray(msg.toolCalls)) {
+    flags.push("tool-output");
   }
 
   // Detect repetition patterns
-  const fullText = JSON.stringify(msg.content);
+  const fullText = JSON.stringify(contentArray(msg));
   if (detectRepetition(fullText)) flags.push("repetitive");
 
   // Detect loop detection messages
@@ -155,6 +192,17 @@ export function autoTrimSuggestions(): number[] {
   }
 
   return [...toRemove].sort((a, b) => a - b);
+}
+
+export async function checkBackupExists(): Promise<{ exists: boolean; path: string; size: number }> {
+  if (!loadedPath) return { exists: false, path: "", size: 0 };
+  const backupPath = loadedPath + ".backup";
+  try {
+    const s = await stat(backupPath);
+    return { exists: true, path: backupPath, size: s.size };
+  } catch {
+    return { exists: false, path: backupPath, size: 0 };
+  }
 }
 
 export async function saveSession(
