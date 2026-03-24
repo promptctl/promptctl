@@ -1,5 +1,12 @@
 import { useEffect, useState } from "react";
-import { HashRouter, Routes, Route, Link, useLocation } from "react-router";
+import {
+  HashRouter,
+  Routes,
+  Route,
+  Link,
+  Navigate,
+  useLocation,
+} from "react-router";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
 import { CommandsPage } from "./pages/Commands";
@@ -11,6 +18,40 @@ import { LaunchToolDialog } from "./components/LaunchToolDialog";
 import { initTmuxSubscription } from "./store/tmux";
 import { initOutputSubscription } from "./store/pane-output";
 import { initCommandSubscription } from "./store/command";
+
+function TopTab({
+  to,
+  children,
+}: {
+  to: string;
+  children: React.ReactNode;
+}) {
+  const location = useLocation();
+  const active = location.pathname.startsWith(to);
+
+  return (
+    <Link
+      to={to}
+      className={`flex-1 border-b-2 py-2 text-center text-xs font-medium tracking-wide transition-colors ${
+        active
+          ? "border-neutral-400 text-neutral-200"
+          : "border-transparent text-neutral-500 hover:text-neutral-300"
+      }`}
+    >
+      {children}
+    </Link>
+  );
+}
+
+function TopTabBar() {
+  return (
+    <div className="flex items-end border-b border-neutral-800 bg-neutral-950 pl-20">
+      <TopTab to="/loops">Loops</TopTab>
+      <TopTab to="/workshop">Context Workshop</TopTab>
+      <TopTab to="/settings">Settings</TopTab>
+    </div>
+  );
+}
 
 function NavLink({
   to,
@@ -46,11 +87,9 @@ function Sidebar() {
         <h1 className="mb-2 px-2 text-lg font-semibold tracking-tight">
           promptctl
         </h1>
-        <NavLink to="/">Panes</NavLink>
-        <NavLink to="/commands">Commands</NavLink>
-        <NavLink to="/sessions">Sessions</NavLink>
-        <NavLink to="/prompts">Prompts</NavLink>
-        <NavLink to="/settings">Settings</NavLink>
+        <NavLink to="/loops">Panes</NavLink>
+        <NavLink to="/loops/commands">Commands</NavLink>
+        <NavLink to="/loops/prompts">Prompts</NavLink>
       </div>
 
       {/* Tmux tree */}
@@ -77,6 +116,24 @@ function Sidebar() {
   );
 }
 
+function LoopsLayout() {
+  return (
+    <div className="flex flex-1 overflow-hidden">
+      <Sidebar />
+      <div className="flex flex-1 flex-col overflow-hidden">
+        <main className="flex-1 overflow-hidden p-6">
+          <Routes>
+            <Route path="/" element={<Home />} />
+            <Route path="/commands" element={<CommandsPage />} />
+            <Route path="/prompts" element={<PromptsPage />} />
+          </Routes>
+        </main>
+        <CommandBar />
+      </div>
+    </div>
+  );
+}
+
 export function App() {
   useEffect(() => {
     const unsubTmux = initTmuxSubscription();
@@ -96,19 +153,29 @@ export function App() {
 
   return (
     <HashRouter>
-      <div className="flex h-screen bg-neutral-950 text-neutral-100">
-        <Sidebar />
-        <div className="flex flex-1 flex-col overflow-hidden">
-          <main className="flex-1 overflow-hidden p-6">
-            <Routes>
-              <Route path="/" element={<Home />} />
-              <Route path="/commands" element={<CommandsPage />} />
-              <Route path="/sessions" element={<SessionsPage />} />
-              <Route path="/prompts" element={<PromptsPage />} />
-              <Route path="/settings" element={<Settings />} />
-            </Routes>
-          </main>
-          <CommandBar />
+      <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
+        <TopTabBar />
+        <div className="flex flex-1 overflow-hidden">
+          <Routes>
+            <Route path="/loops/*" element={<LoopsLayout />} />
+            <Route
+              path="/workshop"
+              element={
+                <main className="flex-1 overflow-auto p-6">
+                  <SessionsPage />
+                </main>
+              }
+            />
+            <Route
+              path="/settings"
+              element={
+                <main className="flex-1 overflow-auto p-6">
+                  <Settings />
+                </main>
+              }
+            />
+            <Route path="*" element={<Navigate to="/loops" replace />} />
+          </Routes>
         </div>
       </div>
     </HashRouter>
