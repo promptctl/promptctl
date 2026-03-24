@@ -1,6 +1,5 @@
 // Output streaming via pipe-pane + file watching
-import { watch, type FSWatcher } from "node:fs";
-import { mkdir, readFile, writeFile } from "node:fs/promises";
+import { mkdir, readFile, stat, writeFile } from "node:fs/promises";
 import { join } from "node:path";
 import { app } from "electron";
 import type { WebContents } from "electron";
@@ -12,7 +11,7 @@ export type OutputListener = (paneId: PaneId, data: string) => void;
 interface PaneWatcher {
   paneId: PaneId;
   filePath: string;
-  fsWatcher: FSWatcher | null;
+  pollTimer: ReturnType<typeof setInterval> | null;
   subscribers: Set<WebContents>;
   lastSize: number;
 }
@@ -56,7 +55,7 @@ export class PaneOutputManager {
     watcher = {
       paneId,
       filePath,
-      fsWatcher: null,
+      pollTimer: null,
       subscribers: new Set([webContents]),
       lastSize: 0,
     };
@@ -71,10 +70,8 @@ export class PaneOutputManager {
     // Start pipe-pane to stream output to file
     await startPipePane(paneId, filePath);
 
-    // Watch the file for changes
-    watcher.fsWatcher = watch(filePath, async () => {
-      await this.onFileChange(w);
-    });
+    // Poll the file for changes (fs.watch is unreliable on macOS)
+    watcher.pollTimer = setInterval(() => this.pollFile(w), 100);
   }
 
   async unwatch(paneId: PaneId, webContents: WebContents): Promise<void> {
@@ -98,7 +95,7 @@ export class PaneOutputManager {
     paneId: PaneId,
     watcher: PaneWatcher,
   ): Promise<void> {
-    watcher.fsWatcher?.close();
+    if (watcher.pollTimer) clearInterval(watcher.pollTimer);
     try {
       await stopPipePane(paneId);
     } catch {
@@ -123,6 +120,17 @@ export class PaneOutputManager {
       }
     } catch {
       // Pane may not exist yet
+    }
+  }
+
+  private async pollFile(watcher: PaneWatcher): Promise<void> {
+    try {
+      const stats = await stat(watcher.filePath);
+      if (stats.size > watcher.lastSize) {
+        await this.onFileChange(watcher);
+      }
+    } catch {
+      // File may not exist yet or was removed
     }
   }
 

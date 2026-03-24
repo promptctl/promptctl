@@ -73,6 +73,14 @@ export async function sendKeys(
   await tmuxExec(args);
 }
 
+export async function sendKeysLiteral(
+  paneId: PaneId,
+  data: string,
+): Promise<void> {
+  // -l sends characters literally (no tmux key name interpretation)
+  await tmuxExec(["send-keys", "-t", paneId, "-l", data]);
+}
+
 export async function capturePane(
   paneId: PaneId,
   startLine = -500,

@@ -27,7 +27,6 @@ export function PaneOutput({ paneId }: { paneId: PaneId }) {
       },
       convertEol: true,
       scrollback: 10000,
-      disableStdin: true,
     });
 
     const fitAddon = new FitAddon();
@@ -35,6 +34,11 @@ export function PaneOutput({ paneId }: { paneId: PaneId }) {
     term.loadAddon(new WebLinksAddon());
     term.open(containerRef.current);
     fitAddon.fit();
+
+    // Forward keystrokes to tmux pane
+    const dataDisposable = term.onData((data) => {
+      window.electronAPI.invoke("tmux:send-keys-literal", paneId, data);
+    });
 
     termRef.current = term;
     fitAddonRef.current = fitAddon;
@@ -45,6 +49,7 @@ export function PaneOutput({ paneId }: { paneId: PaneId }) {
 
     return () => {
       observer.disconnect();
+      dataDisposable.dispose();
       term.dispose();
       termRef.current = null;
       fitAddonRef.current = null;

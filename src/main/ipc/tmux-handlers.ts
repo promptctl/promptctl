@@ -3,7 +3,7 @@ import { ipcMain } from "electron";
 import type { PaneId, ToolKind } from "../../shared/types";
 import type { TmuxStateManager } from "../tmux/state";
 import type { PaneOutputManager } from "../tmux/output";
-import { sendKeys, capturePane } from "../tmux/client";
+import { sendKeys, sendKeysLiteral, capturePane } from "../tmux/client";
 import { launchTool } from "../tmux/controllable";
 import { getPaneProcesses } from "../tmux/processes";
 
@@ -27,6 +27,12 @@ export function registerTmuxHandlers(
     "tmux:send-keys",
     (_e, paneId: string, text: string, pressEnter = true) =>
       sendKeys(paneId as PaneId, text, pressEnter),
+  );
+
+  ipcMain.handle(
+    "tmux:send-keys-literal",
+    (_e, paneId: string, data: string) =>
+      sendKeysLiteral(paneId as PaneId, data),
   );
 
   ipcMain.handle(
