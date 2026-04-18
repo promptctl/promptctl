@@ -1,239 +1,244 @@
-// [LAW:single-enforcer] All session loading, analysis, and trimming logic lives here.
-import { readFile, writeFile, copyFile, stat } from "node:fs/promises";
+// [LAW:single-enforcer] All session editor operations route through here.
+// This is a thin coordinator — all format-specific logic lives in provider adapters.
+// Versioning is enforced here uniformly: every edit op records a version after success.
+import { readFile, writeFile } from "node:fs/promises";
 import type {
-  GeminiMessageSummary,
-  GeminiMessageFlag,
+  ProviderKind,
+  ProviderUIMetadata,
+  Project,
+  MessageSummary,
+  DiffEntry,
+  VersionMeta,
+  CompressToolsOptions,
+  CompressToolsResult,
 } from "../../shared/types";
+import type { TaskHandle } from "../tasks/runner";
+import type { ProviderAdapter } from "./types";
+import { getAllProviders, getProvider } from "./registry";
+import {
+  recordVersion,
+  ensureBaseline,
+  listVersions as storeListVersions,
+  getVersionContent,
+  undo as storeUndo,
+  redo as storeRedo,
+  restoreVersion as storeRestoreVersion,
+} from "./versioning";
 
-// Raw JSON shape from Gemini CLI session files
-interface RawSession {
-  sessionId: string;
-  projectHash: string;
-  startTime: string;
-  lastUpdated: string;
-  messages: RawMessage[];
-  kind: string;
-  summary: string;
+let activeAdapter: ProviderAdapter | null = null;
+let activeFilePath: string | null = null;
+let activeProvider: ProviderKind | null = null;
+
+export async function listAllProjects(): Promise<Project[]> {
+  const results = await Promise.all(
+    getAllProviders().map((a) => a.listProjects()),
+  );
+  return results.flat();
 }
 
-interface RawMessage {
-  id: string;
-  timestamp: string;
-  type: string;
-  content?: string | RawContent[];
-  displayContent?: unknown[];
-  [key: string]: unknown;
+export function getAllProviderMetadata(): Record<string, ProviderUIMetadata> {
+  const meta: Record<string, ProviderUIMetadata> = {};
+  for (const adapter of getAllProviders()) {
+    meta[adapter.id] = adapter.uiMetadata;
+  }
+  return meta;
 }
 
-type RawContent =
-  | { text: string }
-  | { toolCalls: unknown[] }
-  | { functionResponse: unknown }
-  | Record<string, unknown>;
-
-function contentArray(msg: RawMessage): RawContent[] {
-  if (typeof msg.content === "string") return [{ text: msg.content }];
-  return msg.content ?? [];
+export async function loadSession(
+  provider: ProviderKind,
+  filePath: string,
+): Promise<MessageSummary[]> {
+  activeAdapter = getProvider(provider);
+  activeFilePath = filePath;
+  activeProvider = provider;
+  return activeAdapter.loadSession(filePath);
 }
 
-let loadedSession: RawSession | null = null;
-let loadedPath: string | null = null;
+function active(): ProviderAdapter {
+  if (!activeAdapter) throw new Error("No session loaded");
+  return activeAdapter;
+}
 
-export async function loadSession(filePath: string): Promise<GeminiMessageSummary[]> {
-  const raw = await readFile(filePath, "utf-8");
-  loadedSession = JSON.parse(raw) as RawSession;
-  loadedPath = filePath;
-  return summarizeMessages(loadedSession.messages);
+function activePath(): string {
+  if (!activeFilePath) throw new Error("No session loaded");
+  return activeFilePath;
+}
+
+function activeProviderId(): ProviderKind {
+  if (!activeProvider) throw new Error("No session loaded");
+  return activeProvider;
 }
 
 export function getMessageContent(index: number): string {
-  if (!loadedSession) return "";
-  const msg = loadedSession.messages[index];
-  if (!msg) return "";
-  return JSON.stringify(msg, null, 2);
+  return active().getMessageContent(index);
 }
 
-function extractText(msg: RawMessage): string {
-  const role = msg.type === "user" ? "User" : msg.type === "gemini" ? "Assistant" : msg.type;
-  const parts: string[] = [];
-  for (const c of contentArray(msg)) {
-    if ("text" in c && typeof c.text === "string") {
-      parts.push(c.text);
-    }
-  }
-  // toolCalls is a top-level message key
-  if ("toolCalls" in msg && Array.isArray(msg.toolCalls)) {
-    const calls = msg.toolCalls as Array<{ name?: string }>;
-    for (const tc of calls) {
-      parts.push(`[Tool call: ${tc.name ?? "unknown"}]`);
-    }
-  }
-  const body = parts.join("\n").trim();
-  return body ? `**${role}:**\n${body}` : "";
+export function getMessageRaw(index: number): unknown {
+  return active().getMessageRaw(index);
 }
 
 export function getMessagesContent(indices: number[]): string {
-  if (!loadedSession) return "";
-  const sorted = [...indices].sort((a, b) => a - b);
-  return sorted
-    .map((i) => {
-      const msg = loadedSession!.messages[i];
-      if (!msg) return "";
-      return extractText(msg);
-    })
-    .filter(Boolean)
-    .join("\n\n---\n\n");
-}
-
-function summarizeMessages(messages: RawMessage[]): GeminiMessageSummary[] {
-  return messages.map((msg, index) => {
-    const sizeBytes = JSON.stringify(msg).length;
-    const preview = extractPreview(msg);
-    const flags = analyzeFlags(msg, sizeBytes);
-    const hasToolCalls = hasToolCallContent(msg);
-    const hasToolResults = hasToolResultContent(msg);
-    const toolNames = extractToolNames(msg);
-
-    return {
-      index,
-      id: msg.id,
-      type: msg.type,
-      timestamp: msg.timestamp,
-      sizeBytes,
-      preview,
-      hasToolCalls,
-      hasToolResults,
-      toolNames,
-      flags,
-    };
-  });
-}
-
-function extractPreview(msg: RawMessage): string {
-  const contents = contentArray(msg);
-  for (const c of contents) {
-    if ("text" in c && typeof c.text === "string") {
-      return c.text.slice(0, 300).replace(/\n/g, " ");
-    }
-  }
-  // toolCalls is a top-level message key
-  if ("toolCalls" in msg && Array.isArray(msg.toolCalls)) {
-    const calls = msg.toolCalls as Array<{ name?: string }>;
-    const names = calls.map((tc) => tc.name ?? "unknown").join(", ");
-    return `[tool calls: ${names}]`;
-  }
-  return `[${msg.type}]`;
-}
-
-function extractToolNames(msg: RawMessage): string[] {
-  if (!("toolCalls" in msg) || !Array.isArray(msg.toolCalls)) return [];
-  const calls = msg.toolCalls as Array<{ name?: string }>;
-  const names = new Set<string>();
-  for (const tc of calls) {
-    if (tc.name) names.add(tc.name);
-  }
-  return [...names];
-}
-
-function hasToolCallContent(msg: RawMessage): boolean {
-  return "toolCalls" in msg && Array.isArray(msg.toolCalls);
-}
-
-function hasToolResultContent(msg: RawMessage): boolean {
-  // Tool results appear as functionResponse in content or displayContent
-  const contents = contentArray(msg);
-  const display = (msg.displayContent ?? []) as RawContent[];
-  return [...contents, ...display].some((c) => "functionResponse" in c);
-}
-
-function analyzeFlags(msg: RawMessage, sizeBytes: number): GeminiMessageFlag[] {
-  const flags: GeminiMessageFlag[] = [];
-
-  if (sizeBytes > 50_000) flags.push("oversized");
-
-  if (msg.type === "info") flags.push("system-noise");
-
-  // toolCalls is a top-level message key in Gemini's format
-  if ("toolCalls" in msg && Array.isArray(msg.toolCalls)) {
-    flags.push("tool-output");
-  }
-
-  // Detect repetition patterns
-  const fullText = JSON.stringify(contentArray(msg));
-  if (detectRepetition(fullText)) flags.push("repetitive");
-
-  // Detect loop detection messages
-  if (fullText.toLowerCase().includes("loop detected")) {
-    flags.push("loop-detection");
-  }
-
-  return flags;
-}
-
-function detectRepetition(text: string): boolean {
-  if (text.length < 1000) return false;
-  // Look for a phrase repeated many times
-  const sample = text.slice(0, 5000);
-  const phrases = sample.match(/(.{20,50})\1{3,}/);
-  return phrases !== null;
+  return active().getMessagesContent(indices);
 }
 
 export function autoTrimSuggestions(): number[] {
-  if (!loadedSession) return [];
-  const summaries = summarizeMessages(loadedSession.messages);
-  const toRemove: Set<number> = new Set();
-
-  for (const msg of summaries) {
-    // Always flag repetitive / loop-detection
-    if (msg.flags.includes("repetitive")) toRemove.add(msg.index);
-    if (msg.flags.includes("loop-detection")) toRemove.add(msg.index);
-    // Flag system noise
-    if (msg.flags.includes("system-noise")) toRemove.add(msg.index);
-  }
-
-  return [...toRemove].sort((a, b) => a - b);
+  return active().autoTrimSuggestions();
 }
 
-export async function checkBackupExists(): Promise<{ exists: boolean; path: string; size: number }> {
-  if (!loadedPath) return { exists: false, path: "", size: 0 };
-  const backupPath = loadedPath + ".backup";
-  try {
-    const s = await stat(backupPath);
-    return { exists: true, path: backupPath, size: s.size };
-  } catch {
-    return { exists: false, path: backupPath, size: 0 };
-  }
+// Sum of billable tokens for content as it would be parsed by the active adapter.
+// Stateless — does NOT reload the adapter (that would discard in-memory edits).
+function tokensForContent(content: string): number {
+  const adapter = active();
+  return adapter
+    .summarizeContent(content)
+    .reduce((sum, m) => sum + m.tokens, 0);
+}
+
+async function recordCurrentVersion(label: string): Promise<void> {
+  const filePath = activePath();
+  const provider = activeProviderId();
+  const content = await readFile(filePath, "utf-8");
+  const tokens = tokensForContent(content);
+  await recordVersion(filePath, provider, content, label, tokens);
+}
+
+async function ensureBaselineForActive(): Promise<void> {
+  const filePath = activePath();
+  const provider = activeProviderId();
+  const content = await readFile(filePath, "utf-8");
+  const tokens = tokensForContent(content);
+  await ensureBaseline(filePath, provider, tokens);
 }
 
 export async function saveSession(
   indicesToRemove: number[],
   outputPath?: string,
 ): Promise<string> {
-  if (!loadedSession || !loadedPath) {
-    throw new Error("No session loaded");
+  // Capture pre-edit baseline if first edit
+  await ensureBaselineForActive();
+
+  const result = await active().saveSession(indicesToRemove, outputPath);
+
+  // If outputPath was used and differs from active, switch active path
+  if (outputPath && outputPath !== activeFilePath) {
+    activeFilePath = outputPath;
   }
 
-  // Backup original
-  const backupPath = loadedPath + ".backup";
-  await copyFile(loadedPath, backupPath);
-
-  const removeSet = new Set(indicesToRemove);
-  const trimmedMessages = loadedSession.messages.filter(
-    (_, i) => !removeSet.has(i),
-  );
-
-  const trimmedSession: RawSession = {
-    ...loadedSession,
-    messages: trimmedMessages,
-    lastUpdated: new Date().toISOString(),
-  };
-
-  const dest = outputPath ?? loadedPath;
-  await writeFile(dest, JSON.stringify(trimmedSession, null, 2), "utf-8");
-
-  // Reload the trimmed version
-  loadedSession = trimmedSession;
-  loadedPath = dest;
-
-  return dest;
+  const label =
+    indicesToRemove.length === 0
+      ? "Saved (no removals)"
+      : `Removed ${indicesToRemove.length} message${indicesToRemove.length === 1 ? "" : "s"}`;
+  await recordCurrentVersion(label);
+  return result;
 }
+
+export async function compressToolResults(
+  indices: number[],
+  options: CompressToolsOptions,
+  handle?: TaskHandle,
+): Promise<CompressToolsResult> {
+  const adapter = active();
+  if (!adapter.compressToolResults) {
+    throw new Error(
+      `Provider ${adapter.id} does not support tool result compression`,
+    );
+  }
+
+  const result = await adapter.compressToolResults(indices, options, handle);
+
+  // Only baseline + persist + record if something actually changed.
+  // If everything was skipped (too small or protected), don't pollute history.
+  if (result.updated.length > 0) {
+    await ensureBaselineForActive();
+    // compressToolResults modifies in-memory; we need to persist for the version snapshot.
+    await adapter.saveSession([]);
+
+    // Label reads naturally when only one strategy fired; combines when both did.
+    // [LAW:dataflow-not-control-flow] The counts decide the phrasing, not a mode flag.
+    const n = result.updated.length;
+    const plural = n === 1 ? "" : "s";
+    let label: string;
+    if (result.summarizedCount > 0 && result.truncatedCount > 0) {
+      label = `Compressed ${n} tool result${plural} (summarized ${result.summarizedCount}, truncated ${result.truncatedCount})`;
+    } else if (result.summarizedCount > 0) {
+      label = `Summarized ${result.summarizedCount} tool result${result.summarizedCount === 1 ? "" : "s"}`;
+    } else {
+      label = `Truncated ${result.truncatedCount} tool result${result.truncatedCount === 1 ? "" : "s"}`;
+    }
+    await recordCurrentVersion(label);
+  }
+
+  return result;
+}
+
+export async function listVersions(): Promise<VersionMeta> {
+  return storeListVersions(activePath());
+}
+
+export async function undo(): Promise<MessageSummary[] | null> {
+  const result = await storeUndo(activePath());
+  if (!result) return null;
+  await writeFile(activePath(), result.content, "utf-8");
+  return active().loadSession(activePath());
+}
+
+export async function redo(): Promise<MessageSummary[] | null> {
+  const result = await storeRedo(activePath());
+  if (!result) return null;
+  await writeFile(activePath(), result.content, "utf-8");
+  return active().loadSession(activePath());
+}
+
+export async function restoreVersion(
+  targetIdx: number,
+): Promise<MessageSummary[] | null> {
+  const filePath = activePath();
+  const provider = activeProviderId();
+
+  // First write the target version's content as the new file content
+  const targetContent = await getVersionContent(filePath, targetIdx);
+  if (targetContent == null) return null;
+  await writeFile(filePath, targetContent, "utf-8");
+
+  // Then record it as a new version (Restored from vN)
+  await storeRestoreVersion(filePath, provider, targetIdx);
+
+  return active().loadSession(filePath);
+}
+
+export async function diffVersions(
+  fromIdx: number,
+  toIdx: number,
+): Promise<DiffEntry[]> {
+  const filePath = activePath();
+  const [fromContent, toContent] = await Promise.all([
+    getVersionContent(filePath, fromIdx),
+    getVersionContent(filePath, toIdx),
+  ]);
+  if (fromContent == null || toContent == null) return [];
+  return active().diffContent(fromContent, toContent);
+}
+
+// Stateless peek — reads a session file and returns its messages WITHOUT
+// mutating the coordinator's active adapter state. The editor singleton
+// (activeAdapter / activeFilePath / activeProvider) stays untouched, so a
+// peek never clobbers whatever session the user is editing or enters.
+// [LAW:single-enforcer] Only path that can read a session without "loading" it.
+export async function peekSession(
+  provider: ProviderKind,
+  filePath: string,
+): Promise<MessageSummary[]> {
+  const adapter = getProvider(provider);
+  const content = await readFile(filePath, "utf-8");
+  return adapter.summarizeContent(content);
+}
+
+// Reset coordinator state — exposed for tests.
+export function _resetForTesting(): void {
+  activeAdapter = null;
+  activeFilePath = null;
+  activeProvider = null;
+}
+
+export { listSessions } from "./registry-helpers";
+export { searchSessions } from "./search";

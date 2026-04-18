@@ -1,4 +1,4 @@
-import { useEffect, useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import {
   HashRouter,
   Routes,
@@ -6,6 +6,7 @@ import {
   Link,
   Navigate,
   useLocation,
+  useNavigate,
 } from "react-router";
 import { Home } from "./pages/Home";
 import { Settings } from "./pages/Settings";
@@ -116,6 +117,31 @@ function Sidebar() {
   );
 }
 
+// [LAW:one-source-of-truth] Route persisted in ~/.promptctl/settings.json via settings IPC.
+function RouteRestorer() {
+  const navigate = useNavigate();
+  const location = useLocation();
+  const restored = useRef(false);
+
+  // Restore saved route on first mount
+  useEffect(() => {
+    window.electronAPI.invoke("settings:load").then((settings) => {
+      if (settings.lastRoute && settings.lastRoute !== location.pathname) {
+        navigate(settings.lastRoute, { replace: true });
+      }
+      restored.current = true;
+    });
+  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+
+  // Persist route on every navigation after restore
+  useEffect(() => {
+    if (!restored.current) return;
+    window.electronAPI.invoke("settings:save", { lastRoute: location.pathname });
+  }, [location.pathname]);
+
+  return null;
+}
+
 function LoopsLayout() {
   return (
     <div className="flex flex-1 overflow-hidden">
@@ -153,6 +179,7 @@ export function App() {
 
   return (
     <HashRouter>
+      <RouteRestorer />
       <div className="flex h-screen flex-col bg-neutral-950 text-neutral-100">
         <TopTabBar />
         <div className="flex flex-1 overflow-hidden">

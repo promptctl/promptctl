@@ -134,16 +134,18 @@ export interface Prompt {
 }
 
 // Session editor types
-export type SessionProvider = "gemini" | "claude" | "codex";
+// [LAW:one-type-per-behavior] All providers share these types. Provider-specific
+// differences live in adapter data (ProviderUIMetadata), not in the type system.
+export type ProviderKind = "gemini" | "claude" | "codex";
 
-export interface GeminiProject {
+export interface Project {
   name: string;
-  paths: string[]; // all tmp dirs for this project (merged duplicates)
+  paths: string[]; // storage dirs for this project
   projectRoot: string; // the actual project directory
-  provider: SessionProvider;
+  provider: ProviderKind;
 }
 
-export interface GeminiSessionInfo {
+export interface SessionInfo {
   sessionId: string;
   filePath: string;
   summary: string;
@@ -154,23 +156,153 @@ export interface GeminiSessionInfo {
   previewMessages: string[]; // first few user message previews
 }
 
-export interface GeminiMessageSummary {
+export interface MessageSummary {
   index: number;
   id: string;
-  type: string; // "user" | "gemini" | "info"
+  type: string; // provider-defined: "user" | "assistant" | "gemini" | "info" etc.
   timestamp: string;
-  sizeBytes: number;
-  preview: string; // first ~200 chars of text content
+  tokens: number; // estimated token count for this message
+  preview: string; // first ~300 chars of text content
   hasToolCalls: boolean;
   hasToolResults: boolean;
   toolNames: string[];
-  flags: GeminiMessageFlag[];
+  // [LAW:dataflow-not-control-flow] Flags describe the message; the UI decides what to do with them.
+  flags: string[]; // provider-defined flag identifiers
+  extras: Record<string, string>; // rich metadata (model, tokens, branch) — empty for providers without it
 }
 
-// [LAW:dataflow-not-control-flow] Flags describe the message; the UI decides what to do with them.
-export type GeminiMessageFlag =
-  | "oversized" // > 50KB
-  | "repetitive" // detected repetition patterns
-  | "loop-detection" // system loop detection message
-  | "tool-output" // contains tool call results
-  | "system-noise"; // info/system messages with no user value
+// Options for compressToolResults — one operation dispatches truncate vs summarize
+// by token thresholds, so the UI exposes a single surface instead of two modes.
+// [LAW:dataflow-not-control-flow] Strategy lives in token count, not a branch.
+export interface CompressToolsOptions {
+  // Tool results at or above this token count are summarized via LLM.
+  summarizeThreshold: number;
+  // Tool results at or above this (but below summarize) are head/tail truncated.
+  // Below this they are skipped — the overhead isn't worth the diff.
+  truncateThreshold: number;
+  // Don't touch the last N tool results — the assistant typically references
+  // them on the next turn, and truncating would degrade continuation context.
+  keepLastN: number;
+}
+
+// Result of compressToolResults — per-strategy counts let the UI explain outcomes.
+export interface CompressToolsResult {
+  updated: MessageSummary[];
+  truncatedCount: number;
+  summarizedCount: number;
+  skippedTooSmall: number;
+  skippedProtected: number;
+}
+
+// Task seam — a single event stream drives cancel + progress UX for every
+// long-running main-process operation. New operations reuse this; they do not
+// reinvent progress channels. [LAW:one-source-of-truth]
+export interface TaskStartedEvent {
+  type: "started";
+  taskId: string;
+  kind: string; // e.g. "compress-tools"
+  label: string; // human-readable, shown in toast
+  total: number; // 0 if unknown; progress events update it
+}
+export interface TaskProgressEvent {
+  type: "progress";
+  taskId: string;
+  done: number;
+  total: number;
+  message?: string; // optional per-step detail ("Summarizing result 3 of 12")
+}
+export interface TaskDoneEvent {
+  type: "done";
+  taskId: string;
+}
+export interface TaskErrorEvent {
+  type: "error";
+  taskId: string;
+  error: string;
+}
+export interface TaskCancelledEvent {
+  type: "cancelled";
+  taskId: string;
+}
+export type TaskEvent =
+  | TaskStartedEvent
+  | TaskProgressEvent
+  | TaskDoneEvent
+  | TaskErrorEvent
+  | TaskCancelledEvent;
+
+// Diff entries — adapter-aware semantic diff between two versions of session content.
+// [LAW:dataflow-not-control-flow] The UI renders these; never switches on provider.
+export type DiffEntry =
+  | { kind: "unchanged"; count: number }
+  | { kind: "removed"; messages: MessageSummary[] }
+  | { kind: "added"; messages: MessageSummary[] }
+  | { kind: "modified"; before: MessageSummary; after: MessageSummary };
+
+// Version metadata returned to the renderer.
+export interface VersionInfo {
+  idx: number;
+  ts: string;
+  label: string;
+  sizeBytes: number;
+  tokensTotal: number;
+}
+
+export interface VersionMeta {
+  sessionPath: string;
+  provider: string;
+  head: number;
+  versions: VersionInfo[];
+}
+
+// UI metadata — provided by each adapter as data, consumed by renderer.
+// [LAW:dataflow-not-control-flow] The UI reads these; never switches on provider.
+export interface MessageTypeStyle {
+  label: string;
+  color: string; // tailwind classes
+}
+
+export interface FlagDefinition {
+  label: string;
+  color: string;
+  tip: string;
+}
+
+export interface ProviderUIMetadata {
+  badge: { label: string; color: string };
+  typeStyles: Record<string, MessageTypeStyle>;
+  flagDefinitions: Record<string, FlagDefinition>;
+  helpText: {
+    description: string;
+    resumeCommand: string;
+    safeToRemove: string[];
+    beCareful: string[];
+  };
+}
+
+// Full-text session search.
+// [LAW:dataflow-not-control-flow] The UI renders from these; null results = tree mode, array = search mode.
+// Match offsets are 0-based indices INTO `snippet` (not the original file) so the renderer
+// can highlight without re-running regex on every keystroke.
+export interface SessionSearchMatch {
+  lineNumber: number; // 1-based line in the source file (where rg matched)
+  messageRole: string; // provider-defined: "user" | "assistant" | "tool-result" | ...
+  snippet: string; // ~200-char window around the match, with newlines collapsed
+  matchStart: number; // offset into `snippet` where the highlight begins
+  matchEnd: number; // offset into `snippet` where the highlight ends
+}
+
+export interface SessionSearchResult {
+  provider: ProviderKind;
+  projectName: string;
+  projectRoot: string;
+  sessionId: string;
+  filePath: string;
+  summary: string;
+  lastUpdated: string;
+  messageCount: number;
+  fileSizeBytes: number;
+  totalMatches: number; // total rg hits in the file
+  matches: SessionSearchMatch[]; // capped for payload size; see matchesTruncated
+  matchesTruncated: boolean; // true if totalMatches > matches.length
+}

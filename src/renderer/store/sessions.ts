@@ -1,32 +1,57 @@
 import { create } from "zustand";
 import type {
-  GeminiProject,
-  GeminiSessionInfo,
-  GeminiMessageSummary,
+  Project,
+  SessionInfo,
+  MessageSummary,
+  ProviderKind,
+  ProviderUIMetadata,
+  VersionInfo,
+  DiffEntry,
+  SessionSearchResult,
 } from "../../shared/types";
+import { cancelTask, newTaskId } from "./tasks";
 
 interface SessionEditorState {
   // Tree view state
-  projects: GeminiProject[];
-  sessionsByProject: Record<string, GeminiSessionInfo[]>; // keyed by project.name
+  projects: Project[];
+  sessionsByProject: Record<string, SessionInfo[]>; // keyed by project.projectRoot
   expandedProjects: Set<string>;
   loadingProjects: Set<string>;
 
+  // Provider UI metadata — loaded once, keyed by provider id
+  providerMetadata: Record<string, ProviderUIMetadata>;
+
   // Editor state
-  selectedSession: GeminiSessionInfo | null;
+  selectedSession: SessionInfo | null;
   selectedProjectPath: string | null;
-  messages: GeminiMessageSummary[];
+  selectedProvider: ProviderKind | null;
+  messages: MessageSummary[];
   markedForRemoval: Set<number>;
   previewIndex: number | null;
   previewContent: string;
+  // Parsed JS object for the previewed message. Drives the structured
+  // field-grid view. [LAW:one-source-of-truth] Adapter parses once.
+  previewRaw: unknown;
   loading: boolean;
   saving: boolean;
   autoTrimIndices: number[];
 
+  // Versioning state
+  versions: VersionInfo[];
+  versionHead: number;
+
+  // Search state. [LAW:dataflow-not-control-flow] searchResults drives the UI mode:
+  // null = tree mode, array = search mode. No separate "isSearching" flag in the UI.
+  searchQuery: string;
+  searchResults: SessionSearchResult[] | null;
+  searchStatus: "idle" | "running" | "done" | "error";
+  searchError: string | null;
+  searchTaskId: string | null;
+
   // Actions
   loadProjects: () => Promise<void>;
-  toggleProject: (projectKey: string, projectPaths: string[]) => Promise<void>;
-  selectSession: (session: GeminiSessionInfo, projectKey: string) => Promise<void>;
+  toggleProject: (project: Project) => Promise<void>;
+  selectSession: (session: SessionInfo, project: Project) => Promise<void>;
   clearSession: () => void;
   toggleMessage: (index: number) => void;
   toggleRange: (startIndex: number, endIndex: number) => void;
@@ -38,19 +63,55 @@ interface SessionEditorState {
   runAutoTrim: () => Promise<void>;
   applyAutoTrim: () => void;
   save: () => Promise<string>;
+
+  // Versioning actions
+  loadVersions: () => Promise<void>;
+  undo: () => Promise<void>;
+  redo: () => Promise<void>;
+  restoreVersion: (targetIdx: number) => Promise<void>;
+  diffVersions: (fromIdx: number, toIdx: number) => Promise<DiffEntry[]>;
+
+  // Peek (non-destructive preview while search is open). peekResult is the
+  // source of truth for "is the peek pane open?"; peekMessages is lazily
+  // loaded via session:peek and caches the current peek's content.
+  peekResult: SessionSearchResult | null;
+  peekMessages: MessageSummary[] | null;
+  peekLoading: boolean;
+  peekError: string | null;
+
+  // Search actions
+  setSearchQuery: (query: string) => void;
+  runSearch: (query: string) => Promise<void>;
+  clearSearch: () => void;
+  selectSearchResult: (result: SessionSearchResult) => Promise<void>;
+  openPeek: (result: SessionSearchResult) => Promise<void>;
+  closePeek: () => void;
 }
 
 const STORAGE_KEY = "session-editor-state";
 
-function persistSelection(session: GeminiSessionInfo | null, projectKey: string | null) {
-  if (session && projectKey) {
-    sessionStorage.setItem(STORAGE_KEY, JSON.stringify({ session, projectKey }));
+interface PersistedSelection {
+  session: SessionInfo;
+  projectKey: string;
+  provider: ProviderKind;
+}
+
+function persistSelection(
+  session: SessionInfo | null,
+  projectKey: string | null,
+  provider: ProviderKind | null,
+) {
+  if (session && projectKey && provider) {
+    sessionStorage.setItem(
+      STORAGE_KEY,
+      JSON.stringify({ session, projectKey, provider }),
+    );
   } else {
     sessionStorage.removeItem(STORAGE_KEY);
   }
 }
 
-function loadPersistedSelection(): { session: GeminiSessionInfo; projectKey: string } | null {
+function loadPersistedSelection(): PersistedSelection | null {
   try {
     const raw = sessionStorage.getItem(STORAGE_KEY);
     if (!raw) return null;
@@ -66,52 +127,72 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
   expandedProjects: new Set(),
   loadingProjects: new Set(),
 
+  providerMetadata: {},
+
   selectedSession: null,
   selectedProjectPath: null,
+  selectedProvider: null,
   messages: [],
   markedForRemoval: new Set(),
   previewIndex: null,
   previewContent: "",
+  previewRaw: null,
   loading: false,
   saving: false,
   autoTrimIndices: [],
+  versions: [],
+  versionHead: 0,
+
+  searchQuery: "",
+  searchResults: null,
+  searchStatus: "idle",
+  searchError: null,
+  searchTaskId: null,
+
+  peekResult: null,
+  peekMessages: null,
+  peekLoading: false,
+  peekError: null,
 
   loadProjects: async () => {
-    const projects = (await window.electronAPI.invoke(
-      "session:list-projects",
-    )) as GeminiProject[];
-    set({ projects });
+    const [projects, providerMetadata] = await Promise.all([
+      window.electronAPI.invoke("session:list-projects") as Promise<Project[]>,
+      window.electronAPI.invoke("session:provider-metadata") as Promise<
+        Record<string, ProviderUIMetadata>
+      >,
+    ]);
+    set({ projects, providerMetadata });
 
     // Restore persisted selection
     const persisted = loadPersistedSelection();
     if (persisted) {
-      const project = projects.find((p) => p.name === persisted.projectKey);
+      const project = projects.find((p) => p.projectRoot === persisted.projectKey);
       if (project) {
-        // Expand the project and load its sessions
         const expanded = new Set<string>([persisted.projectKey]);
         set({ expandedProjects: expanded });
 
         const sessions = (await window.electronAPI.invoke(
           "session:list-sessions",
+          project.provider,
           project.paths,
-        )) as GeminiSessionInfo[];
+        )) as SessionInfo[];
         set({
           sessionsByProject: { [persisted.projectKey]: sessions },
         });
 
-        // Re-select the session if it still exists
         const match = sessions.find(
           (s) => s.sessionId === persisted.session.sessionId,
         );
         if (match) {
-          get().selectSession(match, persisted.projectKey);
+          get().selectSession(match, project);
         }
       }
     }
   },
 
-  toggleProject: async (projectKey, projectPaths) => {
+  toggleProject: async (project) => {
     const { expandedProjects, sessionsByProject, loadingProjects } = get();
+    const projectKey = project.projectRoot;
 
     if (expandedProjects.has(projectKey)) {
       const next = new Set(expandedProjects);
@@ -120,7 +201,6 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       return;
     }
 
-    // Expand and load sessions if not already loaded
     const nextExpanded = new Set(expandedProjects);
     nextExpanded.add(projectKey);
     set({ expandedProjects: nextExpanded });
@@ -132,45 +212,58 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
 
       const sessions = (await window.electronAPI.invoke(
         "session:list-sessions",
-        projectPaths,
-      )) as GeminiSessionInfo[];
+        project.provider,
+        project.paths,
+      )) as SessionInfo[];
 
       const doneLoading = new Set(get().loadingProjects);
       doneLoading.delete(projectKey);
       set({
-        sessionsByProject: { ...get().sessionsByProject, [projectKey]: sessions },
+        sessionsByProject: {
+          ...get().sessionsByProject,
+          [projectKey]: sessions,
+        },
         loadingProjects: doneLoading,
       });
     }
   },
 
-  selectSession: async (session, projectKey) => {
-    persistSelection(session, projectKey);
+  selectSession: async (session, project) => {
+    persistSelection(session, project.projectRoot, project.provider);
     set({
       selectedSession: session,
-      selectedProjectPath: projectKey,
+      selectedProjectPath: project.projectRoot,
+      selectedProvider: project.provider,
       loading: true,
       markedForRemoval: new Set(),
       autoTrimIndices: [],
       previewIndex: null,
+      versions: [],
+      versionHead: 0,
     });
     const messages = (await window.electronAPI.invoke(
       "session:load",
+      project.provider,
       session.filePath,
-    )) as GeminiMessageSummary[];
+    )) as MessageSummary[];
     set({ messages, loading: false });
+    // Load versions after the session is active (server-side coordinator needs the active path)
+    await get().loadVersions();
   },
 
   clearSession: () => {
-    persistSelection(null, null);
+    persistSelection(null, null, null);
     set({
       selectedSession: null,
       selectedProjectPath: null,
+      selectedProvider: null,
       messages: [],
       markedForRemoval: new Set(),
       autoTrimIndices: [],
       previewIndex: null,
       previewContent: "",
+      versions: [],
+      versionHead: 0,
     });
   },
 
@@ -204,7 +297,7 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
   selectFlagged: (flag) => {
     const next = new Set(get().markedForRemoval);
     for (const msg of get().messages) {
-      if (msg.flags.includes(flag as GeminiMessageSummary["flags"][number])) {
+      if (msg.flags.includes(flag)) {
         next.add(msg.index);
       }
     }
@@ -212,15 +305,17 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
   },
 
   previewMessage: async (index) => {
-    const content = (await window.electronAPI.invoke(
-      "session:message-content",
-      index,
-    )) as string;
-    set({ previewIndex: index, previewContent: content });
+    // Fetch raw and stringified content in parallel. [LAW:dataflow-not-control-flow]
+    // Both travel together; the consumer picks the one it needs.
+    const [content, raw] = await Promise.all([
+      window.electronAPI.invoke("session:message-content", index) as Promise<string>,
+      window.electronAPI.invoke("session:message-raw", index) as Promise<unknown>,
+    ]);
+    set({ previewIndex: index, previewContent: content, previewRaw: raw });
   },
 
   closePreview: () => {
-    set({ previewIndex: null, previewContent: "" });
+    set({ previewIndex: null, previewContent: "", previewRaw: null });
   },
 
   runAutoTrim: async () => {
@@ -243,22 +338,258 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       "session:save",
       indices,
     )) as string;
-    // Reload the trimmed session
+    // Reload the trimmed session — reuse active adapter (already set)
     const session = get().selectedSession;
-    if (session) {
+    const provider = get().selectedProvider;
+    if (session && provider) {
       const messages = (await window.electronAPI.invoke(
         "session:load",
+        provider,
         session.filePath,
-      )) as GeminiMessageSummary[];
+      )) as MessageSummary[];
       set({
         messages,
         markedForRemoval: new Set(),
         autoTrimIndices: [],
         saving: false,
       });
+      await get().loadVersions();
     } else {
       set({ saving: false });
     }
     return result;
+  },
+
+  loadVersions: async () => {
+    const meta = await window.electronAPI.invoke("session:list-versions");
+    set({ versions: meta.versions, versionHead: meta.head });
+  },
+
+  undo: async () => {
+    const messages = await window.electronAPI.invoke("session:undo");
+    if (messages == null) return;
+    set({
+      messages,
+      markedForRemoval: new Set(),
+      autoTrimIndices: [],
+    });
+    await get().loadVersions();
+  },
+
+  redo: async () => {
+    const messages = await window.electronAPI.invoke("session:redo");
+    if (messages == null) return;
+    set({
+      messages,
+      markedForRemoval: new Set(),
+      autoTrimIndices: [],
+    });
+    await get().loadVersions();
+  },
+
+  restoreVersion: async (targetIdx: number) => {
+    const messages = await window.electronAPI.invoke(
+      "session:restore-version",
+      targetIdx,
+    );
+    if (messages == null) return;
+    set({
+      messages,
+      markedForRemoval: new Set(),
+      autoTrimIndices: [],
+    });
+    await get().loadVersions();
+  },
+
+  diffVersions: async (fromIdx: number, toIdx: number) => {
+    return await window.electronAPI.invoke(
+      "session:diff-versions",
+      fromIdx,
+      toIdx,
+    );
+  },
+
+  setSearchQuery: (query) => {
+    set({ searchQuery: query });
+  },
+
+  // [LAW:single-enforcer] All content searches go through here. Cancels any
+  // in-flight search before starting a new one — a mid-flight previous query
+  // would otherwise land after the new one's results and silently overwrite them.
+  // Subscribes to "session:search-batch" so results stream in as enrichment
+  // completes, rather than the UI blocking on the full result set.
+  runSearch: async (query) => {
+    const trimmed = query.trim();
+
+    // Cancel any in-flight search. Safe to call even if taskId is stale.
+    const prevTaskId = get().searchTaskId;
+    if (prevTaskId) {
+      await cancelTask(prevTaskId).catch(() => undefined);
+    }
+
+    // Minimum length gate — below the threshold, we exit search mode entirely.
+    if (trimmed.length < 2) {
+      set({
+        searchQuery: query,
+        searchResults: null,
+        searchStatus: "idle",
+        searchError: null,
+        searchTaskId: null,
+      });
+      return;
+    }
+
+    const taskId = newTaskId();
+    // Start with an empty array (not null) so the UI enters search mode
+    // immediately and can render batches as they arrive.
+    set({
+      searchQuery: query,
+      searchResults: [],
+      searchStatus: "running",
+      searchError: null,
+      searchTaskId: taskId,
+    });
+
+    // Subscribe to streaming batches for this task. Filter by taskId so a
+    // batch from a now-cancelled earlier search can't land in the new one's
+    // results — the main process keeps the taskId in the payload.
+    // Results are kept sorted by lastUpdated desc at all times, including
+    // during streaming. Same key as the main-process final sort so the list
+    // ordering is stable across "arriving" → "done" transitions.
+    const off = window.electronAPI.on(
+      "session:search-batch",
+      (...args: unknown[]) => {
+        const payload = args[0] as {
+          taskId: string;
+          results: SessionSearchResult[];
+        };
+        if (payload.taskId !== taskId) return;
+        if (get().searchTaskId !== taskId) return;
+        const current = get().searchResults ?? [];
+        const merged = [...current, ...payload.results];
+        merged.sort(
+          (a, b) =>
+            new Date(b.lastUpdated).getTime() -
+            new Date(a.lastUpdated).getTime(),
+        );
+        set({ searchResults: merged });
+      },
+    );
+
+    try {
+      const results = (await window.electronAPI.invoke(
+        "session:search",
+        taskId,
+        trimmed,
+      )) as SessionSearchResult[];
+      // Drop late results if the user started another search or cleared.
+      if (get().searchTaskId !== taskId) return;
+      // Overwrite with the authoritative sorted final set. During streaming
+      // results arrived in enrichment-completion order; this is the single
+      // canonical "done" state.
+      set({
+        searchResults: results,
+        searchStatus: "done",
+        searchTaskId: null,
+      });
+    } catch (err) {
+      if (get().searchTaskId !== taskId) return;
+      set({
+        searchStatus: "error",
+        searchError: err instanceof Error ? err.message : String(err),
+        searchTaskId: null,
+      });
+    } finally {
+      off();
+    }
+  },
+
+  clearSearch: () => {
+    const prev = get().searchTaskId;
+    if (prev) cancelTask(prev).catch(() => undefined);
+    set({
+      searchQuery: "",
+      searchResults: null,
+      searchStatus: "idle",
+      searchError: null,
+      searchTaskId: null,
+      // Peek is a child of search state; clear together.
+      peekResult: null,
+      peekMessages: null,
+      peekLoading: false,
+      peekError: null,
+    });
+  },
+
+  // Loads a session from a search result — skips the tree expansion path and
+  // synthesizes the SessionInfo + Project from the result's embedded metadata.
+  selectSearchResult: async (result) => {
+    const synthesizedSession: SessionInfo = {
+      sessionId: result.sessionId,
+      filePath: result.filePath,
+      summary: result.summary,
+      startTime: "",
+      lastUpdated: result.lastUpdated,
+      messageCount: result.messageCount,
+      fileSizeBytes: result.fileSizeBytes,
+      previewMessages: [],
+    };
+    const synthesizedProject: Project = {
+      name: result.projectName,
+      paths: [],
+      projectRoot: result.projectRoot,
+      provider: result.provider,
+    };
+    // Clear search + peek state first so the UI exits search mode, then load.
+    set({
+      searchQuery: "",
+      searchResults: null,
+      searchStatus: "idle",
+      searchError: null,
+      searchTaskId: null,
+      peekResult: null,
+      peekMessages: null,
+      peekLoading: false,
+      peekError: null,
+    });
+    await get().selectSession(synthesizedSession, synthesizedProject);
+  },
+
+  // Load a session's messages via the stateless peek IPC (doesn't touch the
+  // editor's active adapter). Safe to call repeatedly as the user flips
+  // between results — we overwrite peekMessages with the latest load and
+  // track a token to drop stale responses.
+  openPeek: async (result) => {
+    set({
+      peekResult: result,
+      peekMessages: null,
+      peekLoading: true,
+      peekError: null,
+    });
+    try {
+      const messages = (await window.electronAPI.invoke(
+        "session:peek",
+        result.provider,
+        result.filePath,
+      )) as MessageSummary[];
+      // Drop the response if the user has since closed or switched peek.
+      if (get().peekResult?.filePath !== result.filePath) return;
+      set({ peekMessages: messages, peekLoading: false });
+    } catch (err) {
+      if (get().peekResult?.filePath !== result.filePath) return;
+      set({
+        peekError: err instanceof Error ? err.message : String(err),
+        peekLoading: false,
+      });
+    }
+  },
+
+  closePeek: () => {
+    set({
+      peekResult: null,
+      peekMessages: null,
+      peekLoading: false,
+      peekError: null,
+    });
   },
 }));

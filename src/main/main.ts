@@ -8,6 +8,12 @@ import { registerTmuxHandlers } from "./ipc/tmux-handlers";
 import { registerCommandHandlers } from "./ipc/command-handlers";
 import { registerSessionHandlers } from "./ipc/session-handlers";
 import { registerPromptHandlers } from "./ipc/prompt-handlers";
+import { registerSettingsHandlers } from "./ipc/settings-handlers";
+import { registerLlmHandlers } from "./ipc/llm-handlers";
+import { registerTaskHandlers } from "./ipc/task-handlers";
+import { registerProvider } from "./sessions/registry";
+import { geminiAdapter } from "./sessions/gemini/adapter";
+import { claudeAdapter } from "./sessions/claude/adapter";
 
 // Handle Squirrel events for Windows installer
 // eslint-disable-next-line @typescript-eslint/no-require-imports
@@ -54,10 +60,15 @@ const createWindow = (): void => {
 
 app.whenReady().then(async () => {
   // Initialize subsystems
+  registerProvider(geminiAdapter);
+  registerProvider(claudeAdapter);
   registerTmuxHandlers(tmuxState, outputManager);
   registerCommandHandlers(commandEngine);
   registerSessionHandlers();
   registerPromptHandlers();
+  registerSettingsHandlers();
+  registerLlmHandlers();
+  registerTaskHandlers();
 
   await outputManager.init();
   tmuxState.start();
