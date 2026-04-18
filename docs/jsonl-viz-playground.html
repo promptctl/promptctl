@@ -1,0 +1,1917 @@
+<!doctype html>
+<html lang="en">
+<head>
+<meta charset="utf-8" />
+<meta name="viewport" content="width=device-width, initial-scale=1" />
+<title>JSONL Viz Playground — promptctl Context Workshop</title>
+<style>
+  /* ==============================================
+     Palette — "terminal report"
+     Warm cream text on cool dark background.
+     Accents chosen to be distinguishable at a glance
+     without the neon-on-black AI-chat look.
+     ============================================== */
+  :root {
+    --bg: #0f1115;
+    --surface-1: #161920;
+    --surface-2: #1c2028;
+    --surface-3: #232834;
+    --border: #252a34;
+    --border-hi: #363c48;
+    --text: #e8e3d8;          /* warm cream */
+    --text-dim: #8a8573;
+    --text-faint: #4a4a43;
+    --assistant: #c4a9e8;      /* warm lilac */
+    --user: #a8d09b;           /* dusty sage */
+    --tool: #6bb9b2;           /* muted teal */
+    --tool-dim: #3e6e6a;
+    --meta: #d4a04d;           /* ochre — for XML tags, meta lines */
+    --meta-soft: #a37e39;
+    --system: #7a8294;         /* steel */
+    --hook: #5d6575;           /* dimmer steel */
+    --error: #d47878;          /* clay red */
+    --thread: #2a313d;         /* gutter thread line */
+    --shadow: 0 1px 0 rgba(0,0,0,0.4), 0 8px 24px -12px rgba(0,0,0,0.6);
+  }
+  * { box-sizing: border-box; }
+  html, body {
+    margin: 0; padding: 0;
+    background: var(--bg);
+    color: var(--text);
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, "Segoe UI", sans-serif;
+    font-size: 14px;
+    line-height: 1.5;
+    /* Use browser defaults for smoothing — forcing antialiased makes SF Pro look anemic on dark. */
+    min-height: 100vh;
+  }
+  .mono {
+    font-family: ui-monospace, "SF Mono", Menlo, Consolas, monospace;
+    font-variant-ligatures: none;
+  }
+  .dim { color: var(--text-dim); }
+  .faint { color: var(--text-faint); }
+
+  /* ==============================================
+     Top bar — sticky, compact
+     ============================================== */
+  .topbar {
+    position: sticky; top: 0; z-index: 10;
+    background: linear-gradient(180deg, #12151b 0%, #10131a 100%);
+    border-bottom: 1px solid var(--border);
+    padding: 10px 18px;
+    display: flex; gap: 20px; align-items: center; flex-wrap: wrap;
+  }
+  .brand {
+    font-weight: 600;
+    letter-spacing: 0.2px;
+    color: var(--text);
+    display: flex; align-items: baseline; gap: 8px;
+  }
+  .brand small {
+    font-weight: 400; color: var(--text-dim);
+    font-size: 11px; letter-spacing: 0.4px; text-transform: uppercase;
+  }
+  .ctrl-group {
+    display: flex; align-items: center; gap: 6px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    padding: 3px;
+    background: var(--surface-1);
+  }
+  .ctrl-group label {
+    font-size: 10px; letter-spacing: 0.6px; text-transform: uppercase;
+    color: var(--text-dim);
+    padding: 0 6px; align-self: center;
+  }
+  button.tab {
+    appearance: none; background: transparent; border: 0;
+    color: var(--text-dim);
+    padding: 5px 10px; border-radius: 4px;
+    font: inherit; font-size: 12px;
+    cursor: pointer; transition: all 120ms ease;
+  }
+  button.tab:hover { color: var(--text); background: var(--surface-2); }
+  button.tab.active {
+    color: var(--bg); background: var(--text);
+    font-weight: 500;
+  }
+  .toggles { display: flex; gap: 14px; align-items: center; }
+  .toggle {
+    display: inline-flex; align-items: center; gap: 6px;
+    font-size: 12px; color: var(--text-dim);
+    cursor: pointer; user-select: none;
+  }
+  .toggle input {
+    appearance: none; width: 14px; height: 14px;
+    border: 1px solid var(--border-hi); border-radius: 3px;
+    background: var(--surface-2);
+    cursor: pointer; position: relative;
+  }
+  .toggle input:checked {
+    background: var(--text); border-color: var(--text);
+  }
+  .toggle input:checked::after {
+    content: '✓';
+    position: absolute; inset: 0;
+    color: var(--bg); font-size: 11px; font-weight: 700;
+    display: flex; align-items: center; justify-content: center;
+    line-height: 1;
+  }
+  .toggle:hover { color: var(--text); }
+
+  /* ==============================================
+     Style description banner
+     ============================================== */
+  .style-desc {
+    padding: 10px 20px 14px;
+    background: var(--surface-1);
+    border-bottom: 1px solid var(--border);
+    font-size: 12px;
+    color: var(--text-dim);
+    display: flex; gap: 12px;
+  }
+  .style-desc strong {
+    color: var(--meta);
+    font-weight: 600;
+    letter-spacing: 0.3px;
+    text-transform: uppercase;
+    font-size: 11px;
+    align-self: baseline;
+    padding-top: 1px;
+  }
+  .style-desc .thesis { flex: 1; }
+
+  /* ==============================================
+     Preview container
+     ============================================== */
+  .preview {
+    padding: 16px 20px 80px;
+    max-width: 1600px;
+    margin: 0 auto;
+  }
+
+  /* ==============================================
+     FIELD RENDERERS — shared across all styles.
+     This is the visual vocabulary.
+     ============================================== */
+
+  /* Tooltip-trigger: subtle underline on hover so you know it has more info */
+  .tt {
+    border-bottom: 1px dotted transparent;
+    cursor: help;
+    transition: border-color 120ms ease;
+  }
+  .tt:hover { border-bottom-color: var(--text-faint); }
+
+  /* Opaque handles — receding. Small, low contrast, hover to reveal. */
+  .id {
+    color: var(--text-dim);
+    font-size: 12px;
+    letter-spacing: 0.2px;
+    opacity: 0.75;
+  }
+  .id::before { content: '#'; opacity: 0.5; }
+  .id:hover { opacity: 1; color: var(--text); }
+
+  .time {
+    color: var(--text-dim);
+    font-size: 12px;
+    letter-spacing: 0.1px;
+    opacity: 0.8;
+  }
+  .time:hover { opacity: 1; color: var(--text); }
+
+  .path {
+    color: var(--text-dim);
+    font-size: 12px;
+  }
+
+  /* Pills — small colored chips */
+  .pill {
+    display: inline-block;
+    padding: 1px 6px;
+    border-radius: 3px;
+    font-size: 11px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    letter-spacing: 0.2px;
+    line-height: 1.55;
+    border: 1px solid transparent;
+    vertical-align: baseline;
+  }
+  .pill-model      { color: var(--assistant); border-color: color-mix(in srgb, var(--assistant) 30%, transparent); background: color-mix(in srgb, var(--assistant) 8%, transparent); }
+  .pill-branch     { color: var(--tool);      border-color: color-mix(in srgb, var(--tool) 30%, transparent);      background: color-mix(in srgb, var(--tool) 8%, transparent); }
+  .pill-assistant  { color: var(--assistant); border-color: color-mix(in srgb, var(--assistant) 40%, transparent); }
+  .pill-user       { color: var(--user);      border-color: color-mix(in srgb, var(--user) 40%, transparent); }
+  .pill-hook       { color: var(--hook);      border-color: color-mix(in srgb, var(--hook) 40%, transparent); }
+  .pill-tool_result{ color: var(--tool);      border-color: color-mix(in srgb, var(--tool) 40%, transparent); }
+  .pill-usermeta   { color: var(--meta);      border-color: color-mix(in srgb, var(--meta) 40%, transparent); }
+  .pill-slashcmd   { color: var(--meta);      border-color: color-mix(in srgb, var(--meta) 40%, transparent); }
+  .pill-system     { color: var(--system);    border-color: color-mix(in srgb, var(--system) 40%, transparent); }
+  .pill-snapshot   { color: var(--text-faint); border-color: var(--border); }
+
+  /* Tokens — compact in→out with cache hits */
+  .tokens {
+    font-size: 12px; letter-spacing: 0.1px;
+    color: var(--text-dim);
+    display: inline-flex; align-items: baseline; gap: 2px;
+  }
+  .tok-in   { color: var(--user); }
+  .tok-out  { color: var(--assistant); }
+  .tok-arrow { color: var(--text-faint); padding: 0 2px; }
+  .tok-cache {
+    color: var(--tool); font-size: 11px;
+    padding-left: 4px; opacity: 0.75;
+  }
+
+  /* XML tags — wrapped content is color-coded ochre; hover the content
+     (or the orphan-tag marker) to see the full tag via JS tooltip.
+     .xwrap = enclosed text between <tag>...</tag>. No visible brackets.
+     .xtag  = fallback for orphan/unclosed tags (compact chevron glyph). */
+  .xwrap {
+    color: var(--meta);
+    background: color-mix(in srgb, var(--meta) 6%, transparent);
+    border-radius: 2px;
+    padding: 0 2px;
+    cursor: help;
+    transition: filter 120ms ease, background 120ms ease;
+  }
+  .xwrap:hover {
+    filter: brightness(1.18);
+    background: color-mix(in srgb, var(--meta) 14%, transparent);
+  }
+  .xtag {
+    color: var(--meta);
+    font-weight: 700;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 13px;
+    cursor: help;
+    opacity: 0.8;
+    padding: 0 1px;
+  }
+  .xtag:hover { opacity: 1; }
+  .xtag-close { opacity: 0.5; }
+  .xtag-close:hover { opacity: 1; }
+
+  /* JS tooltip — positioned above hovered [data-tip] elements */
+  .jstip {
+    position: fixed;
+    display: none;
+    max-width: 560px;
+    padding: 6px 10px;
+    background: #1a1f2a;
+    border: 1px solid var(--border-hi);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    line-height: 1.5;
+    box-shadow: 0 4px 20px rgba(0,0,0,0.55);
+    pointer-events: none;
+    z-index: 1000;
+    white-space: pre-wrap;
+    word-break: break-word;
+  }
+
+  /* tt = "has tooltip" affordance — subtle hover cue. Paired with data-tip. */
+  [data-tip] { cursor: help; }
+
+  /* Actors — small colored label, always same width-ish */
+  .actor {
+    display: inline-block;
+    min-width: 46px;
+    padding: 0 6px;
+    font-size: 10px;
+    letter-spacing: 0.6px;
+    text-transform: uppercase;
+    font-weight: 600;
+    border-left: 2px solid transparent;
+    color: var(--text-dim);
+    line-height: 1.8;
+  }
+  .actor-assistant, .actor-asst { color: var(--assistant); border-left-color: var(--assistant); }
+  .actor-user                   { color: var(--user);      border-left-color: var(--user); }
+  .actor-tool, .actor-tool_result { color: var(--tool);    border-left-color: var(--tool); }
+  .actor-usermeta, .actor-meta  { color: var(--meta);      border-left-color: var(--meta); }
+  .actor-slashcmd, .actor-cmd   { color: var(--meta);      border-left-color: var(--meta); }
+  .actor-hook                   { color: var(--hook);      border-left-color: var(--hook); }
+  .actor-system, .actor-sys     { color: var(--system);    border-left-color: var(--system); }
+  .actor-snap, .actor-snapshot  { color: var(--text-faint); border-left-color: var(--text-faint); }
+
+  /* Tool input — compact key:value */
+  .tool-input {
+    font-size: 11px;
+    color: var(--text-dim);
+  }
+  .arg { display: inline; white-space: nowrap; }
+  .arg + .arg { margin-left: 6px; }
+  .arg-k { color: var(--tool); }
+  .arg-eq { color: var(--text-faint); padding: 0 1px; }
+  .arg-v { color: var(--text); }
+  .arg-more {
+    color: var(--text-faint);
+    font-style: italic;
+  }
+
+  /* Flags — small single-glyph badges */
+  .flag {
+    display: inline-block;
+    width: 14px; height: 14px;
+    line-height: 14px;
+    text-align: center;
+    font-size: 10px;
+    margin-right: 2px;
+    border-radius: 2px;
+    color: var(--text-dim);
+    background: var(--surface-2);
+  }
+  .flag-sidechain { color: var(--tool); }
+  .flag-meta      { color: var(--meta); }
+  .flag-perm      { color: var(--error); }
+  .flag-slug      { color: var(--assistant); }
+
+  /* Prose text */
+  .prose {
+    font-family: -apple-system, BlinkMacSystemFont, "SF Pro Text", system-ui, sans-serif;
+    color: var(--text);
+    line-height: 1.55;
+  }
+
+  /* Tool call inline (stream style) */
+  .block-tool {
+    color: var(--tool);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+  }
+  .tool-name { color: var(--tool); font-weight: 600; }
+  .tool-id { margin-left: 4px; }
+  .block-think {
+    color: var(--assistant);
+    opacity: 0.7;
+    font-size: 11px;
+    font-style: italic;
+  }
+  .block-text { color: var(--text); }
+
+  .hook-ev { color: var(--hook); font-weight: 600; font-size: 12px; }
+  .hook-name { color: var(--text-dim); font-size: 12px; }
+  .hook-cmd { font-size: 12px; color: var(--text-faint); margin-left: 6px; }
+  .sys-sub { color: var(--system); font-size: 12px; margin-right: 6px; }
+
+  /* Expand affordance — tiny glyph appended to clamped rows. Clicking the
+     row toggles .expanded on the row, which unclamps the content below. */
+  .expand-hint {
+    color: var(--text-faint);
+    font-size: 11px;
+    margin-left: 4px;
+    user-select: none;
+  }
+  [data-row-id] { cursor: pointer; }
+  [data-row-id]:hover .expand-hint { color: var(--meta); }
+
+  /* ==============================================
+     STYLE A — "Stream"
+     One row per JSONL line. Default: rigidly 1-line,
+     content truncated. Click row → expand below.
+     ============================================== */
+  .stream {
+    font-size: 13px;
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface-1);
+  }
+  .stream .row {
+    display: grid;
+    grid-template-columns: 74px 60px 64px 1fr auto;
+    gap: 10px;
+    padding: 2px 12px;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+    align-items: baseline;
+    min-height: 22px;
+  }
+  .stream .row:hover { background: var(--surface-2); }
+  .stream .row:last-child { border-bottom: 0; }
+  .stream .col-time,
+  .stream .col-uuid,
+  .stream .col-meta {
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+  }
+  .stream .col-summary {
+    overflow: hidden; text-overflow: ellipsis; white-space: nowrap;
+    min-width: 0;
+  }
+  .stream .row-hook,
+  .stream .row-snapshot { opacity: 0.6; }
+  .stream .row-hook:hover,
+  .stream .row-snapshot:hover { opacity: 1; }
+
+  /* Expanded row: unwrap summary + show secondary "raw" line below */
+  .stream .row.expanded {
+    background: var(--surface-2);
+    border-bottom-color: var(--border-hi);
+  }
+  .stream .row.expanded .col-summary {
+    white-space: pre-wrap;
+    word-break: break-word;
+    overflow: visible;
+  }
+  /* Expanded-row payload — composed of field renderers, never raw JSON. */
+  .row-expansion {
+    padding: 10px 16px 12px;
+    background: var(--surface-2);
+    border-bottom: 1px solid var(--border-hi);
+  }
+
+  /* Field grid — universal expanded visualization.
+     Used by Stream row-expansion AND Thread bubble expansions.
+     key column auto-sizes to widest key, value column fills. */
+  .field-grid {
+    display: grid;
+    grid-template-columns: minmax(110px, max-content) 1fr;
+    column-gap: 14px;
+    row-gap: 2px;
+    font-size: 12px;
+  }
+  .field-row { display: contents; }
+  .field-key {
+    color: var(--text-dim);
+    font-size: 11px;
+    text-align: right;
+    padding-top: 1px;
+    white-space: nowrap;
+    line-height: 1.5;
+  }
+  .field-val {
+    color: var(--text);
+    min-width: 0;
+    word-break: break-word;
+    line-height: 1.5;
+    /* pre-wrap preserves newlines in string values (stack traces, multiline content) */
+    white-space: pre-wrap;
+  }
+  /* Nested field grids — indented with left-border so structure is visible */
+  .field-val .field-grid {
+    margin: 2px 0;
+    padding: 2px 0 2px 10px;
+    border-left: 1px solid var(--border);
+  }
+  .field-val .prose-block {
+    white-space: pre-wrap;
+    word-break: break-word;
+    font-family: -apple-system, BlinkMacSystemFont, system-ui, sans-serif;
+  }
+  /* Content-block list (inside message.content array) */
+  .cb-list {
+    display: flex;
+    flex-direction: column;
+    gap: 4px;
+  }
+  .cb {
+    padding: 3px 0;
+    border-top: 1px dashed var(--border);
+  }
+  .cb-list .cb:first-child { border-top: 0; padding-top: 0; }
+  .cb-text .prose-block { white-space: pre-wrap; }
+  .cb-tool_result .ref-to {
+    color: var(--text-dim);
+    font-size: 11px;
+    margin: 0 6px;
+  }
+  .tool-result-expanded {
+    background: var(--surface-3);
+    border-left: 2px solid var(--tool-dim);
+    padding: 5px 10px;
+    margin-top: 4px;
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 12px;
+    white-space: pre-wrap;
+    word-break: break-word;
+    color: var(--text);
+    max-height: 360px;
+    overflow: auto;
+    border-radius: 2px;
+  }
+  /* Array rendering — stacked with dim index prefix */
+  .arr {
+    display: flex;
+    flex-direction: column;
+    gap: 1px;
+  }
+  .arr-item {
+    display: flex;
+    gap: 8px;
+    align-items: baseline;
+  }
+  .arr-idx {
+    color: var(--text-faint);
+    font-size: 10px;
+    min-width: 18px;
+    text-align: right;
+    user-select: none;
+  }
+  .arr-val { min-width: 0; flex: 1; }
+  .glyph-ok { color: var(--user); font-weight: 600; cursor: help; }
+  .glyph-no { color: var(--error); font-weight: 600; cursor: help; }
+  .num { color: var(--assistant); }
+  .path-item {
+    color: var(--tool);
+    font-size: 12px;
+  }
+  /* Content-block badge pills */
+  .pill-cb-thinking    { color: var(--assistant); border-color: color-mix(in srgb, var(--assistant) 40%, transparent); background: color-mix(in srgb, var(--assistant) 8%, transparent); }
+  .pill-cb-tool_use    { color: var(--tool); border-color: color-mix(in srgb, var(--tool) 40%, transparent); background: color-mix(in srgb, var(--tool) 8%, transparent); }
+  .pill-cb-tool_result { color: var(--tool); border-color: color-mix(in srgb, var(--tool) 40%, transparent); background: color-mix(in srgb, var(--tool) 8%, transparent); }
+  .pill-cb-text        { color: var(--text-dim); border-color: var(--border-hi); }
+  .pill-error          { color: var(--error); border-color: color-mix(in srgb, var(--error) 40%, transparent); background: color-mix(in srgb, var(--error) 12%, transparent); }
+
+  /* Density variants */
+  body[data-density="compact"]      .stream .row { padding: 2px 12px; min-height: 22px; }
+  body[data-density="ultra"]        .stream .row { padding: 1px 12px; min-height: 18px; font-size: 12px; }
+  body[data-density="ultra"]        .stream { font-size: 12px; }
+  body[data-density="comfortable"]  .stream .row { padding: 5px 12px; min-height: 28px; }
+
+  /* ==============================================
+     STYLE B — "Thread"
+     Conversation layout. Gutter thread line on left.
+     Colored dots by kind. Tool_use + tool_result fused.
+     ============================================== */
+  .thread {
+    max-width: 900px;
+    margin: 0;
+  }
+  .tbubble {
+    display: grid;
+    grid-template-columns: 32px 1fr;
+    align-items: stretch;
+    margin-bottom: 4px;
+  }
+  .tbubble-gutter {
+    position: relative;
+    display: flex; justify-content: center;
+  }
+  .tbubble-gutter::before {
+    content: '';
+    position: absolute;
+    top: 0; bottom: -4px;
+    left: 50%;
+    width: 1px;
+    background: var(--thread);
+    transform: translateX(-50%);
+  }
+  .gutter-dot {
+    position: relative;
+    z-index: 1;
+    width: 8px; height: 8px;
+    border-radius: 50%;
+    margin-top: 10px;
+    background: var(--text-faint);
+    box-shadow: 0 0 0 3px var(--bg);
+  }
+  .gd-user { background: var(--user); }
+  .gd-asst { background: var(--assistant); }
+  .gd-tool { background: var(--tool); }
+  .gd-meta { background: var(--meta); }
+  .gd-sys  { background: var(--system); }
+  .gd-hook { background: var(--hook); opacity: 0.5; }
+  .gd-snap { background: var(--text-faint); opacity: 0.3; }
+
+  .tbubble-content {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 5px 10px;
+    margin-left: 4px;
+    min-width: 0;
+  }
+  .tbubble-content.tbubble-thin {
+    padding: 3px 10px;
+    font-size: 12px;
+  }
+  .tbubble-user .tbubble-content {
+    border-left: 2px solid var(--user);
+    background: color-mix(in srgb, var(--user) 4%, var(--surface-1));
+  }
+  .tbubble-asst .tbubble-content {
+    border-left: 2px solid var(--assistant);
+  }
+  .tbubble-meta .tbubble-content,
+  .tbubble-sys .tbubble-content {
+    background: transparent;
+    border-style: dashed;
+    border-color: color-mix(in srgb, var(--meta) 25%, var(--border));
+  }
+  .tbubble-hook .tbubble-content,
+  .tbubble-snap .tbubble-content {
+    background: transparent;
+    border: 0;
+    padding-left: 0;
+    color: var(--text-dim);
+  }
+  .tbubble-head {
+    display: flex; align-items: baseline; gap: 8px;
+    flex-wrap: wrap;
+    margin-bottom: 2px;
+  }
+  /* Body clamps to 1 line by default. Expanded unclamps. */
+  .tbubble-body {
+    color: var(--text);
+    line-height: 1.5;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    word-break: break-word;
+  }
+  .tbubble.expanded .tbubble-body,
+  .tbubble.expanded .tblock-text,
+  .tbubble.expanded .tool-result {
+    white-space: pre-wrap;
+    overflow: visible;
+    text-overflow: clip;
+    max-height: none;
+  }
+  .tbubble.expanded .tbubble-content {
+    background: var(--surface-2);
+    border-color: var(--border-hi);
+  }
+  .tbubble-body.mono { font-size: 12px; color: var(--text-dim); }
+
+  .tblock { margin-top: 4px; }
+  .tblock:first-child { margin-top: 0; }
+  .tblock-thinking {
+    display: flex; align-items: baseline; gap: 6px;
+    font-size: 12px;
+    color: var(--assistant);
+    opacity: 0.7;
+    font-style: italic;
+    padding: 2px 0;
+  }
+  .thinking-label { text-transform: uppercase; letter-spacing: 0.5px; font-size: 10px; font-style: normal; }
+  .thinking-preview { color: var(--text-dim); font-style: normal; }
+  .sig-hidden { color: var(--text-faint); font-size: 11px; }
+  .block-badge {
+    display: inline-block;
+    color: var(--text-faint);
+    font-size: 12px;
+    margin-right: 2px;
+  }
+
+  .tblock-tool {
+    margin: 4px 0;
+    border-left: 1px solid var(--tool-dim);
+    padding-left: 10px;
+  }
+  .tool-call {
+    display: flex; flex-wrap: wrap; align-items: baseline; gap: 6px;
+    font-size: 13px;
+    padding: 1px 0;
+  }
+  .tool-result {
+    position: relative;
+    margin-top: 3px; padding: 3px 8px 3px 12px;
+    background: var(--surface-2);
+    border-radius: 3px;
+    font-size: 12px;
+    color: var(--text-dim);
+    line-height: 1.45;
+    /* Single-line clamp — matches the 1-line default for bubble bodies. */
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+    word-break: break-word;
+  }
+  .tool-result::before {
+    content: '';
+    position: absolute;
+    left: 4px; top: 4px; bottom: 4px; width: 2px;
+    background: var(--tool-dim);
+    border-radius: 1px;
+  }
+  .tool-result-missing {
+    font-style: italic;
+    color: var(--error);
+    background: transparent;
+  }
+  .tool-result-missing::before { background: var(--error); }
+  .res-text { color: var(--text); }
+
+  .tblock-text {
+    padding: 2px 0;
+    color: var(--text);
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+  }
+
+  body[data-density="compact"]  .tbubble-content { padding: 5px 10px; }
+  body[data-density="ultra"]    .tbubble-content { padding: 3px 10px; font-size: 12px; }
+  body[data-density="ultra"]    .tbubble-head { margin-bottom: 1px; }
+  body[data-density="comfortable"] .tbubble-content { padding: 10px 14px; }
+
+  /* ==============================================
+     STYLE C — "Inspector"
+     Tabular. Every field exposed in a column.
+     ============================================== */
+  .inspector {
+    border: 1px solid var(--border);
+    border-radius: 6px;
+    overflow: hidden;
+    background: var(--surface-1);
+    font-size: 11px;
+  }
+  .inspector .ihead,
+  .inspector .irow {
+    display: grid;
+    grid-template-columns: 74px 88px 80px 54px 54px 80px 100px 140px 62px 1fr;
+    gap: 8px;
+    padding: 4px 12px;
+    align-items: baseline;
+    border-bottom: 1px solid color-mix(in srgb, var(--border) 60%, transparent);
+  }
+  .inspector .ihead {
+    background: var(--surface-2);
+    color: var(--text-dim);
+    font-size: 10px;
+    letter-spacing: 0.5px;
+    text-transform: uppercase;
+    font-weight: 600;
+    position: sticky; top: 0;
+  }
+  .inspector .irow:hover { background: var(--surface-2); }
+  .inspector .icol {
+    overflow: hidden;
+    text-overflow: ellipsis;
+    white-space: nowrap;
+    min-width: 0;
+  }
+  .inspector .icol-summary { white-space: nowrap; }
+
+  body[data-density="ultra"] .inspector .irow { padding: 2px 12px; font-size: 10px; }
+  body[data-density="compact"] .inspector .irow { padding: 3px 12px; }
+  body[data-density="comfortable"] .inspector .irow { padding: 6px 12px; }
+
+  /* ==============================================
+     STYLE D — "Timeline"
+     Time axis on left. Cards attached.
+     ============================================== */
+  .timeline {
+    position: relative;
+    padding-left: 4px;
+  }
+  .tlrow {
+    display: grid;
+    grid-template-columns: 62px 20px 1fr;
+    gap: 8px;
+    align-items: start;
+    margin-bottom: 6px;
+    position: relative;
+  }
+  .tlrow::before {
+    content: '';
+    position: absolute;
+    left: 71px; top: 0; bottom: -6px;
+    width: 1px;
+    background: var(--thread);
+  }
+  .tlrow:last-child::before { bottom: 50%; }
+  .tl-offset {
+    color: var(--text-dim);
+    font-size: 10px;
+    text-align: right;
+    padding-top: 6px;
+    letter-spacing: 0.3px;
+  }
+  .tl-dot {
+    width: 10px; height: 10px;
+    border-radius: 50%;
+    background: var(--text-faint);
+    margin: 7px auto 0;
+    z-index: 1; position: relative;
+    box-shadow: 0 0 0 3px var(--bg);
+  }
+  .tl-dot-assistant { background: var(--assistant); }
+  .tl-dot-user { background: var(--user); }
+  .tl-dot-tool_result { background: var(--tool); }
+  .tl-dot-usermeta { background: var(--meta); }
+  .tl-dot-slashcmd { background: var(--meta); }
+  .tl-dot-system { background: var(--system); }
+  .tl-dot-hook { background: var(--hook); width: 6px; height: 6px; margin-top: 9px; }
+  .tl-dot-snapshot { background: var(--text-faint); width: 6px; height: 6px; margin-top: 9px; }
+  .tl-card {
+    background: var(--surface-1);
+    border: 1px solid var(--border);
+    border-radius: 5px;
+    padding: 6px 10px;
+    min-width: 0;
+  }
+  .tl-head {
+    display: flex; gap: 8px; align-items: baseline;
+    margin-bottom: 3px;
+    flex-wrap: wrap;
+    font-size: 11px;
+  }
+  .tl-body {
+    color: var(--text);
+    font-size: 12px;
+    line-height: 1.5;
+    white-space: nowrap;
+    overflow: hidden;
+    text-overflow: ellipsis;
+  }
+
+  body[data-density="ultra"] .tl-card { padding: 3px 8px; }
+  body[data-density="ultra"] .tl-body { font-size: 11px; }
+  body[data-density="compact"] .tl-card { padding: 5px 10px; }
+  body[data-density="comfortable"] .tl-card { padding: 10px 12px; }
+
+  /* ==============================================
+     Paste panel
+     ============================================== */
+  .paste-panel {
+    position: fixed; left: 0; right: 0; bottom: 0;
+    background: var(--surface-1);
+    border-top: 1px solid var(--border);
+    padding: 8px 20px;
+    display: flex; gap: 12px; align-items: center;
+    font-size: 12px;
+    box-shadow: 0 -4px 16px -8px rgba(0,0,0,0.5);
+    z-index: 5;
+  }
+  .paste-panel details { flex: 1; }
+  .paste-panel summary {
+    cursor: pointer;
+    color: var(--text-dim);
+    font-size: 11px;
+    letter-spacing: 0.4px;
+    text-transform: uppercase;
+    padding: 4px 0;
+    list-style: none;
+  }
+  .paste-panel summary::before {
+    content: '▸ ';
+    display: inline-block;
+    transition: transform 120ms;
+  }
+  .paste-panel details[open] summary::before {
+    content: '▾ ';
+  }
+  .paste-panel textarea {
+    width: 100%; min-height: 120px;
+    background: var(--bg);
+    border: 1px solid var(--border);
+    border-radius: 4px;
+    color: var(--text);
+    font-family: ui-monospace, "SF Mono", Menlo, monospace;
+    font-size: 11px;
+    padding: 8px 10px;
+    resize: vertical;
+    margin-top: 6px;
+  }
+  .paste-panel .paste-buttons {
+    display: flex; gap: 8px; margin-top: 8px;
+  }
+  .btn {
+    appearance: none; background: var(--surface-2); border: 1px solid var(--border-hi);
+    color: var(--text);
+    padding: 5px 12px; border-radius: 4px;
+    font: inherit; font-size: 11px;
+    cursor: pointer;
+  }
+  .btn:hover { background: var(--surface-3); border-color: var(--text-faint); }
+  .btn-primary {
+    background: var(--text); color: var(--bg);
+    border-color: var(--text);
+    font-weight: 500;
+  }
+  .btn-primary:hover { background: var(--meta); border-color: var(--meta); }
+
+  /* scrollbar tweak */
+  ::-webkit-scrollbar { width: 12px; height: 12px; }
+  ::-webkit-scrollbar-track { background: var(--bg); }
+  ::-webkit-scrollbar-thumb { background: var(--surface-3); border-radius: 6px; border: 3px solid var(--bg); }
+  ::-webkit-scrollbar-thumb:hover { background: var(--border-hi); }
+
+</style>
+</head>
+<body data-style="thread" data-density="compact">
+
+  <header class="topbar">
+    <div class="brand">
+      promptctl <small>JSONL Viz Playground</small>
+    </div>
+
+    <div class="ctrl-group" role="tablist" aria-label="Style">
+      <label>Style</label>
+      <button class="tab" data-style-btn="stream">Stream</button>
+      <button class="tab active" data-style-btn="thread">Thread</button>
+      <button class="tab" data-style-btn="inspector">Inspector</button>
+      <button class="tab" data-style-btn="timeline">Timeline</button>
+    </div>
+
+    <div class="ctrl-group">
+      <label>Density</label>
+      <button class="tab" data-density-btn="comfortable">Comfy</button>
+      <button class="tab active" data-density-btn="compact">Compact</button>
+      <button class="tab" data-density-btn="ultra">Ultra</button>
+    </div>
+
+    <div class="toggles">
+      <label class="toggle"><input type="checkbox" id="toggle-Meta" checked /> meta</label>
+      <label class="toggle"><input type="checkbox" id="toggle-Hooks" /> hooks</label>
+      <label class="toggle"><input type="checkbox" id="toggle-Thinking" /> thinking</label>
+      <label class="toggle"><input type="checkbox" id="toggle-Snapshots" /> snapshots</label>
+    </div>
+  </header>
+
+  <div class="style-desc">
+    <strong id="style-name">Thread</strong>
+    <div class="thesis" id="style-thesis"></div>
+  </div>
+
+  <main class="preview" id="preview"></main>
+
+  <footer class="paste-panel">
+    <details>
+      <summary>Paste additional JSONL (one JSON object per line)</summary>
+      <textarea id="paste-area" placeholder='Paste JSONL lines here. Each line must be a complete JSON object. Leave empty to use sample data.'></textarea>
+      <div class="paste-buttons">
+        <button class="btn btn-primary" id="paste-apply">Apply</button>
+        <button class="btn" id="paste-reset">Reset to sample</button>
+      </div>
+    </details>
+  </footer>
+
+  <!-- ==========================================
+       Real sample data — first 20 lines from
+       promptctl session 04c41302 (smart-compress
+       investigation). Covers: file-history-snapshot,
+       progress/hook, user isMeta, slash command,
+       system local_command, user prose, assistant
+       with thinking, assistant tool_use, tool_result.
+       ========================================== -->
+  <script id="sample-jsonl" type="application/jsonl">
+{"type":"file-history-snapshot","messageId":"6e3e4d5d-1405-4eef-9b36-ce62c2e658a3","snapshot":{"messageId":"6e3e4d5d-1405-4eef-9b36-ce62c2e658a3","trackedFileBackups":{},"timestamp":"2026-04-14T21:57:39.296Z"},"isSnapshotUpdate":false}
+{"parentUuid":null,"isSidechain":false,"type":"progress","data":{"type":"hook_progress","hookEvent":"SessionStart","hookName":"SessionStart:clear","command":"node \"/Users/bmf/.claude/hooks/gsd-check-update.js\""},"parentToolUseID":"d6c853bb-58a5-407e-a14e-6e3893935ce0","toolUseID":"d6c853bb-58a5-407e-a14e-6e3893935ce0","timestamp":"2026-04-14T21:57:39.195Z","uuid":"f1907298-a052-46c2-a9d7-c3695a96e841","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master"}
+{"parentUuid":"f1907298-a052-46c2-a9d7-c3695a96e841","isSidechain":false,"type":"progress","data":{"type":"hook_progress","hookEvent":"SessionStart","hookName":"SessionStart:clear","command":"bash /Users/bmf/.claude/hooks/gsd-session-state.sh"},"parentToolUseID":"d6c853bb-58a5-407e-a14e-6e3893935ce0","toolUseID":"d6c853bb-58a5-407e-a14e-6e3893935ce0","timestamp":"2026-04-14T21:57:39.195Z","uuid":"379556ee-c626-4de2-8dae-3fe82feadbd3","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master"}
+{"parentUuid":"379556ee-c626-4de2-8dae-3fe82feadbd3","isSidechain":false,"type":"progress","data":{"type":"hook_progress","hookEvent":"SessionStart","hookName":"SessionStart:clear","command":"${CLAUDE_PLUGIN_ROOT}/hooks-handlers/session-start.sh"},"parentToolUseID":"d6c853bb-58a5-407e-a14e-6e3893935ce0","toolUseID":"d6c853bb-58a5-407e-a14e-6e3893935ce0","timestamp":"2026-04-14T21:57:39.195Z","uuid":"29c037a7-f7ba-4cf5-96f9-79598c18496e","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master"}
+{"parentUuid":"29c037a7-f7ba-4cf5-96f9-79598c18496e","isSidechain":false,"promptId":"a5f7929e-2856-4435-95cd-cf3708684c78","type":"user","message":{"role":"user","content":"<local-command-caveat>Caveat: The messages below were generated by the user while running local commands. DO NOT respond to these messages or otherwise consider them in your response unless the user explicitly asks you to.</local-command-caveat>"},"isMeta":true,"uuid":"951017b9-f133-41ea-8fd5-52cb20625144","timestamp":"2026-04-14T21:57:39.296Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master"}
+{"parentUuid":"951017b9-f133-41ea-8fd5-52cb20625144","isSidechain":false,"promptId":"a5f7929e-2856-4435-95cd-cf3708684c78","type":"user","message":{"role":"user","content":"<command-name>/clear</command-name>\n            <command-message>clear</command-message>\n            <command-args></command-args>"},"uuid":"6e3e4d5d-1405-4eef-9b36-ce62c2e658a3","timestamp":"2026-04-14T21:57:39.193Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master"}
+{"parentUuid":"6e3e4d5d-1405-4eef-9b36-ce62c2e658a3","isSidechain":false,"type":"system","subtype":"local_command","content":"<local-command-stdout></local-command-stdout>","level":"info","timestamp":"2026-04-14T21:57:39.296Z","uuid":"6741be65-f601-4c9e-b59b-0d7950814027","isMeta":false,"userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master"}
+{"type":"file-history-snapshot","messageId":"b89b4d6b-2ac8-4eb2-9b5a-4bafa1fb83ee","snapshot":{"messageId":"b89b4d6b-2ac8-4eb2-9b5a-4bafa1fb83ee","trackedFileBackups":{},"timestamp":"2026-04-14T21:57:52.217Z"},"isSnapshotUpdate":false}
+{"parentUuid":"6741be65-f601-4c9e-b59b-0d7950814027","isSidechain":false,"promptId":"ef87ba8e-b720-4564-ba8c-436732d82767","type":"user","message":{"role":"user","content":"Let's work on the 'Smart Compress' feature.  What does it currently do?"},"uuid":"b89b4d6b-2ac8-4eb2-9b5a-4bafa1fb83ee","timestamp":"2026-04-14T21:57:52.172Z","permissionMode":"bypassPermissions","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master"}
+{"parentUuid":"b89b4d6b-2ac8-4eb2-9b5a-4bafa1fb83ee","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_01MRFMTM2HFme9rFAWEXE22g","type":"message","role":"assistant","content":[{"type":"thinking","thinking":"Let me investigate the Smart Compress feature. First I need to find where it lives in the codebase, then understand its current behavior.","signature":"ErECClkIDBgCKkAf6j3XQawyFRh6kOjly0wQYbRzwiAYVHJYtg90bDzUkZdMb9k1YtNTMWETla38lKqb0FV3yKxilO8scP+G3wz0Mg9jbGF1ZGUtb3B1cy00LTY4ABIM3ZsnSSz5kg7iWBugGgwU249vQqc6iHnCfvIiMDdreihFTY70AM7rHBlA1drNtbK9OhVtGf9bW9EfvP84g9EaFV/W8ncPhDvkhe5q5SqFAQJvsyZ1cNhDN1Ni09rn7krpBOVle0uf7jCf3h+wQmQ3jT3HWxcfxd7WhROuw/810p/CNhN2p/GmGWuHCloBlmWm6kE9i/dLdP4ECR1XDOzcvd3SCmD0SZ+hz7/253fDm/CPI7fksNI7BYgO1eoPlOaGtY0b5bE9DFXTMorGZerFRTMZhjoYAQ=="}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":3,"cache_creation_input_tokens":16607,"cache_read_input_tokens":11961,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":16607},"output_tokens":33,"service_tier":"standard","inference_geo":"not_available"}},"requestId":"req_011Ca4QsE4fTg6DPxJknkm3V","type":"assistant","uuid":"e853c619-9db1-401c-a9ba-1f8009935025","timestamp":"2026-04-14T21:57:55.206Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master"}
+{"parentUuid":"e853c619-9db1-401c-a9ba-1f8009935025","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_01MRFMTM2HFme9rFAWEXE22g","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01NNgwK9fStVf9zBtYvji9Rd","name":"Grep","input":{"pattern":"smart.?compress|smartCompress|smart_compress","-i":true},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":3,"cache_creation_input_tokens":16607,"cache_read_input_tokens":11961,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":16607},"output_tokens":33,"service_tier":"standard","inference_geo":"not_available"}},"requestId":"req_011Ca4QsE4fTg6DPxJknkm3V","type":"assistant","uuid":"f5aa15b6-1983-4196-98d5-b664fa9fbe2b","timestamp":"2026-04-14T21:57:56.754Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"f5aa15b6-1983-4196-98d5-b664fa9fbe2b","isSidechain":false,"type":"progress","data":{"type":"hook_progress","hookEvent":"PostToolUse","hookName":"PostToolUse:Grep","command":"callback"},"parentToolUseID":"toolu_01NNgwK9fStVf9zBtYvji9Rd","toolUseID":"toolu_01NNgwK9fStVf9zBtYvji9Rd","timestamp":"2026-04-14T21:57:56.775Z","uuid":"ad5ba8b2-d47f-407e-86f2-46131721d1f9","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"f5aa15b6-1983-4196-98d5-b664fa9fbe2b","isSidechain":false,"promptId":"ef87ba8e-b720-4564-ba8c-436732d82767","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01NNgwK9fStVf9zBtYvji9Rd","type":"tool_result","content":"Found 1 file\nsrc/renderer/components/SessionEditor.tsx"}]},"uuid":"0531b90d-0d8f-4031-913b-db16e3311355","timestamp":"2026-04-14T21:57:56.775Z","toolUseResult":{"mode":"files_with_matches","filenames":["src/renderer/components/SessionEditor.tsx"],"numFiles":1},"sourceToolAssistantUUID":"f5aa15b6-1983-4196-98d5-b664fa9fbe2b","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"0531b90d-0d8f-4031-913b-db16e3311355","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_01MRFMTM2HFme9rFAWEXE22g","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01A8Au3inUxbK9Sqp9XPPSmL","name":"Grep","input":{"pattern":"compress|compaction|compact","-i":true,"glob":"*.ts","head_limit":30},"caller":{"type":"direct"}}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":3,"cache_creation_input_tokens":16607,"cache_read_input_tokens":11961,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":16607},"output_tokens":33,"service_tier":"standard","inference_geo":"not_available"}},"requestId":"req_011Ca4QsE4fTg6DPxJknkm3V","type":"assistant","uuid":"dfced0b8-605f-4c5d-a91d-ef5e8724be2e","timestamp":"2026-04-14T21:57:57.506Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"dfced0b8-605f-4c5d-a91d-ef5e8724be2e","isSidechain":false,"type":"progress","data":{"type":"hook_progress","hookEvent":"PostToolUse","hookName":"PostToolUse:Grep","command":"callback"},"parentToolUseID":"toolu_01A8Au3inUxbK9Sqp9XPPSmL","toolUseID":"toolu_01A8Au3inUxbK9Sqp9XPPSmL","timestamp":"2026-04-14T21:57:57.530Z","uuid":"9a6cc76d-38b7-40f3-8ce2-e32633de4770","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"dfced0b8-605f-4c5d-a91d-ef5e8724be2e","isSidechain":false,"promptId":"ef87ba8e-b720-4564-ba8c-436732d82767","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01A8Au3inUxbK9Sqp9XPPSmL","type":"tool_result","content":"Found 3 files limit: 30, offset: 0\nsrc/renderer/env.d.ts\nsrc/main/ipc/llm-handlers.ts\nsrc/main/llm/operations.ts"}]},"uuid":"cd5784fa-46a3-4e24-9a61-168b71dd0b79","timestamp":"2026-04-14T21:57:57.529Z","toolUseResult":{"mode":"files_with_matches","filenames":["src/renderer/env.d.ts","src/main/ipc/llm-handlers.ts","src/main/llm/operations.ts"],"numFiles":3,"appliedLimit":30},"sourceToolAssistantUUID":"dfced0b8-605f-4c5d-a91d-ef5e8724be2e","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"cd5784fa-46a3-4e24-9a61-168b71dd0b79","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_01BYnz5XibtL9eBv5UhXMkCz","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01DSdReymP8cX55RPa7Dtw8u","name":"Grep","input":{"pattern":"compress|compaction|compact|smart.?compress","-i":true,"glob":"*.{ts,tsx}","output_mode":"content","-n":true},"caller":{"type":"direct"}}],"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1,"cache_creation_input_tokens":347,"cache_read_input_tokens":28568,"output_tokens":138,"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":347,"ephemeral_5m_input_tokens":0},"inference_geo":""}},"requestId":"req_011Ca4QsdMdjvJPuq8ZSf4gN","type":"assistant","uuid":"131f120d-14c5-4707-be71-b38f712a56ae","timestamp":"2026-04-14T21:58:00.697Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"131f120d-14c5-4707-be71-b38f712a56ae","isSidechain":false,"type":"progress","data":{"type":"hook_progress","hookEvent":"PostToolUse","hookName":"PostToolUse:Grep","command":"callback"},"parentToolUseID":"toolu_01DSdReymP8cX55RPa7Dtw8u","toolUseID":"toolu_01DSdReymP8cX55RPa7Dtw8u","timestamp":"2026-04-14T21:58:00.714Z","uuid":"f9c8caea-6259-43ee-bf81-64a23c9772a2","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"131f120d-14c5-4707-be71-b38f712a56ae","isSidechain":false,"promptId":"ef87ba8e-b720-4564-ba8c-436732d82767","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01DSdReymP8cX55RPa7Dtw8u","type":"tool_result","content":"src/main/llm/operations.ts:5:export interface CompressSuggestion {\nsrc/main/llm/operations.ts:19: * Analyze messages and suggest which ones to remove for compression.\nsrc/main/llm/operations.ts:22:export async function suggestCompression(\nsrc/main/llm/operations.ts:24:): Promise<CompressSuggestion[]> {\nsrc/main/llm/operations.ts:25:  // Build a compact representation of the conversation for the LLM\nsrc/renderer/components/SessionEditor.tsx:583:  const handleSmartCompress = useCallback(async () => {\nsrc/renderer/components/SessionEditor.tsx:813:                  onClick={handleSmartCompress}"}]},"uuid":"8bc87352-a404-4dc1-aa02-e5816f20d075","timestamp":"2026-04-14T21:58:00.713Z","toolUseResult":{"mode":"content","numFiles":0,"filenames":[],"numLines":7},"sourceToolAssistantUUID":"131f120d-14c5-4707-be71-b38f712a56ae","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"8bc87352-a404-4dc1-aa02-e5816f20d075","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_01QupSjjegdFvZdUwZyqdcHr","type":"message","role":"assistant","content":[{"type":"text","text":"Let me read the key files to understand the full implementation."}],"stop_reason":null,"stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1,"cache_creation_input_tokens":827,"cache_read_input_tokens":28915,"cache_creation":{"ephemeral_5m_input_tokens":0,"ephemeral_1h_input_tokens":827},"output_tokens":3,"service_tier":"standard","inference_geo":"not_available"}},"requestId":"req_011Ca4Qsrd6mPCp7EMn7Zisf","type":"assistant","uuid":"d49858a2-81fa-4ca8-876a-23a07610d71a","timestamp":"2026-04-14T21:58:05.893Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"61c2ca2f-aeb5-4e5e-ae5e-b09ff2ef43b7","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_01XQkt7CzF16R2AonDrPTL8T","type":"message","role":"assistant","content":[{"type":"text","text":"Here's what **Smart Compress** currently does:\n\n## Flow\n\n1. **UI** — A violet button in `SessionEditor.tsx:813` labeled \"Smart Compress\". When clicked, it calls `handleSmartCompress` (line 583).\n\n2. **IPC** — The handler sends all current `MessageSummary[]` objects over `llm:suggest-compression` to the main process (`llm-handlers.ts:9`).\n\n3. **LLM call** — `suggestCompression()` in `operations.ts:22` builds a compact text representation of every message (index, type, token count, flags, 120-char preview) and sends it to the **OpenAI API** (via `client.ts`) with a system prompt that asks the model to identify removable messages.\n\n4. **Prompt logic** — The system prompt tells the LLM to look for:\n   - Thinking-only messages\n   - Tool results already summarized by the assistant later\n   - Redundant retry loops (keep only the final success)\n   - System/info noise\n   - Large tool outputs where the assistant already extracted what mattered\n\n   It tells the LLM to **preserve**: user instructions, assistant conclusions/plans, un-summarized tool results, and context-establishing messages.\n\n5. **Response** — The LLM returns a JSON array of `{indices: number[], reason: string}` groups. The code regex-extracts the JSON from the response.\n\n6. **UI update** — Back in the renderer, the suggested indices get added to `markedForRemoval` (a `Set<number>` in the session store). A status message shows how many messages were marked and why. The user can then review and confirm before actually removing them.\n\n## Key characteristics\n\n- **Non-destructive** — It only *marks* messages; it doesn't delete them until the user confirms.\n- **Additive** — It adds to the existing `markedForRemoval` set, preserving any messages the user already marked manually.\n- **OpenAI-only** — Uses the OpenAI client (`client.ts`) with `settings.openaiModel` and `settings.openaiApiKey`. No other providers supported yet.\n- **Preview-based** — The LLM only sees the first 120 chars of each message preview, not full content, so its analysis is based on summaries rather than full text.\n\nThere's also a sibling feature **Topic Focus** (`segmentTopics`) that segments the conversation by topic and marks off-topic segments for removal, using a similar LLM call pattern.\n\nWhat would you like to change or improve about it?"}],"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1,"cache_creation_input_tokens":3426,"cache_read_input_tokens":29742,"output_tokens":601,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":3426,"ephemeral_5m_input_tokens":0},"inference_geo":"","iterations":[],"speed":"standard"}},"requestId":"req_011Ca4QtcnBcy3CbAoNemj18","type":"assistant","uuid":"4e92cea5-8502-4531-bf22-6a9da6c4f94e","timestamp":"2026-04-14T21:58:32.450Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"222d361b-ab9e-450e-bc2c-472530a392f7","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_01HKV54rMDUpYTeqAaErj772","type":"message","role":"assistant","content":[{"type":"text","text":"Now I have a thorough understanding. Let me formulate the analysis.\n\n---\n\nOkay, I've studied all three docs and the full implementation. Here's the core analysis:\n\n## Fundamental Misconceptions\n\nThe current \"Smart Compress\" approach is built on a model where **you delete messages from the conversation to save tokens**. The Anthropic API docs reveal that this is solving the wrong problem — the API provides three server-side primitives that handle context management properly:\n\n### 1. **Compaction** (the primary answer)\nThe docs say explicitly: *\"server-side compaction is the primary strategy for context management.\"* Compaction automatically summarizes older conversation turns on the server side when approaching the context window limit. The client sends the full conversation, and the API handles it. **You don't need to delete messages yourself.**\n\n### 2. **Prompt Caching** (cost reduction, not compression)\nThe current feature treats \"compression\" as removing messages to fit more into context. But the actual cost/performance problem is solved by **caching**: prefix-based caching means the earlier parts of conversation don't get re-processed on each turn. The cache breakpoint moves forward automatically. Cost drops to 10% for cached prefixes. **The expensive problem isn't context size — it's re-processing the same prefix.**\n\n### 3. **Memory Tool** (persistence across sessions)\nFor information that needs to survive beyond a single context window, the API provides a memory tool — a structured file-based system where Claude stores and retrieves information across sessions. This replaces the need to manually curate what stays in context. **You don't need to decide what to keep — Claude does, via memory.**\n\n### 4. **Context Editing** (surgical, not bulk)\nThe docs describe context editing as tool result clearing and thinking block clearing — not bulk message removal. Thinking blocks are automatically stripped by the API. Tool results can be cleared after they've been consumed. These are **structural** operations, not LLM-driven heuristic removal.\n\n## What's Wrong with the Current Approach\n\n| Current Assumption | Reality per API Docs |\n|---|---|\n| We must delete messages to manage context | Compaction handles this server-side automatically |\n| An LLM should decide what to remove | The API's compaction uses Claude itself to summarize, with full context |\n| Seeing 120-char previews is enough to judge | The API has full content when it compacts — our LLM sees only previews |\n| OpenAI should power compression analysis | This is an Anthropic session tool — should use Anthropic primitives |\n| Token count is the cost driver | Prompt caching makes repeated prefixes 90% cheaper |\n| Users manually curate context | Memory tool + compaction automate this |\n\n## Proposed Changes\n\nHere's what I'd suggest the Context Workshop should actually provide:\n\n1. **Replace \"Smart Compress\" with compaction awareness** — Show users their compaction state, when it will trigger, and what was summarized. Don't try to replicate what the server does better.\n\n2. **Add prompt caching visualization** — Show which parts of the conversation are cached, cache hit rates, and actual cost savings. Help users understand that the first N messages cost almost nothing on subsequent turns.\n\n3. **Surface memory tool integration** — If the session uses memory, show what's in memory, what would survive a context reset, and what wouldn't. This replaces the \"Topic Focus\" feature with something that actually persists.\n\n4. **Keep Auto-Trim but reframe it** — The heuristic-based auto-trim (removing noise/loops) still has value as a *session hygiene* tool, but frame it as cleaning up the session file, not as \"compression.\"\n\n5. **Replace the OpenAI client** — If Smart Compress stays in some form, it should use the Anthropic SDK, not OpenAI. This is a tool for managing Anthropic sessions.\n\n6. **Context editing instead of message deletion** — Instead of removing whole messages, support the API's actual primitives: clearing tool results that have been consumed, stripping thinking blocks, etc.\n\n---\n\nWant me to proceed with planning and implementing these changes, or do you want to discuss the direction first?"}],"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1,"cache_creation_input_tokens":2915,"cache_read_input_tokens":58759,"output_tokens":950,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":2915,"ephemeral_5m_input_tokens":0},"inference_geo":"","iterations":[],"speed":"standard"}},"requestId":"req_011Ca4ZhuBeyk5Bcn6Wm12XV","type":"assistant","uuid":"e65ff240-8911-462c-957b-b87dc7409a37","timestamp":"2026-04-14T23:54:18.611Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"b2dfaed6-c968-4df6-8c41-6d2c690a264c","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_019DU2kBWdesTsNG87E5B2Bq","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01B2Xc26VN4v2LohuMs3QyLu","name":"Read","input":{"file_path":"/Users/bmf/code/promptctl/src/renderer/pages/Settings.tsx","offset":80,"limit":60},"caller":{"type":"direct"}}],"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":3,"cache_creation_input_tokens":318,"cache_read_input_tokens":90914,"output_tokens":121,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":318,"ephemeral_5m_input_tokens":0},"inference_geo":"","iterations":[],"speed":"standard"}},"requestId":"req_011Ca4xzXsuBLCY8V1gt5HMo","type":"assistant","uuid":"75546be5-2101-4c6f-9cb5-b8962701636c","timestamp":"2026-04-15T04:59:13.127Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"75546be5-2101-4c6f-9cb5-b8962701636c","isSidechain":false,"promptId":"7e06047d-d475-43e4-97a1-fe2e90d74d4e","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01B2Xc26VN4v2LohuMs3QyLu","type":"tool_result","content":"    80→      <div className=\"space-y-6 rounded-xl border border-neutral-800 bg-neutral-900 p-6\">\n    81→        <div>\n    82→          <h3 className=\"text-lg font-semibold text-neutral-200\">\n    83→            OpenAI API\n    84→          </h3>\n    85→          <p className=\"mt-1 text-sm text-neutral-500\">\n    86→            Used for LLM-powered session compression and topic focusing in\n    87→            Context Workshop.\n    88→          </p>\n    89→        </div>\n    90→\n    91→        {/* API Key */}\n    92→        <div className=\"space-y-1.5\">\n    93→          <label className=\"block text-sm font-medium text-neutral-300\">\n    94→            API Key\n    95→          </label>\n    96→          <input\n    97→            type=\"password\"\n    98→            value={settings.openaiApiKey}\n    99→            onChange={(e) =>\n   100→              setSettings((s) => ({ ...s, openaiApiKey: e.target.value }))\n   101→            }\n   102→            placeholder=\"sk-...\"\n   103→            className=\"w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-600 outline-none focus:border-neutral-500\"\n   104→          />\n   105→          <p className=\"text-sm text-neutral-600\">\n   106→            Stored locally at ~/.promptctl/settings.json. Never sent anywhere\n   107→            except the OpenAI API.\n   108→          </p>\n   109→        </div>\n   110→\n   111→        {/* Model */}\n   112→        <div className=\"space-y-1.5\">\n   113→          <label className=\"block text-sm font-medium text-neutral-300\">\n   114→            Model\n   115→          </label>\n   116→          <select\n   117→            value={settings.openaiModel}\n   118→            onChange={(e) =>\n   119→              setSettings((s) => ({ ...s, openaiModel: e.target.value }))\n   120→            }\n   121→            className=\"w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-500\"\n   122→          >\n   123→            {MODELS.map((m) => (\n   124→              <option key={m} value={m}>\n   125→                {m}\n   126→              </option>\n   127→            ))}\n   128→          </select>\n   129→          <p className=\"text-sm text-neutral-600\">\n   130→            Used for compression analysis and topic segmentation. Smaller models\n   131→            are faster and cheaper.\n   132→          </p>\n   133→        </div>\n   134→\n   135→        {/* Actions */}\n   136→        <div className=\"flex items-center gap-3\">\n   137→          <button\n   138→            onClick={handleSave}\n   139→            className=\"rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500\""}]},"uuid":"25f9f8c9-9a1e-4925-8566-730dfb929f8a","timestamp":"2026-04-15T04:59:13.144Z","toolUseResult":{"type":"text","file":{"filePath":"/Users/bmf/code/promptctl/src/renderer/pages/Settings.tsx","content":"      <div className=\"space-y-6 rounded-xl border border-neutral-800 bg-neutral-900 p-6\">\n        <div>\n          <h3 className=\"text-lg font-semibold text-neutral-200\">\n            OpenAI API\n          </h3>\n          <p className=\"mt-1 text-sm text-neutral-500\">\n            Used for LLM-powered session compression and topic focusing in\n            Context Workshop.\n          </p>\n        </div>\n\n        {/* API Key */}\n        <div className=\"space-y-1.5\">\n          <label className=\"block text-sm font-medium text-neutral-300\">\n            API Key\n          </label>\n          <input\n            type=\"password\"\n            value={settings.openaiApiKey}\n            onChange={(e) =>\n              setSettings((s) => ({ ...s, openaiApiKey: e.target.value }))\n            }\n            placeholder=\"sk-...\"\n            className=\"w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-600 outline-none focus:border-neutral-500\"\n          />\n          <p className=\"text-sm text-neutral-600\">\n            Stored locally at ~/.promptctl/settings.json. Never sent anywhere\n            except the OpenAI API.\n          </p>\n        </div>\n\n        {/* Model */}\n        <div className=\"space-y-1.5\">\n          <label className=\"block text-sm font-medium text-neutral-300\">\n            Model\n          </label>\n          <select\n            value={settings.openaiModel}\n            onChange={(e) =>\n              setSettings((s) => ({ ...s, openaiModel: e.target.value }))\n            }\n            className=\"w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-500\"\n          >\n            {MODELS.map((m) => (\n              <option key={m} value={m}>\n                {m}\n              </option>\n            ))}\n          </select>\n          <p className=\"text-sm text-neutral-600\">\n            Used for compression analysis and topic segmentation. Smaller models\n            are faster and cheaper.\n          </p>\n        </div>\n\n        {/* Actions */}\n        <div className=\"flex items-center gap-3\">\n          <button\n            onClick={handleSave}\n            className=\"rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500\"","numLines":60,"startLine":80,"totalLines":165}},"sourceToolAssistantUUID":"75546be5-2101-4c6f-9cb5-b8962701636c","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"7c9bb009-2901-4b9c-8248-d231e2730aca","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_016v3LUhK6iPo2jxHuwAARPi","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01Jn6FgezCZesz5VfoEYyxqM","name":"Bash","input":{"command":"npx vitest run src/main/sessions/versioning.integration.test.ts 2>&1 | tail -30","description":"Run integration tests","timeout":60000},"caller":{"type":"direct"}}],"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1,"cache_creation_input_tokens":9320,"cache_read_input_tokens":311067,"output_tokens":148,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":0,"ephemeral_5m_input_tokens":9320},"inference_geo":"","iterations":[],"speed":"standard"}},"requestId":"req_011Ca7484YuVqkZ4bYBViJuk","type":"assistant","uuid":"8b20d836-b61c-43e9-9492-35d4abe469ba","timestamp":"2026-04-16T07:27:40.529Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"8b20d836-b61c-43e9-9492-35d4abe469ba","isSidechain":false,"promptId":"d5a4da53-15c5-4874-9342-152de165534b","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01Jn6FgezCZesz5VfoEYyxqM","type":"tool_result","content":"       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:110:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n2. saveSession recording records label with correct count for multiple removals\n   Error: No adapter registered for provider: claude\n       at getProvider (/Users/bmf/code/promptctl/src/main/sessions/registry.ts:15:11)\n       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:127:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n3. saveSession recording subsequent save creates v3 (no second baseline)\n   Error: No adapter registered for provider: claude\n       at getProvider (/Users/bmf/code/promptctl/src/main/sessions/registry.ts:15:11)\n       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:140:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n4. undo restores file content to v1 and decrements head\n   Error: No adapter registered for provider: claude\n       at getProvider (/Users/bmf/code/promptctl/src/main/sessions/registry.ts:15:11)\n       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:163:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n5. undo returns null at v1 (no undo possible)\n   Error: No adapter registered for provider: claude\n       at getProvider (/Users/bmf/code/promptctl/src/main/sessions/registry.ts:15:11)\n       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:181:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n\n... +15 more failures\n[full output: ~/Library/Application Support/rtk/tee/1776324461_vitest_run.log]","is_error":false}]},"uuid":"c32817da-3a60-4525-828a-013b51fb0b12","timestamp":"2026-04-16T07:27:41.389Z","toolUseResult":{"stdout":"       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:110:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n2. saveSession recording records label with correct count for multiple removals\n   Error: No adapter registered for provider: claude\n       at getProvider (/Users/bmf/code/promptctl/src/main/sessions/registry.ts:15:11)\n       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:127:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n3. saveSession recording subsequent save creates v3 (no second baseline)\n   Error: No adapter registered for provider: claude\n       at getProvider (/Users/bmf/code/promptctl/src/main/sessions/registry.ts:15:11)\n       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:140:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n4. undo restores file content to v1 and decrements head\n   Error: No adapter registered for provider: claude\n       at getProvider (/Users/bmf/code/promptctl/src/main/sessions/registry.ts:15:11)\n       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:163:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n5. undo returns null at v1 (no undo possible)\n   Error: No adapter registered for provider: claude\n       at getProvider (/Users/bmf/code/promptctl/src/main/sessions/registry.ts:15:11)\n       at loadSession (/Users/bmf/code/promptctl/src/main/sessions/editor.ts:48:19)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:181:11\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n\n... +15 more failures\n[full output: ~/Library/Application Support/rtk/tee/1776324461_vitest_run.log]","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false},"sourceToolAssistantUUID":"8b20d836-b61c-43e9-9492-35d4abe469ba","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"e0738901-d4f3-4483-8d9f-4c39795d1866","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_015SdoA65Uk2LVLnB4MGezSx","type":"message","role":"assistant","content":[{"type":"tool_use","id":"toolu_01QU5yGenBNdAnMpx5Xsg96z","name":"Bash","input":{"command":"npx vitest run 2>&1 | tail -30","description":"Run full test suite","timeout":120000},"caller":{"type":"direct"}}],"stop_reason":"tool_use","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1,"cache_creation_input_tokens":370,"cache_read_input_tokens":414843,"output_tokens":148,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":370,"ephemeral_5m_input_tokens":0},"inference_geo":"","iterations":[],"speed":"standard"}},"requestId":"req_011Ca7G5H1pD6pE3Z6tfnRgR","type":"assistant","uuid":"df2e761a-4e8c-4e2a-8da9-6a6d7b725ce3","timestamp":"2026-04-16T10:04:24.375Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"df2e761a-4e8c-4e2a-8da9-6a6d7b725ce3","isSidechain":false,"promptId":"968946d3-db90-48ed-a2ac-ba162219326a","type":"user","message":{"role":"user","content":[{"tool_use_id":"toolu_01QU5yGenBNdAnMpx5Xsg96z","type":"tool_result","content":"PASS (181) FAIL (5)\n\n1. clearToolResults version recording truncate strategy records version with correct label\n   AssertionError: expected [ { idx: 1, …(4) } ] to have a length of 2 but got 1\n       at Proxy.<anonymous> (file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+expect@4.1.4/node_modules/@vitest/expect/dist/index.js:1389:20)\n       at Proxy.<anonymous> (file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+expect@4.1.4/node_modules/@vitest/expect/dist/index.js:1156:15)\n       at Proxy.methodWrapper (file:///Users/bmf/Library/pnpm/global/5/.pnpm/chai@6.2.2/node_modules/chai/index.js:1700:25)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:275:27\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n2. clearToolResults version recording truncate persists the change to disk\n   AssertionError: expected '{\"type\":\"user\",\"uuid\":\"tr1\",\"timestam…' to contain 'tokens omitted'\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:288:25\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n3. clearToolResults version recording summarize strategy records version with correct label\n   TypeError: Cannot read properties of undefined (reading 'label')\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:305:29\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n4. listVersions metadata returns ordered versions with correct labels and head after multiple ops\n   AssertionError: expected [ 'Initial snapshot', …(1) ] to deeply equal [ 'Initial snapshot', …(2) ]\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:368:47\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n5. clearToolResults — truncate truncates large tool results\n   AssertionError: expected [] to have a length of 1 but got +0\n       at Proxy.<anonymous> (file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+expect@4.1.4/node_modules/@vitest/expect/dist/index.js:1389:20)\n       at Proxy.<anonymous> (file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+expect@4.1.4/node_modules/@vitest/expect/dist/index.js:1156:15)\n       at Proxy.methodWrapper (file:///Users/bmf/Library/pnpm/global/5/.pnpm/chai@6.2.2/node_modules/chai/index.js:1700:25)\n       at /Users/bmf/code/promptctl/src/main/sessions/claude/adapter.test.ts:497:28\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n[full output: ~/Library/Application Support/rtk/tee/1776333867_vitest_run.log]","is_error":false}]},"uuid":"f40bb5c3-6702-4a9a-b92a-2bfda6bbf762","timestamp":"2026-04-16T10:04:27.585Z","toolUseResult":{"stdout":"PASS (181) FAIL (5)\n\n1. clearToolResults version recording truncate strategy records version with correct label\n   AssertionError: expected [ { idx: 1, …(4) } ] to have a length of 2 but got 1\n       at Proxy.<anonymous> (file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+expect@4.1.4/node_modules/@vitest/expect/dist/index.js:1389:20)\n       at Proxy.<anonymous> (file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+expect@4.1.4/node_modules/@vitest/expect/dist/index.js:1156:15)\n       at Proxy.methodWrapper (file:///Users/bmf/Library/pnpm/global/5/.pnpm/chai@6.2.2/node_modules/chai/index.js:1700:25)\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:275:27\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n2. clearToolResults version recording truncate persists the change to disk\n   AssertionError: expected '{\"type\":\"user\",\"uuid\":\"tr1\",\"timestam…' to contain 'tokens omitted'\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:288:25\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n3. clearToolResults version recording summarize strategy records version with correct label\n   TypeError: Cannot read properties of undefined (reading 'label')\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:305:29\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n4. listVersions metadata returns ordered versions with correct labels and head after multiple ops\n   AssertionError: expected [ 'Initial snapshot', …(1) ] to deeply equal [ 'Initial snapshot', …(2) ]\n       at /Users/bmf/code/promptctl/src/main/sessions/versioning.integration.test.ts:368:47\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n5. clearToolResults — truncate truncates large tool results\n   AssertionError: expected [] to have a length of 1 but got +0\n       at Proxy.<anonymous> (file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+expect@4.1.4/node_modules/@vitest/expect/dist/index.js:1389:20)\n       at Proxy.<anonymous> (file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+expect@4.1.4/node_modules/@vitest/expect/dist/index.js:1156:15)\n       at Proxy.methodWrapper (file:///Users/bmf/Library/pnpm/global/5/.pnpm/chai@6.2.2/node_modules/chai/index.js:1700:25)\n       at /Users/bmf/code/promptctl/src/main/sessions/claude/adapter.test.ts:497:28\n       at file:///Users/bmf/Library/pnpm/global/5/.pnpm/@vitest+runner@4.1.4/node_modules/@vitest/runner/dist/chunk-artifact.js:1903:20\n[full output: ~/Library/Application Support/rtk/tee/1776333867_vitest_run.log]","stderr":"","interrupted":false,"isImage":false,"noOutputExpected":false},"sourceToolAssistantUUID":"df2e761a-4e8c-4e2a-8da9-6a6d7b725ce3","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+{"parentUuid":"deb994fb-a9fa-4e97-8cb1-d8efb9cf1049","isSidechain":false,"message":{"model":"claude-opus-4-6","id":"msg_01PESbudPdv3NWcdcFZUeMAu","type":"message","role":"assistant","content":[{"type":"text","text":"All 191 tests pass.\n\n`★ Insight ─────────────────────────────────────`\nThe `summarizeContent` addition is a great example of separating \"stateful loading\" from \"stateless analysis.\" Before, computing token totals for the version baseline required calling `loadSession` — which mutated the adapter's loaded state. That was a hidden coupling that bit us when in-memory edits got discarded mid-flow. The new state-free `summarizeContent(content)` lets the coordinator inspect arbitrary content (file on disk, future versions, etc.) without disrupting active editing.\n`─────────────────────────────────────────────────`\n\n## Summary of tweaks\n\n**1. Floating notification toast** (`SessionEditor.tsx`)\n- Removed inline status div from inside editor pane\n- Added fixed-position toast at bottom-right with spinner when working\n- Persists 8s for fast operations\n- New tests: `Status toast notifications` (2 tests)\n\n**2. Diff view shows what changed** (`DiffViewer.tsx`)\n- Modified rows now display **prominent token delta** (`8500 → 200 tok (−8300 tokens)`) with green/red color\n- Type badge inline with the modification\n- Expandable \"Show content\" reveals full before/after side-by-side with red/green backgrounds\n- New tests: token delta visibility, color-coded delta, expandable content\n\n**3. Truncation cutoff raised to 1000 tokens** (`claude/adapter.ts`)\n- `MIN_TOKENS_TO_CLEAR = 1000` (was 200)\n- Tool results below threshold show as `skippedTooSmall` in the result\n- Documented as a future configurability TODO\n- Updated tests use larger fixtures and verify skip stats\n\n**4. Last 3 tool results protected** (`claude/adapter.ts`)\n- `KEEP_LAST_N = 3` — most recent tool results never cleared\n- Identified by walking `loadedParsed` for `tool_result` blocks in order\n- Returned as `skippedProtected` count\n- New test: `preserves the last 3 tool results (protected tail)`\n\n**5. Tool result preview now shows actual content** (`claude/adapter.ts`)\n- `extractTextPreview` now extracts tool_result block content (was showing `[user]`)\n- Makes diffs meaningful for truncations\n- New test: `shows tool result content as preview (truncated)`\n\n**6. Skip stats surfaced to UI**\n- Added `ClearToolResultsResult` type carrying `updated[] + skippedTooSmall + skippedProtected`\n- Status toast explains every outcome: `\"Truncated 5 tool results · 2 skipped (too small) · 3 preserved (most recent)\"`\n- Editor coordinator only baselines/records a version when something actually changed (no useless empty edits in history)\n\n**7. State-free summarization** (`adapter.ts` interface)\n- Added `summarizeContent(content)` method to `ProviderAdapter`\n- Implemented on both Claude and Gemini adapters\n- Replaced destructive `loadSession`-for-token-counting in editor coordinator\n- Fixed a real bug where `clearToolResults` followed by version recording was discarding in-memory edits\n\n**Total: 191 tests passing, +5 new test cases over previous run.**"}],"stop_reason":"end_turn","stop_sequence":null,"stop_details":null,"usage":{"input_tokens":1,"cache_creation_input_tokens":188,"cache_read_input_tokens":450385,"output_tokens":1105,"server_tool_use":{"web_search_requests":0,"web_fetch_requests":0},"service_tier":"standard","cache_creation":{"ephemeral_1h_input_tokens":188,"ephemeral_5m_input_tokens":0},"inference_geo":"","iterations":[],"speed":"standard"}},"requestId":"req_011Ca7GXX7rzA6hzqGaTHm5b","type":"assistant","uuid":"5bc7b4bd-7642-46df-b34f-185222992d57","timestamp":"2026-04-16T10:10:38.508Z","userType":"external","entrypoint":"cli","cwd":"/Users/bmf/code/promptctl","sessionId":"04c41302-8067-46ca-ac9c-74712746fcf9","version":"2.1.81","gitBranch":"master","slug":"staged-jumping-orbit"}
+  </script>
+
+<script>
+/* ==================================================================
+   Playground logic — shared renderers, classifier, 4 style renderers
+   ================================================================== */
+
+const SAMPLE_LINES = document.getElementById('sample-jsonl')
+  .textContent.trim().split('\n')
+  .filter(s => s.trim())
+  .map(s => JSON.parse(s));
+
+const state = {
+  style: 'thread',
+  density: 'compact',
+  showMeta: true,
+  showHooks: false,
+  showThinking: false,
+  showSnapshots: false,
+  lines: SAMPLE_LINES,
+  expanded: new Set(), // row ids that are currently expanded
+};
+
+/* Build a stable per-row id for click-expand tracking. Prefer uuid,
+   fall back to a synthetic id based on line index + type. */
+function rowId(line, idx) {
+  return line.uuid || line.messageId || ('idx-' + idx + '-' + (line.type || 'x'));
+}
+
+/* --- small utilities --- */
+const esc = (s) => String(s ?? '').replace(/[&<>"']/g, c => ({
+  '&':'&amp;','<':'&lt;','>':'&gt;','"':'&quot;',"'":'&#39;'
+}[c]));
+const truncate = (s, n) => {
+  s = String(s ?? '');
+  return s.length <= n ? s : s.slice(0, n - 1) + '…';
+};
+
+/* ==================================================================
+   FIELD RENDERERS — the visual vocabulary.
+   One function per field-type. Used by all 4 styles.
+   ================================================================== */
+
+function fmtRelTime(iso, now = Date.now()) {
+  const t = new Date(iso).getTime();
+  if (Number.isNaN(t)) return '';
+  const d = Math.max(0, (now - t) / 1000);
+  if (d < 60) return Math.floor(d) + 's';
+  if (d < 3600) return Math.floor(d/60) + 'm';
+  if (d < 86400) return Math.floor(d/3600) + 'h';
+  return Math.floor(d/86400) + 'd';
+}
+function fmtClockTime(iso) {
+  const d = new Date(iso);
+  if (Number.isNaN(d.getTime())) return '';
+  return [d.getHours(), d.getMinutes(), d.getSeconds()]
+    .map(n => String(n).padStart(2, '0'))
+    .join(':');
+}
+
+function renderTime(iso, mode = 'clock') {
+  if (!iso) return '';
+  const display = mode === 'rel' ? fmtRelTime(iso) + ' ago' : fmtClockTime(iso);
+  return `<span class="mono tt time" data-tip="${esc(iso)}">${esc(display)}</span>`;
+}
+function renderId(uuid, len = 6) {
+  if (!uuid) return '';
+  const short = String(uuid).slice(0, len);
+  return `<span class="mono tt id" data-tip="${esc(uuid)}">${esc(short)}</span>`;
+}
+function renderPath(cwd) {
+  if (!cwd) return '';
+  const parts = cwd.split('/');
+  const tail = parts.slice(-2).join('/');
+  return `<span class="mono tt path" data-tip="${esc(cwd)}">${esc(tail)}</span>`;
+}
+function renderPill(label, kind = '') {
+  return `<span class="pill pill-${esc(kind)}">${esc(label)}</span>`;
+}
+function renderTokens(usage) {
+  if (!usage) return '';
+  const inp = usage.input_tokens ?? 0;
+  const out = usage.output_tokens ?? 0;
+  const cr = usage.cache_read_input_tokens ?? 0;
+  const cc = usage.cache_creation_input_tokens ?? 0;
+  const parts = [
+    `<span class="tok-in">${inp}</span>`,
+    `<span class="tok-arrow">→</span>`,
+    `<span class="tok-out">${out}</span>`
+  ];
+  if (cr || cc) {
+    const title = `cache read ${cr} / cache create ${cc}`;
+    parts.push(`<span class="tok-cache tt" data-tip="${esc(title)}">(${kfmt(cr)}r/${kfmt(cc)}c)</span>`);
+  }
+  return `<span class="mono tokens">${parts.join('')}</span>`;
+}
+function kfmt(n) {
+  if (n < 1000) return String(n);
+  return (n / 1000).toFixed(n < 10000 ? 1 : 0) + 'k';
+}
+
+/* XML tag highlighting — pair-aware.
+   <tag>content</tag> → <span class="xwrap" data-tip="<tag>">content</span>
+     The enclosed text is colored ochre; hovering shows the tag name.
+   Orphan/unclosed tags fall back to compact chevron markers (.xtag).
+   Non-nested pairs (same tag name) are the expected case for Claude
+   session content — command-name, local-command-caveat, etc. */
+function renderXMLContent(text) {
+  if (!text) return '';
+  const pairRe = /<(\w[\w-]*)\b[^>]*>([\s\S]*?)<\/\1>/g;
+  let out = '';
+  let last = 0;
+  let m;
+  while ((m = pairRe.exec(text)) !== null) {
+    out += renderOrphanTags(text.slice(last, m.index));
+    const openTag = m[0].slice(0, m[0].indexOf('>') + 1);
+    const name = m[1];
+    const inner = m[2];
+    const tipText = openTag + '...</' + name + '>';
+    // Render inner content (recursing once to catch nested children)
+    const innerRendered = renderXMLContent(inner);
+    out += `<span class="xwrap" data-tip="${esc(tipText)}">${innerRendered}</span>`;
+    last = m.index + m[0].length;
+  }
+  out += renderOrphanTags(text.slice(last));
+  return out;
+}
+function renderOrphanTags(text) {
+  if (!text) return '';
+  const re = /<(\/?)([\w-]+)([^>]*?)>/g;
+  let out = '';
+  let last = 0;
+  let m;
+  while ((m = re.exec(text)) !== null) {
+    out += esc(text.slice(last, m.index));
+    const slash = m[1];
+    const cls = slash ? 'xtag xtag-close' : 'xtag xtag-open';
+    const glyph = slash ? '›' : '‹';
+    out += `<span class="${cls}" data-tip="${esc(m[0])}">${glyph}</span>`;
+    last = m.index + m[0].length;
+  }
+  out += esc(text.slice(last));
+  return out;
+}
+
+/* Tool input — compact key:value list. Tooltip shows structured k:v text,
+   NEVER a JSON blob. Visible chips show first 3 args + overflow count. */
+function renderToolInput(input) {
+  if (!input || typeof input !== 'object') return '';
+  const entries = Object.entries(input).filter(([k]) => k !== 'caller');
+  const SHOW = 3;
+  const fmtVisible = (v) => {
+    if (typeof v === 'string') return v.length > 32 ? '"' + v.slice(0, 32) + '…"' : '"' + v + '"';
+    if (typeof v === 'boolean') return v ? '✓' : '✗';
+    if (typeof v === 'number') return String(v);
+    if (Array.isArray(v)) return '[' + v.length + ']';
+    return '{…}';
+  };
+  const fmtTip = (v) => {
+    if (v === null || v === undefined) return '·';
+    if (typeof v === 'string') return v;
+    if (typeof v === 'boolean') return v ? '✓' : '✗';
+    if (typeof v === 'number') return String(v);
+    if (Array.isArray(v)) return '[' + v.length + ' items]';
+    return '{' + Object.keys(v).length + ' keys}';
+  };
+  const short = entries.slice(0, SHOW).map(([k, v]) =>
+    `<span class="arg"><span class="arg-k">${esc(k)}</span><span class="arg-eq">:</span><span class="arg-v">${esc(fmtVisible(v))}</span></span>`
+  ).join(' ');
+  const more = entries.length > SHOW ? ` <span class="arg-more">+${entries.length - SHOW}</span>` : '';
+  const tipText = entries.map(([k, v]) => k + ': ' + fmtTip(v)).join('\n');
+  return `<span class="mono tool-input" data-tip="${esc(tipText)}">${short}${more}</span>`;
+}
+
+function renderFlags(l) {
+  const out = [];
+  if (l.isSidechain) out.push('<span class="flag flag-sidechain" data-tip="isSidechain">⇢</span>');
+  if (l.isMeta) out.push('<span class="flag flag-meta" data-tip="isMeta">§</span>');
+  if (l.permissionMode) out.push(`<span class="flag flag-perm" data-tip="permissionMode: ${esc(l.permissionMode)}">⚿</span>`);
+  if (l.slug) out.push(`<span class="flag flag-slug" data-tip="slug: ${esc(l.slug)}">◆</span>`);
+  return out.join('') || '<span class="dim">—</span>';
+}
+
+/* ==================================================================
+   FIELD-RENDERER REGISTRY + GENERIC VALUE RENDERER
+   Drives the expanded-row visualization. Every field on a JSONL line
+   flows through this — no raw JSON is ever rendered. Unknown keys fall
+   through to renderAnyValue, which dispatches by JS type and calls back
+   into the registry for nested object keys.
+   [LAW:one-source-of-truth] One renderer per field semantic.
+   [LAW:dataflow-not-control-flow] Same render path regardless of shape;
+     variance lives in the registry and the data, not in if-ladders.
+   ================================================================== */
+function renderPrimitive(v) {
+  if (v === null || v === undefined) return '<span class="dim mono">·</span>';
+  if (typeof v === 'boolean') return v
+    ? '<span class="glyph-ok" data-tip="true">✓</span>'
+    : '<span class="glyph-no" data-tip="false">✗</span>';
+  if (typeof v === 'number') return `<span class="mono num">${v}</span>`;
+  if (typeof v === 'string') {
+    if (v === '') return '<span class="dim">(empty)</span>';
+    return renderXMLContent(v);
+  }
+  return esc(String(v));
+}
+
+function renderAnyValue(v) {
+  if (v === null || v === undefined || typeof v !== 'object') return renderPrimitive(v);
+  if (Array.isArray(v)) {
+    if (v.length === 0) return '<span class="dim">[ ]</span>';
+    return `<div class="arr">${v.map((item, i) =>
+      `<div class="arr-item"><span class="arr-idx mono">${i}</span><span class="arr-val">${renderAnyValue(item)}</span></div>`
+    ).join('')}</div>`;
+  }
+  return renderFieldGrid(v);
+}
+
+const FIELD_RENDERERS = {
+  // Opaque handles → short colored hash + hover for full
+  uuid:                    v => renderId(v, 10),
+  parentUuid:              v => renderId(v, 10),
+  sessionId:               v => renderId(v, 10),
+  messageId:               v => renderId(v, 10),
+  requestId:               v => renderId(v, 14),
+  promptId:                v => renderId(v, 10),
+  toolUseID:               v => renderId(v, 10),
+  parentToolUseID:         v => renderId(v, 10),
+  sourceToolAssistantUUID: v => renderId(v, 10),
+  tool_use_id:             v => renderId(v, 10),
+  id:                      v => renderId(v, 12),
+  // Time / path
+  timestamp:               v => renderTime(v, 'clock'),
+  cwd:                     v => renderPath(v),
+  filePath:                v => renderPath(v),
+  // Pills (identity / enum-like)
+  gitBranch:               v => renderPill(v, 'branch'),
+  version:                 v => renderPill(v, 'branch'),
+  userType:                v => renderPill(v, 'system'),
+  entrypoint:              v => renderPill(v, 'system'),
+  slug:                    v => renderPill(v, 'model'),
+  permissionMode:          v => renderPill(v, 'usermeta'),
+  model:                   v => renderPill(String(v).replace(/^claude-/, ''), 'model'),
+  role:                    v => renderPill(v, v),
+  type:                    v => renderPill(v, v),
+  subtype:                 v => renderPill(v, 'system'),
+  level:                   v => renderPill(v, 'system'),
+  hookEvent:               v => renderPill(v, 'hook'),
+  hookName:                v => `<span class="mono">${esc(v)}</span>`,
+  command:                 v => `<span class="mono hook-cmd" data-tip="${esc(v)}">${esc(v)}</span>`,
+  stop_reason:             v => v == null ? renderPrimitive(v) : renderPill(v, 'system'),
+  stop_sequence:           v => v == null ? renderPrimitive(v) : renderPill(v, 'system'),
+  // Flags
+  isSidechain:             v => v ? '<span class="flag flag-sidechain" data-tip="isSidechain">⇢</span>' : renderPrimitive(v),
+  isMeta:                  v => v ? '<span class="flag flag-meta" data-tip="isMeta">§</span>' : renderPrimitive(v),
+  is_error:                v => v ? renderPill('error', 'error') : renderPrimitive(v),
+  isSnapshotUpdate:        v => renderPrimitive(v),
+  interrupted:             v => renderPrimitive(v),
+  isImage:                 v => renderPrimitive(v),
+  noOutputExpected:        v => renderPrimitive(v),
+  // Composed
+  usage:                   v => renderTokens(v),
+  input:                   v => renderToolInput(v),
+  name:                    v => `<span class="tool-name mono">${esc(v)}</span>`,
+  thinking:                v => !v ? '<span class="dim">(empty)</span>'
+                                  : `<span class="mono thinking-preview" data-tip="${esc(v)}">◐ ${esc(truncate(v, 80))}</span>`,
+  signature:               v => `<span class="sig-hidden" data-tip="${esc('signature (' + v.length + ' chars)')}">·sig (${v.length} ch)</span>`,
+  content:                 v => {
+                             if (typeof v === 'string') return v === ''
+                               ? '<span class="dim">(empty)</span>'
+                               : `<div class="prose-block">${renderXMLContent(v)}</div>`;
+                             if (Array.isArray(v)) return `<div class="cb-list">${v.map(renderContentBlock).join('')}</div>`;
+                             return renderAnyValue(v);
+                           },
+  filenames:               v => {
+                             if (!Array.isArray(v)) return renderAnyValue(v);
+                             if (v.length === 0) return '<span class="dim">[ ]</span>';
+                             return `<div class="arr">${v.map(f =>
+                               `<div class="arr-item"><span class="mono path-item">${esc(f)}</span></div>`
+                             ).join('')}</div>`;
+                           },
+  trackedFileBackups:      v => Object.keys(v || {}).length === 0
+                                  ? '<span class="dim">(none)</span>' : renderAnyValue(v),
+  // Passthroughs — recurse. Makes nested shapes self-describing via the grid.
+  caller:                  renderAnyValue,
+  data:                    renderAnyValue,
+  message:                 renderAnyValue,
+  snapshot:                renderAnyValue,
+  toolUseResult:           renderAnyValue,
+  stop_details:            renderAnyValue,
+  cache_creation:          renderAnyValue,
+  server_tool_use:         renderAnyValue,
+  file:                    renderAnyValue,
+  iterations:              renderAnyValue,
+};
+
+function renderFieldByKey(key, value) {
+  const fn = FIELD_RENDERERS[key];
+  if (fn) return fn(value);
+  return renderAnyValue(value);
+}
+
+function renderFieldGrid(obj) {
+  if (!obj || typeof obj !== 'object') return renderAnyValue(obj);
+  const entries = Object.entries(obj);
+  if (entries.length === 0) return '<span class="dim">{ }</span>';
+  return `<div class="field-grid">${entries.map(([k, v]) =>
+    `<div class="field-row"><span class="field-key mono">${esc(k)}</span><span class="field-val">${renderFieldByKey(k, v)}</span></div>`
+  ).join('')}</div>`;
+}
+
+function renderContentBlock(b) {
+  if (!b || typeof b !== 'object' || !b.type) return renderAnyValue(b);
+  const badge = renderPill(b.type, 'cb-' + b.type);
+  if (b.type === 'thinking') {
+    return `<div class="cb cb-thinking">${badge}
+      ${FIELD_RENDERERS.thinking(b.thinking || '')}
+      ${b.signature ? FIELD_RENDERERS.signature(b.signature) : ''}
+    </div>`;
+  }
+  if (b.type === 'tool_use') {
+    return `<div class="cb cb-tool_use">${badge}
+      ${FIELD_RENDERERS.name(b.name || '?')}${renderToolInput(b.input || {})}
+      ${FIELD_RENDERERS.id(b.id || '')}
+    </div>`;
+  }
+  if (b.type === 'text') {
+    return `<div class="cb cb-text">${badge}
+      <div class="prose-block">${renderXMLContent(b.text || '')}</div>
+    </div>`;
+  }
+  if (b.type === 'tool_result') {
+    const contentHtml = typeof b.content === 'string'
+      ? `<div class="tool-result-expanded">${renderXMLContent(b.content)}</div>`
+      : renderAnyValue(b.content);
+    return `<div class="cb cb-tool_result">${badge}
+      <span class="ref-to mono" data-tip="${esc(b.tool_use_id || '')}">→ ${esc((b.tool_use_id || '').slice(0, 10))}</span>
+      ${b.is_error ? FIELD_RENDERERS.is_error(true) : ''}
+      ${contentHtml}
+    </div>`;
+  }
+  return `<div class="cb cb-unknown">${badge}${renderFieldGrid(b)}</div>`;
+}
+
+/* ==================================================================
+   CLASSIFIER — one source of truth for "what kind of line is this"
+   ================================================================== */
+function classify(line) {
+  if (line.type === 'file-history-snapshot') {
+    return { kind: 'snapshot', line };
+  }
+  if (line.type === 'progress') {
+    return {
+      kind: 'hook',
+      line,
+      hookEvent: line.data?.hookEvent,
+      hookName: line.data?.hookName,
+      command: line.data?.command,
+    };
+  }
+  if (line.type === 'system') {
+    return { kind: 'system', line, subtype: line.subtype, content: line.content };
+  }
+  if (line.type === 'user') {
+    const content = line.message?.content;
+    if (Array.isArray(content)) {
+      const tr = content.find(b => b.type === 'tool_result');
+      if (tr) {
+        return {
+          kind: 'tool_result',
+          line,
+          toolUseId: tr.tool_use_id,
+          resultContent: tr.content,
+          toolUseResult: line.toolUseResult
+        };
+      }
+    }
+    const text = typeof content === 'string' ? content : '';
+    if (line.isMeta) return { kind: 'usermeta', line, text };
+    if (/^<command-name>/i.test(text)) return { kind: 'slashcmd', line, text };
+    return { kind: 'user', line, text };
+  }
+  if (line.type === 'assistant') {
+    const blocks = line.message?.content || [];
+    return {
+      kind: 'assistant',
+      line,
+      blocks,
+      model: line.message?.model,
+      usage: line.message?.usage,
+      requestId: line.requestId,
+    };
+  }
+  return { kind: 'unknown', line };
+}
+
+function filterClassified(classified) {
+  return classified.filter(c => {
+    if (c.kind === 'snapshot' && !state.showSnapshots) return false;
+    if (c.kind === 'hook' && !state.showHooks) return false;
+    if ((c.kind === 'usermeta' || c.kind === 'slashcmd') && !state.showMeta) return false;
+    return true;
+  });
+}
+
+function buildToolPairs(classified) {
+  const pairs = new Map();
+  classified.forEach(c => {
+    if (c.kind === 'assistant') {
+      c.blocks.forEach(b => {
+        if (b.type === 'tool_use') {
+          if (!pairs.has(b.id)) pairs.set(b.id, {});
+          pairs.get(b.id).use = { classified: c, block: b };
+        }
+      });
+    } else if (c.kind === 'tool_result') {
+      if (!pairs.has(c.toolUseId)) pairs.set(c.toolUseId, {});
+      pairs.get(c.toolUseId).result = { classified: c };
+    }
+  });
+  return pairs;
+}
+
+/* ==================================================================
+   STYLE A — "Stream"
+   One row per event. Max density. Columns: time uuid actor summary meta.
+   ================================================================== */
+function renderStream(classified) {
+  const rows = classified.map((c, i) => streamRow(c, i));
+  return `<div class="stream">${rows.join('')}</div>`;
+}
+function streamRow(c, idx) {
+  const l = c.line;
+  const id = rowId(l, idx);
+  const isExpanded = state.expanded.has(id);
+  const time = renderTime(l.timestamp, 'clock');
+  const uuid = renderId(l.uuid);
+  let actor, summary, meta = '';
+  // Content is always rendered in full. The row's CSS (white-space: nowrap +
+  // text-overflow: ellipsis, toggled off by .expanded) is the single source
+  // of truth for clipping. No JS-side string truncation of display content —
+  // that broke pair-aware XML rendering when a truncation cut a closing tag.
+  switch (c.kind) {
+    case 'hook':
+      actor = `<span class="actor actor-hook">hook</span>`;
+      summary = `<span class="hook-ev">${esc(c.hookEvent || '')}</span>:<span class="hook-name">${esc(c.hookName || '')}</span><span class="hook-cmd">${esc(c.command || '')}</span>`;
+      break;
+    case 'snapshot':
+      actor = `<span class="actor actor-snap">snap</span>`;
+      summary = `<span class="dim">file-history-snapshot</span> ${renderId(l.messageId)}`;
+      break;
+    case 'system':
+      actor = `<span class="actor actor-sys">sys</span>`;
+      summary = `<span class="sys-sub">${esc(c.subtype || '')}</span>${renderXMLContent(c.content || '')}`;
+      break;
+    case 'usermeta':
+      actor = `<span class="actor actor-meta">meta</span>`;
+      summary = renderXMLContent(c.text);
+      break;
+    case 'slashcmd':
+      actor = `<span class="actor actor-cmd">cmd</span>`;
+      summary = renderXMLContent(c.text.replace(/\s+/g, ' '));
+      break;
+    case 'user':
+      actor = `<span class="actor actor-user">user</span>`;
+      summary = `<span class="prose">${esc(c.text)}</span>`;
+      break;
+    case 'assistant': {
+      actor = `<span class="actor actor-asst">asst</span>`;
+      summary = renderAsstBlocksInline(c.blocks);
+      meta = renderTokens(c.usage);
+      break;
+    }
+    case 'tool_result': {
+      actor = `<span class="actor actor-tool_result">tool</span>`;
+      const resStr = typeof c.resultContent === 'string' ? c.resultContent : JSON.stringify(c.resultContent);
+      summary = `${renderId(c.toolUseId, 4)} <span class="mono">${esc(resStr)}</span>`;
+      break;
+    }
+    default:
+      actor = `<span class="actor">?</span>`;
+      summary = `<span class="dim">${esc(l.type || 'unknown')}</span>`;
+  }
+  const hint = `<span class="expand-hint">${isExpanded ? '▴' : '▾'}</span>`;
+  const row = `
+    <div class="row row-${c.kind}${isExpanded ? ' expanded' : ''}" data-row-id="${esc(id)}">
+      <span class="col-time">${time}</span>
+      <span class="col-uuid">${uuid}</span>
+      <span class="col-actor">${actor}</span>
+      <span class="col-summary">${summary}${hint}</span>
+      <span class="col-meta">${meta}</span>
+    </div>`;
+  if (isExpanded) {
+    // Composed field-by-field view. Never raw JSON — every value flows
+    // through FIELD_RENDERERS / renderAnyValue / renderContentBlock.
+    return row + `<div class="row-expansion">${renderFieldGrid(l)}</div>`;
+  }
+  return row;
+}
+
+function renderAsstBlocksInline(blocks) {
+  // Inline rendering used by Stream + Inspector + Timeline summaries.
+  // Text blocks render in full; the containing column's CSS clips.
+  // Thinking is rendered as a short glimpse (◐ + 80 chars) — that's the
+  // *semantic* visualization of a thinking block, independent of expand
+  // state. Full content is in the tooltip.
+  const parts = blocks.map(b => {
+    if (b.type === 'thinking') {
+      if (!state.showThinking) return '';
+      const prev = truncate(b.thinking || '(empty)', 80);
+      return `<span class="block-think" data-tip="${esc(b.thinking || '')}">◐ ${esc(prev)}</span>`;
+    }
+    if (b.type === 'tool_use') {
+      return `<span class="block-tool"><span class="tool-name">${esc(b.name)}</span>(${renderToolInput(b.input)})<span class="tool-id">${renderId(b.id, 4)}</span></span>`;
+    }
+    if (b.type === 'text') {
+      return `<span class="block-text">${esc(b.text)}</span>`;
+    }
+    return '';
+  }).filter(Boolean);
+  return parts.join(' ');
+}
+
+/* ==================================================================
+   STYLE B — "Thread"
+   Conversation-first. Tool_use+tool_result fuse. Gutter thread line.
+   Bubbles clamp to 1 line by default — click to expand.
+   ================================================================== */
+function renderThread(classified) {
+  const pairs = buildToolPairs(classified);
+  const consumedResults = new Set();
+  const out = [];
+  classified.forEach((c, i) => {
+    if (c.kind === 'tool_result') {
+      if (consumedResults.has(c.toolUseId)) return;
+      out.push(renderThreadOrphanResult(c, i));
+      return;
+    }
+    if (c.kind === 'assistant') { out.push(renderThreadAssistant(c, i, pairs, consumedResults)); return; }
+    if (c.kind === 'user')      { out.push(renderThreadUser(c, i)); return; }
+    if (c.kind === 'usermeta' || c.kind === 'slashcmd') { out.push(renderThreadMeta(c, i)); return; }
+    if (c.kind === 'system')    { out.push(renderThreadSystem(c, i)); return; }
+    if (c.kind === 'hook')      { out.push(renderThreadHook(c, i)); return; }
+    if (c.kind === 'snapshot')  { out.push(renderThreadSnapshot(c, i)); return; }
+  });
+  return `<div class="thread">${out.join('')}</div>`;
+}
+function bubbleWrap(kind, gutterClass, inner, c, idx, extraClass = '') {
+  const id = rowId(c.line, idx);
+  const isExp = state.expanded.has(id);
+  return `
+    <div class="tbubble tbubble-${kind}${isExp ? ' expanded' : ''} ${extraClass}" data-row-id="${esc(id)}">
+      <div class="tbubble-gutter"><span class="gutter-dot ${gutterClass}"></span></div>
+      ${inner(isExp)}
+    </div>`;
+}
+function renderThreadUser(c, idx) {
+  return bubbleWrap('user', 'gd-user', (isExp) => `
+    <div class="tbubble-content">
+      <div class="tbubble-head">
+        <span class="actor actor-user">You</span>
+        ${renderTime(c.line.timestamp, 'clock')}
+        ${renderId(c.line.uuid)}
+        ${renderFlags(c.line)}
+        <span class="expand-hint">${isExp ? '▴' : '▾'}</span>
+      </div>
+      <div class="tbubble-body prose">${esc(c.text)}</div>
+    </div>`, c, idx);
+}
+function renderThreadAssistant(c, idx, pairs, consumedResults) {
+  const modelShort = c.model ? c.model.replace(/^claude-/, '') : '';
+  return bubbleWrap('asst', 'gd-asst', (isExp) => {
+    const inner = c.blocks.map(b => {
+      if (b.type === 'thinking') {
+        if (!state.showThinking) return '';
+        const prev = truncate(b.thinking || '(empty thinking block)', 80);
+        return `
+          <div class="tblock tblock-thinking">
+            <span class="block-badge">◐</span>
+            <span class="thinking-label">thinking</span>
+            <span class="mono thinking-preview" data-tip="${esc(b.thinking || '')}">${esc(prev)}</span>
+            ${b.signature ? `<span class="mono sig-hidden" data-tip="${esc('signature (' + b.signature.length + ' chars)')}">·sig</span>` : ''}
+          </div>`;
+      }
+      if (b.type === 'tool_use') {
+        const pair = pairs.get(b.id);
+        if (pair && pair.result) consumedResults.add(b.id);
+        return renderThreadToolPair(b, pair?.result?.classified);
+      }
+      if (b.type === 'text') {
+        return `<div class="tblock tblock-text prose" data-tip="${esc(b.text)}">${esc(b.text)}</div>`;
+      }
+      return '';
+    }).filter(Boolean).join('');
+    return `
+      <div class="tbubble-content">
+        <div class="tbubble-head">
+          <span class="actor actor-asst">Claude</span>
+          ${modelShort ? renderPill(modelShort, 'model') : ''}
+          ${renderTime(c.line.timestamp, 'clock')}
+          ${renderId(c.line.uuid)}
+          ${renderTokens(c.usage)}
+          ${renderFlags(c.line)}
+          <span class="expand-hint">${isExp ? '▴' : '▾'}</span>
+        </div>
+        ${inner}
+      </div>`;
+  }, c, idx);
+}
+function renderThreadToolPair(useBlock, resultClassified) {
+  let resDisplay = '<span class="dim">(no result yet)</span>';
+  let resClass = 'tool-result-missing';
+  if (resultClassified) {
+    const raw = typeof resultClassified.resultContent === 'string'
+      ? resultClassified.resultContent
+      : JSON.stringify(resultClassified.resultContent);
+    // Full content always; .tool-result CSS clips when collapsed, pre-wrap when expanded.
+    resDisplay = `<span class="mono res-text" data-tip="${esc(raw)}">${esc(raw)}</span>`;
+    resClass = '';
+  }
+  return `
+    <div class="tblock tblock-tool">
+      <div class="tool-call">
+        <span class="block-badge">⚑</span>
+        <span class="tool-name mono">${esc(useBlock.name)}</span>
+        ${renderToolInput(useBlock.input)}
+        <span class="tool-id">${renderId(useBlock.id, 4)}</span>
+      </div>
+      <div class="tool-result ${resClass}">${resDisplay}</div>
+    </div>`;
+}
+function renderThreadOrphanResult(c, idx) {
+  const resStr = typeof c.resultContent === 'string' ? c.resultContent : JSON.stringify(c.resultContent);
+  return bubbleWrap('asst', 'gd-tool', (isExp) => `
+    <div class="tbubble-content">
+      <div class="tbubble-head">
+        <span class="actor actor-tool">tool ↩</span>
+        ${renderId(c.toolUseId, 6)}
+        ${renderTime(c.line.timestamp, 'clock')}
+        <span class="expand-hint">${isExp ? '▴' : '▾'}</span>
+      </div>
+      <div class="tbubble-body mono">${esc(resStr)}</div>
+    </div>`, c, idx);
+}
+function renderThreadMeta(c, idx) {
+  return bubbleWrap('meta', 'gd-meta', () => `
+    <div class="tbubble-content tbubble-thin">
+      <span class="actor actor-meta">${c.kind === 'slashcmd' ? '/cmd' : '§meta'}</span>
+      ${renderXMLContent(c.text)}
+      ${renderTime(c.line.timestamp, 'clock')}
+    </div>`, c, idx);
+}
+function renderThreadSystem(c, idx) {
+  return bubbleWrap('sys', 'gd-sys', () => `
+    <div class="tbubble-content tbubble-thin">
+      <span class="actor actor-sys">sys</span>
+      <span class="sys-sub">${esc(c.subtype || '')}</span>
+      ${renderXMLContent(c.content || '')}
+      ${renderTime(c.line.timestamp, 'clock')}
+    </div>`, c, idx);
+}
+function renderThreadHook(c, idx) {
+  return bubbleWrap('hook', 'gd-hook', () => `
+    <div class="tbubble-content tbubble-thin">
+      <span class="actor actor-hook">hook</span>
+      <span class="hook-ev">${esc(c.hookEvent || '')}</span>
+      <span class="hook-name">${esc(c.hookName || '')}</span>
+      <span class="mono hook-cmd" data-tip="${esc(c.command || '')}">${esc(c.command || '')}</span>
+      ${renderTime(c.line.timestamp, 'clock')}
+    </div>`, c, idx);
+}
+function renderThreadSnapshot(c, idx) {
+  return bubbleWrap('snap', 'gd-snap', () => `
+    <div class="tbubble-content tbubble-thin">
+      <span class="dim">snapshot</span> ${renderId(c.line.messageId)}
+      ${renderTime(c.line.timestamp, 'clock')}
+    </div>`, c, idx);
+}
+
+/* ==================================================================
+   STYLE C — "Inspector"
+   Tabular. All recurring fields in columns.
+   ================================================================== */
+function renderInspector(classified) {
+  const rows = classified.map(c => {
+    const l = c.line;
+    const summary = inspectorSummary(c);
+    const model = c.model ? c.model.replace(/^claude-/, '') : '';
+    return `
+      <div class="irow irow-${c.kind}">
+        <span class="icol icol-idx">${renderTime(l.timestamp, 'clock')}</span>
+        <span class="icol icol-kind">${renderPill(c.kind, c.kind)}</span>
+        <span class="icol icol-type mono dim">${esc(l.type || '—')}</span>
+        <span class="icol icol-uuid">${renderId(l.uuid)}</span>
+        <span class="icol icol-parent">${l.parentUuid ? renderId(l.parentUuid) : '<span class="dim mono">·</span>'}</span>
+        <span class="icol icol-branch">${l.gitBranch ? renderPill(l.gitBranch, 'branch') : ''}</span>
+        <span class="icol icol-model">${model ? renderPill(model, 'model') : ''}</span>
+        <span class="icol icol-tokens">${c.usage ? renderTokens(c.usage) : '<span class="dim mono">·</span>'}</span>
+        <span class="icol icol-flags">${renderFlags(l)}</span>
+        <span class="icol icol-summary">${summary}</span>
+      </div>`;
+  });
+  return `
+    <div class="inspector">
+      <div class="ihead mono">
+        <span class="icol">time</span>
+        <span class="icol">kind</span>
+        <span class="icol">type</span>
+        <span class="icol">uuid</span>
+        <span class="icol">parent</span>
+        <span class="icol">branch</span>
+        <span class="icol">model</span>
+        <span class="icol">tokens</span>
+        <span class="icol">flags</span>
+        <span class="icol">summary</span>
+      </div>
+      ${rows.join('')}
+    </div>`;
+}
+function inspectorSummary(c) {
+  // Full content always; .icol-summary CSS clips to one line.
+  switch (c.kind) {
+    case 'assistant':    return renderAsstBlocksInline(c.blocks);
+    case 'user':         return `<span class="prose">${esc(c.text)}</span>`;
+    case 'usermeta':
+    case 'slashcmd':     return renderXMLContent(c.text);
+    case 'tool_result': {
+      const resStr = typeof c.resultContent === 'string' ? c.resultContent : JSON.stringify(c.resultContent);
+      return `${renderId(c.toolUseId, 4)} <span class="mono">${esc(resStr)}</span>`;
+    }
+    case 'hook':         return `<span class="hook-ev">${esc(c.hookEvent)}</span>:<span class="hook-name">${esc(c.hookName || '')}</span> <span class="mono dim">${esc(c.command || '')}</span>`;
+    case 'system':       return `<span class="sys-sub">${esc(c.subtype || '')}</span> ${renderXMLContent(c.content || '')}`;
+    case 'snapshot':     return `<span class="dim">file-history-snapshot</span>`;
+    default:             return '<span class="dim">—</span>';
+  }
+}
+
+/* ==================================================================
+   STYLE D — "Timeline"
+   Time axis on left. Shows gaps between events literally.
+   ================================================================== */
+function renderTimeline(classified) {
+  if (!classified.length) return '<div class="dim">No events.</div>';
+  const first = new Date(classified[0].line.timestamp).getTime();
+  const rows = classified.map(c => {
+    const l = c.line;
+    const ts = new Date(l.timestamp).getTime();
+    const offsetSec = Number.isFinite(ts) ? ((ts - first) / 1000) : 0;
+    const offsetLabel = offsetSec < 1 ? (Math.round(offsetSec * 1000) + 'ms')
+                       : offsetSec < 60 ? (offsetSec.toFixed(1) + 's')
+                       : offsetSec < 3600 ? (Math.floor(offsetSec/60) + 'm' + Math.round(offsetSec%60).toString().padStart(2,'0') + 's')
+                       : (Math.floor(offsetSec/3600) + 'h');
+    const model = c.model ? c.model.replace(/^claude-/, '') : '';
+    return `
+      <div class="tlrow tlrow-${c.kind}">
+        <span class="tl-offset mono tt" data-tip="${esc(l.timestamp || '')}">+${offsetLabel}</span>
+        <span class="tl-dot tl-dot-${c.kind}"></span>
+        <div class="tl-card">
+          <div class="tl-head">
+            <span class="actor actor-${c.kind}">${esc(kindLabel(c.kind))}</span>
+            ${model ? renderPill(model, 'model') : ''}
+            ${renderId(l.uuid)}
+            ${c.usage ? renderTokens(c.usage) : ''}
+            ${renderFlags(l)}
+          </div>
+          <div class="tl-body">${inspectorSummary(c)}</div>
+        </div>
+      </div>`;
+  });
+  return `<div class="timeline">${rows.join('')}</div>`;
+}
+function kindLabel(kind) {
+  return {
+    assistant: 'Claude',
+    user: 'You',
+    usermeta: 'meta',
+    slashcmd: '/cmd',
+    tool_result: 'tool',
+    hook: 'hook',
+    system: 'sys',
+    snapshot: 'snap'
+  }[kind] || kind;
+}
+
+/* ==================================================================
+   STYLE REGISTRY — each style's name + thesis (shown in banner)
+   ================================================================== */
+const STYLES = {
+  stream: {
+    name: 'Stream',
+    thesis: 'One line per JSONL entry. Terminal-log aesthetic. Optimized for scan volume — see 100+ events at once. Time · uuid · actor-glyph · inline summary · tokens. Everything compresses to a single row.'
+  },
+  thread: {
+    name: 'Thread',
+    thesis: 'Conversation-first. Tool call and its result fuse into one block. Gutter dots thread the turn vertically. Optimized for re-reading dialogue without noise — thinking collapses, hooks hide by default.'
+  },
+  inspector: {
+    name: 'Inspector',
+    thesis: 'Tabular. Every recurring field is a column: time · kind · type · uuid · parent · branch · model · tokens · flags · summary. Optimized for debugging session shape and hunting events by metadata.'
+  },
+  timeline: {
+    name: 'Timeline',
+    thesis: 'Time on the left axis with explicit gap labels (+2.3s, +1m05s). Cards attached. Optimized for temporal intuition — where did the long pauses happen? Which events fired in a burst?'
+  }
+};
+
+/* ==================================================================
+   RENDER + CONTROLS
+   ================================================================== */
+function render() {
+  document.body.dataset.style = state.style;
+  document.body.dataset.density = state.density;
+
+  const info = STYLES[state.style];
+  document.getElementById('style-name').textContent = info.name;
+  document.getElementById('style-thesis').textContent = info.thesis;
+
+  const classified = state.lines.map(classify);
+  const filtered = filterClassified(classified);
+
+  let html = '';
+  switch (state.style) {
+    case 'stream':    html = renderStream(filtered); break;
+    case 'thread':    html = renderThread(filtered); break;
+    case 'inspector': html = renderInspector(filtered); break;
+    case 'timeline':  html = renderTimeline(filtered); break;
+  }
+  document.getElementById('preview').innerHTML = html;
+}
+
+function wire() {
+  document.querySelectorAll('[data-style-btn]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.style = btn.dataset.styleBtn;
+      document.querySelectorAll('[data-style-btn]').forEach(x => x.classList.toggle('active', x === btn));
+      render();
+    });
+  });
+  document.querySelectorAll('[data-density-btn]').forEach(btn => {
+    btn.addEventListener('click', () => {
+      state.density = btn.dataset.densityBtn;
+      document.querySelectorAll('[data-density-btn]').forEach(x => x.classList.toggle('active', x === btn));
+      render();
+    });
+  });
+  ['Meta', 'Hooks', 'Thinking', 'Snapshots'].forEach(k => {
+    const el = document.getElementById('toggle-' + k);
+    el.addEventListener('change', () => {
+      state['show' + k] = el.checked;
+      render();
+    });
+  });
+  document.getElementById('paste-apply').addEventListener('click', () => {
+    const txt = document.getElementById('paste-area').value.trim();
+    if (!txt) { state.lines = SAMPLE_LINES; render(); return; }
+    try {
+      state.lines = txt.split('\n').filter(Boolean).map(s => JSON.parse(s));
+    } catch (e) {
+      alert('JSONL parse error: ' + e.message);
+      return;
+    }
+    render();
+  });
+  document.getElementById('paste-reset').addEventListener('click', () => {
+    state.lines = SAMPLE_LINES;
+    document.getElementById('paste-area').value = '';
+    render();
+  });
+  /* Click-to-expand: any element with data-row-id toggles its expanded state.
+     Clicks on interactive children (links, inputs) would propagate here too,
+     but we have none inside rows. The JS tooltip is pointer-events:none so it
+     never swallows clicks. Re-render instead of surgical DOM update — simpler,
+     and sample sizes are small. */
+  document.getElementById('preview').addEventListener('click', (e) => {
+    const row = e.target.closest('[data-row-id]');
+    if (!row) return;
+    const id = row.getAttribute('data-row-id');
+    if (state.expanded.has(id)) state.expanded.delete(id);
+    else state.expanded.add(id);
+    render();
+  });
+}
+
+/* ==================================================================
+   JS TOOLTIP — single positioned div, driven by [data-tip] elements.
+   Replaces native title= (slow, delayed, unstyled). Hover any element
+   with data-tip to see its full value in the ochre-bordered tooltip.
+   ================================================================== */
+(function installTooltip() {
+  const tip = document.createElement('div');
+  tip.className = 'jstip';
+  document.body.appendChild(tip);
+
+  let current = null;
+
+  function show(el) {
+    const text = el.getAttribute('data-tip');
+    if (!text) return;
+    tip.textContent = text;
+    tip.style.display = 'block';
+    current = el;
+    position(el);
+  }
+  function hide() {
+    tip.style.display = 'none';
+    current = null;
+  }
+  function position(el) {
+    const r = el.getBoundingClientRect();
+    const tr = tip.getBoundingClientRect();
+    let x = r.left + r.width / 2 - tr.width / 2;
+    let y = r.top - tr.height - 6;
+    if (y < 6) y = r.bottom + 6;
+    x = Math.max(6, Math.min(x, window.innerWidth - tr.width - 6));
+    tip.style.left = x + 'px';
+    tip.style.top = y + 'px';
+  }
+
+  document.addEventListener('mouseover', (e) => {
+    const el = e.target.closest('[data-tip]');
+    if (el && el !== current) show(el);
+  });
+  document.addEventListener('mouseout', (e) => {
+    const el = e.target.closest('[data-tip]');
+    if (!el) return;
+    const next = e.relatedTarget && e.relatedTarget.closest && e.relatedTarget.closest('[data-tip]');
+    if (next !== el) hide();
+  });
+  window.addEventListener('scroll', hide, true);
+  window.addEventListener('blur', hide);
+})();
+
+wire();
+render();
+</script>
+</body>
+</html>
