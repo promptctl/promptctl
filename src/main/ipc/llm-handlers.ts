@@ -28,11 +28,16 @@ export function registerLlmHandlers(): void {
       taskId: string,
       messages: MessageSummary[],
       focusQuery: string,
-    ): Promise<TopicSegment[]> =>
-      runTask(
+    ): Promise<TopicSegment[]> => {
+      const query = focusQuery.trim();
+      const label = query.length > 0
+        ? `Finding "${query}"`
+        : "Segmenting conversation into topics";
+      return runTask(
         taskId,
-        { kind: "topic-focus", label: `Finding "${focusQuery}"`, total: 2 },
+        { kind: "topic-focus", label, total: 2 },
         (handle) => segmentTopics(messages, focusQuery, handle),
-      ),
+      );
+    },
   );
 }

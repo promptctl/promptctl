@@ -682,3 +682,236 @@ describe("Full-text session search", () => {
     cleanup();
   });
 });
+
+describe("Topic Focus — segment-only vs focus-and-mark", () => {
+  // Shared settings mock so the component's settings:load effect doesn't
+  // throw on an undefined response.
+  const defaultSettings = () => ({
+    openaiApiKey: "",
+    openaiModel: "gpt-5.4",
+    lastRoute: "/workshop",
+    compressSummarizeThreshold: 5000,
+    compressTruncateThreshold: 1000,
+    compressKeepLastN: 3,
+  });
+
+  it("clicking Topic Focus runs segmentation with an empty focus query and renders segment chips without marking anything", async () => {
+    setStoreLoaded({ messages: [makeMessage(0), makeMessage(1), makeMessage(2)] });
+    const segmentCalls: unknown[][] = [];
+
+    setInvokeHandlers(api, {
+      "session:list-projects": () => [],
+      "session:provider-metadata": () => ({}),
+      "settings:load": defaultSettings,
+      "llm:segment-topics": (...args) => {
+        segmentCalls.push(args);
+        return [
+          {
+            topic: "initial setup",
+            startIndex: 0,
+            endIndex: 1,
+            tokenCount: 200,
+            relevant: true,
+          },
+          {
+            topic: "bug fix",
+            startIndex: 2,
+            endIndex: 2,
+            tokenCount: 100,
+            relevant: true,
+          },
+        ];
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<SessionEditor />);
+    await user.click(screen.getByRole("button", { name: "Topic Focus" }));
+
+    // Segments panel shows the chips
+    await screen.findByText(/initial setup/);
+    expect(screen.getByText(/bug fix/)).toBeTruthy();
+
+    // Legend is visible so the kept/removed distinction is explicit
+    expect(screen.getByText(/stays in the session/)).toBeTruthy();
+    expect(screen.getByText(/will be deleted on Save/)).toBeTruthy();
+
+    // The segmentation IPC was invoked with an empty focus query — this is
+    // what makes the button a "segment only" action.
+    expect(segmentCalls.length).toBe(1);
+    expect(segmentCalls[0][2]).toBe("");
+
+    // Segment-only mode does NOT auto-mark any message for removal.
+    expect(useSessionStore.getState().markedForRemoval.size).toBe(0);
+
+    cleanup();
+  });
+
+  it("submitting a focus query runs segmentation with the query and auto-marks off-topic messages", async () => {
+    setStoreLoaded({ messages: [makeMessage(0), makeMessage(1), makeMessage(2)] });
+    const segmentCalls: unknown[][] = [];
+
+    setInvokeHandlers(api, {
+      "session:list-projects": () => [],
+      "session:provider-metadata": () => ({}),
+      "settings:load": defaultSettings,
+      "llm:segment-topics": (...args) => {
+        segmentCalls.push(args);
+        const query = args[2] as string;
+        const relevantFor = (topic: string) => {
+          if (query === "") return true;
+          return topic.toLowerCase().includes(query.toLowerCase());
+        };
+        return [
+          {
+            topic: "unrelated work",
+            startIndex: 0,
+            endIndex: 0,
+            tokenCount: 50,
+            relevant: relevantFor("unrelated work"),
+          },
+          {
+            topic: "auth refactor",
+            startIndex: 1,
+            endIndex: 2,
+            tokenCount: 200,
+            relevant: relevantFor("auth refactor"),
+          },
+        ];
+      },
+    });
+
+    const user = userEvent.setup();
+    render(<SessionEditor />);
+
+    // First: open the segments panel via the button (segment-only)
+    await user.click(screen.getByRole("button", { name: "Topic Focus" }));
+    await screen.findByText(/unrelated work/);
+
+    // Then type a focus query into the panel's input and submit it
+    const input = screen.getByPlaceholderText(/authentication implementation/);
+    fireEvent.change(input, { target: { value: "auth" } });
+    await user.click(screen.getByRole("button", { name: /Mark off-topic/ }));
+
+    // Off-topic segment (message index 0) is marked for removal
+    await waitFor(() => {
+      const marked = useSessionStore.getState().markedForRemoval;
+      expect(marked.has(0)).toBe(true);
+      expect(marked.has(1)).toBe(false);
+      expect(marked.has(2)).toBe(false);
+    });
+
+    // Two IPC calls: one with empty query (segment-only), one with "auth"
+    expect(segmentCalls.length).toBe(2);
+    expect(segmentCalls[0][2]).toBe("");
+    expect(segmentCalls[1][2]).toBe("auth");
+
+    cleanup();
+  });
+
+  it("switching sessions clears Topic Focus state (query + segments)", async () => {
+    setStoreLoaded({ messages: [makeMessage(0)] });
+
+    setInvokeHandlers(api, {
+      "session:list-projects": () => [],
+      "session:provider-metadata": () => ({}),
+      "settings:load": defaultSettings,
+      "llm:segment-topics": () => [
+        {
+          topic: "session A topic",
+          startIndex: 0,
+          endIndex: 0,
+          tokenCount: 100,
+          relevant: true,
+        },
+      ],
+    });
+
+    const user = userEvent.setup();
+    render(<SessionEditor />);
+
+    // Segment session A and type a focus query
+    await user.click(screen.getByRole("button", { name: "Topic Focus" }));
+    await screen.findByText(/session A topic/);
+    const input = screen.getByPlaceholderText(/authentication implementation/);
+    fireEvent.change(input, { target: { value: "leftover query" } });
+    expect((input as HTMLInputElement).value).toBe("leftover query");
+
+    // Switch to a different session — state keyed by sessionId should reset
+    useSessionStore.setState({
+      selectedSession: {
+        ...makeSession(),
+        sessionId: "session-B",
+        filePath: "/test/session-B.jsonl",
+      },
+      messages: [makeMessage(0), makeMessage(1)],
+      markedForRemoval: new Set(),
+    });
+
+    await waitFor(() => {
+      // Segments panel is gone — segment list was cleared
+      expect(screen.queryByText(/session A topic/)).toBeNull();
+      // The stale focus query input from session A should not appear at all
+      expect(
+        screen.queryByPlaceholderText(/authentication implementation/),
+      ).toBeNull();
+    });
+
+    // Re-open on session B: the query field should come back empty, not with "leftover query"
+    setInvokeHandlers(api, {
+      "session:list-projects": () => [],
+      "session:provider-metadata": () => ({}),
+      "settings:load": defaultSettings,
+      "llm:segment-topics": () => [
+        {
+          topic: "session B topic",
+          startIndex: 0,
+          endIndex: 1,
+          tokenCount: 150,
+          relevant: true,
+        },
+      ],
+    });
+    await user.click(screen.getByRole("button", { name: "Topic Focus" }));
+    await screen.findByText(/session B topic/);
+    const freshInput = screen.getByPlaceholderText(
+      /authentication implementation/,
+    );
+    expect((freshInput as HTMLInputElement).value).toBe("");
+
+    cleanup();
+  });
+});
+
+describe("Toolbar restructure — Save button always visible", () => {
+  it("renders the Save button in a row separate from the tool buttons (so it is not pushed off-screen on narrow widths)", async () => {
+    setStoreLoaded({ messages: [makeMessage(0), makeMessage(1)] });
+    useSessionStore.setState({ markedForRemoval: new Set([0]) });
+
+    render(<SessionEditor />);
+
+    const saveBtn = screen.getByRole("button", { name: /Remove .* & Save/i });
+    const autoTrimBtn = screen.getByRole("button", { name: "Auto-Trim" });
+
+    // Walk up each element's ancestors collecting their parents; the two
+    // buttons must NOT share the nearest flex-row container. The save row
+    // is intentionally its own flex line so it can never be pushed off.
+    function nearestFlexRow(el: HTMLElement): HTMLElement | null {
+      let cur: HTMLElement | null = el.parentElement;
+      while (cur) {
+        if (cur.className.includes("flex") && !cur.className.includes("flex-col")) {
+          return cur;
+        }
+        cur = cur.parentElement;
+      }
+      return null;
+    }
+    const saveRow = nearestFlexRow(saveBtn);
+    const toolRow = nearestFlexRow(autoTrimBtn);
+    expect(saveRow).not.toBeNull();
+    expect(toolRow).not.toBeNull();
+    expect(saveRow).not.toBe(toolRow);
+
+    cleanup();
+  });
+});

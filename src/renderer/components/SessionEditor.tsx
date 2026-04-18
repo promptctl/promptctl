@@ -1,4 +1,4 @@
-import { useEffect, useState, useCallback, useRef } from "react";
+import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
 import { useSessionStore } from "../store/sessions";
 import type {
   MessageSummary,
@@ -151,10 +151,209 @@ function HelpPanel({
             ))}
           </div>
         </div>
+
+        {/* Advanced tools */}
+        <div className="rounded border border-neutral-800 bg-neutral-950 p-3">
+          <p className="mb-1.5 font-medium text-neutral-300">Advanced tools:</p>
+          <dl className="space-y-2">
+            <div>
+              <dt>
+                <span className="rounded bg-violet-600/20 px-1.5 py-0.5 text-sm font-semibold text-violet-400">
+                  Smart Compress
+                </span>
+              </dt>
+              <dd className="mt-1 ml-0.5 text-neutral-400">
+                Sends the conversation to the configured LLM and asks it to
+                identify messages whose content is already summarized
+                elsewhere or no longer needed. Runs after Auto-Trim when the
+                conversation is still large.
+              </dd>
+            </div>
+            <div>
+              <dt>
+                <span className="rounded bg-cyan-600/20 px-1.5 py-0.5 text-sm font-semibold text-cyan-400">
+                  Topic Focus
+                </span>
+              </dt>
+              <dd className="mt-1 ml-0.5 text-neutral-400">
+                Clicking the button segments the conversation into topic
+                blocks so you can see its structure at a glance. Entering a
+                query (e.g. <em>&quot;auth refactor&quot;</em>) additionally
+                marks every off-topic segment for removal. Click any chip to
+                flip its kept/removed state.
+              </dd>
+            </div>
+            <div>
+              <dt>
+                <span className="rounded bg-emerald-600/20 px-1.5 py-0.5 text-sm font-semibold text-emerald-400">
+                  Compress Tools
+                </span>
+              </dt>
+              <dd className="mt-1 ml-0.5 text-neutral-400">
+                Rewrites bulky tool results in place instead of removing
+                them: LLM-summarizes the largest, middle-truncates medium
+                ones, keeps the last few untouched. Thresholds are
+                configurable in Settings.
+              </dd>
+            </div>
+            <div>
+              <dt>
+                <span className="rounded bg-neutral-700 px-1.5 py-0.5 text-sm font-semibold text-neutral-300">
+                  History &middot; Undo &middot; Redo
+                </span>
+              </dt>
+              <dd className="mt-1 ml-0.5 text-neutral-400">
+                Every save creates a version. Undo/Redo step through them;
+                History opens a panel where you can diff any two versions or
+                restore an older one. Saves are never destructive.
+              </dd>
+            </div>
+          </dl>
+        </div>
       </div>
     </div>
   );
 }
+
+// -- Rich tooltip for toolbar actions --
+// [LAW:one-type-per-behavior] Every toolbar tool shares the same hover-card
+// shape: title, summary, when-to-use, example. A single component renders
+// all of them from data — no per-button special cases.
+
+interface ToolHoverCardContent {
+  title: string;
+  summary: string;
+  whenToUse: string;
+  example?: string;
+}
+
+function ToolHoverCard({
+  children,
+  info,
+}: {
+  children: ReactNode;
+  info: ToolHoverCardContent;
+}) {
+  // React state drives visibility rather than a CSS-only :hover toggle. The
+  // tooltip is only in the DOM when the user actually points at the tool, so
+  // accessibility tools (and tests) see only the button's own label. Focus
+  // events mirror mouse events so keyboard users get the same affordance.
+  // [LAW:one-source-of-truth] One boolean — rendered or not — no CSS/DOM split.
+  const [open, setOpen] = useState(false);
+  return (
+    <span
+      className="relative inline-block"
+      onMouseEnter={() => setOpen(true)}
+      onMouseLeave={() => setOpen(false)}
+      onFocus={() => setOpen(true)}
+      onBlur={() => setOpen(false)}
+    >
+      {children}
+      {open && (
+        <span
+          role="tooltip"
+          className="pointer-events-none absolute top-full left-0 z-50 mt-1 w-72 rounded-md border border-neutral-700 bg-neutral-950 p-3 text-xs leading-relaxed text-neutral-300 shadow-xl"
+        >
+          <span className="mb-1 block font-semibold text-neutral-100">
+            {info.title}
+          </span>
+          <span className="mb-1.5 block text-neutral-400">{info.summary}</span>
+          <span className="mb-0.5 block text-[10px] font-semibold tracking-wide text-neutral-500 uppercase">
+            When to use
+          </span>
+          <span className="block text-neutral-400">{info.whenToUse}</span>
+          {info.example && (
+            <>
+              <span className="mt-1.5 mb-0.5 block text-[10px] font-semibold tracking-wide text-neutral-500 uppercase">
+                Example
+              </span>
+              <span className="block rounded bg-neutral-900 px-1.5 py-1 font-mono text-[11px] text-neutral-300">
+                {info.example}
+              </span>
+            </>
+          )}
+        </span>
+      )}
+    </span>
+  );
+}
+
+// Per-tool hover-card data. Kept as module data so the toolbar JSX stays
+// declarative and the content is easy to review in one place.
+const TOOL_HOVER_INFO: Record<string, ToolHoverCardContent> = {
+  autoTrim: {
+    title: "Auto-Trim",
+    summary:
+      "Marks repetitive, loop-detection, and system-noise messages for removal using local heuristics — no API call, no cost.",
+    whenToUse:
+      "First pass on any conversation. It only flags obvious junk, so it's safe to run before anything else.",
+  },
+  smartCompress: {
+    title: "Smart Compress",
+    summary:
+      "Sends the conversation to the configured LLM and asks it to identify messages whose content is already summarized elsewhere or no longer needed.",
+    whenToUse:
+      "After Auto-Trim, when the conversation is still large and you want a smarter pass that understands redundant back-and-forth.",
+    example: "Marks failed attempts that were superseded by a later fix.",
+  },
+  topicFocus: {
+    title: "Topic Focus",
+    summary:
+      "Splits the conversation into topic segments. Click the button to just see the segments. Enter a query below to mark everything off-topic for removal.",
+    whenToUse:
+      "When a long session spans several unrelated threads and you only want to carry one forward.",
+    example: 'Query: "authentication rewrite" → keeps auth work, marks the rest.',
+  },
+  compressTools: {
+    title: "Compress Tools",
+    summary:
+      "Rewrites bulky tool results in place: LLM-summarizes the largest, middle-truncates medium ones, keeps the last N untouched. Configure thresholds in Settings.",
+    whenToUse:
+      "When tool output dominates the token count but you still need the structural context those calls provide.",
+  },
+  undo: {
+    title: "Undo",
+    summary:
+      "Revert the session file to the previous version. Every save creates a version, so undo is safe and reversible with Redo.",
+    whenToUse: "After any save that went further than you intended.",
+  },
+  redo: {
+    title: "Redo",
+    summary: "Reapply a version you just undid.",
+    whenToUse: "Immediately after an Undo if you changed your mind.",
+  },
+  history: {
+    title: "Version History",
+    summary:
+      "Browse every saved version of this session. Compare any two versions with a diff viewer, or restore an older one.",
+    whenToUse:
+      "When you want to audit what changed across several saves or roll back more than one step.",
+  },
+  clear: {
+    title: "Clear Selection",
+    summary: "Uncheck every message currently marked for removal.",
+    whenToUse: "When you want to start over without changing any files.",
+  },
+  invert: {
+    title: "Invert Selection",
+    summary: "Flip the marked/unmarked state of every message.",
+    whenToUse:
+      'When it\'s easier to pick what to KEEP — mark those, then Invert to mark the rest for removal.',
+  },
+  copy: {
+    title: "Copy Marked",
+    summary:
+      "Copy the full text of every marked message to the clipboard, in order.",
+    whenToUse:
+      "When you want to paste the removed context into a note or feed it to another tool before deleting it here.",
+  },
+  save: {
+    title: "Remove Marked & Save",
+    summary:
+      "Writes a new session file with the marked messages removed. The prior version is preserved in history — nothing is lost.",
+    whenToUse: "When you're ready to commit the edits.",
+  },
+};
 
 // -- Peek UI --
 // Non-destructive preview of a session's messages. Loaded via the stateless
@@ -1092,7 +1291,6 @@ export function SessionEditor() {
   } | null>(null);
   const llmWorking = activeTaskId !== null && handlerOutcome === null;
   const [focusQuery, setFocusQuery] = useState("");
-  const [showFocusInput, setShowFocusInput] = useState(false);
   const [showHistory, setShowHistory] = useState(false);
   // Compression thresholds — loaded from settings, passed into the backend.
   const [compressOpts, setCompressOpts] = useState<CompressToolsOptions>({
@@ -1161,9 +1359,15 @@ export function SessionEditor() {
 
   // Reset inline-expansion state when the loaded session changes — the
   // cached raw objects belong to the previous session's index space.
+  // Topic-focus state is also session-local: a query and its segments
+  // describe a specific conversation and are meaningless for any other.
+  // [LAW:one-source-of-truth] `selectedSession.sessionId` is the single
+  // signal that a new conversation is active; all derived UI flushes from here.
   useEffect(() => {
     setExpandedRows(new Set());
     setRawByIndex(new Map());
+    setFocusQuery("");
+    setTopicSegments([]);
   }, [selectedSession?.sessionId]);
 
   const handleToggle = useCallback(
@@ -1273,42 +1477,70 @@ export function SessionEditor() {
     });
   }, [messages, markedForRemoval, runHandlerTask]);
 
-  const handleTopicFocus = useCallback(async () => {
-    if (!focusQuery.trim()) return;
-    const segments = await runHandlerTask(async (taskId) => {
-      return (await window.electronAPI.invoke(
-        "llm:segment-topics",
-        taskId,
-        messages,
-        focusQuery,
-      )) as typeof topicSegments;
-    });
-    if (!segments) return;
-    setTopicSegments(segments);
-    const next = new Set(markedForRemoval);
-    let added = 0;
-    for (const seg of segments) {
-      if (!seg.relevant) {
+  // [LAW:dataflow-not-control-flow] Segment-only and focus-and-mark share
+  // one code path; the query string (empty vs non-empty) decides what the
+  // backend returns and whether we touch `markedForRemoval`. Same IPC call,
+  // same state updates, different data.
+  const runSegmentation = useCallback(
+    async (query: string) => {
+      const segments = await runHandlerTask(async (taskId) => {
+        return (await window.electronAPI.invoke(
+          "llm:segment-topics",
+          taskId,
+          messages,
+          query,
+        )) as typeof topicSegments;
+      });
+      if (!segments) return;
+      setTopicSegments(segments);
+
+      const trimmed = query.trim();
+      const offTopic = segments.filter((s) => !s.relevant);
+      const next = new Set(markedForRemoval);
+      let added = 0;
+      for (const seg of offTopic) {
         for (let i = seg.startIndex; i <= seg.endIndex; i++) {
           next.add(i);
           added++;
         }
       }
-    }
-    useSessionStore.setState({ markedForRemoval: next });
-    const keptTopics = segments
-      .filter((s) => s.relevant)
-      .map((s) => s.topic)
-      .join(", ");
-    setHandlerOutcome({
-      status: "done",
-      message:
-        added > 0
-          ? `Marked ${added} off-topic messages. Keeping: ${keptTopics}`
-          : `All segments relevant to "${focusQuery}"`,
-    });
-    setShowFocusInput(false);
-  }, [messages, focusQuery, markedForRemoval, topicSegments, runHandlerTask]);
+      useSessionStore.setState({ markedForRemoval: next });
+
+      if (!trimmed) {
+        setHandlerOutcome({
+          status: "done",
+          message: `Found ${segments.length} topic segment${segments.length === 1 ? "" : "s"}. Click chips to mark for removal, or enter a focus query to mark off-topic segments automatically.`,
+        });
+        return;
+      }
+
+      const keptTopics = segments
+        .filter((s) => s.relevant)
+        .map((s) => s.topic)
+        .join(", ");
+      setHandlerOutcome({
+        status: "done",
+        message:
+          added > 0
+            ? `Marked ${added} off-topic messages. Keeping: ${keptTopics}`
+            : `All segments relevant to "${trimmed}"`,
+      });
+    },
+    [messages, markedForRemoval, runHandlerTask],
+  );
+
+  // Button click: segment only. The panel becomes visible with all segments
+  // as "keep"; nothing is marked until the user either clicks chips or submits
+  // a focus query.
+  const handleSegmentTopics = useCallback(async () => {
+    await runSegmentation("");
+  }, [runSegmentation]);
+
+  // Query submit from inside the segments panel: segment + mark off-topic.
+  const handleApplyFocusQuery = useCallback(async () => {
+    if (!focusQuery.trim()) return;
+    await runSegmentation(focusQuery);
+  }, [focusQuery, runSegmentation]);
 
   const handleCompressTools = useCallback(async () => {
     const toolResultIndices = messages
@@ -1565,137 +1797,168 @@ export function SessionEditor() {
               />
             )}
 
-            {/* Toolbar */}
+            {/* Toolbar
+                [LAW:locality-or-seam] The toolbar is split into two rows that
+                serve different jobs: the actions row wraps freely (any width,
+                any number of tools), while the save row is always a single
+                line with stats on the left and the primary Save button on
+                the right — so "Remove N & Save" never gets pushed off-screen
+                when the window is narrow or the right panel is open. */}
             <div className="shrink-0 space-y-2 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2">
-              {/* Actions row */}
-              <div className="flex items-center gap-2">
-                <button
-                  onClick={handleAutoTrim}
-                  className="rounded bg-orange-600/20 px-2.5 py-1 text-sm font-medium text-orange-400 transition-colors hover:bg-orange-600/30"
-                  title="Automatically mark repetitive, loop-detection, and system noise messages for removal"
-                >
-                  Auto-Trim
-                </button>
-                <button
-                  onClick={handleSmartCompress}
-                  disabled={llmWorking || messages.length === 0}
-                  className="rounded bg-violet-600/20 px-2.5 py-1 text-sm font-medium text-violet-400 transition-colors hover:bg-violet-600/30 disabled:opacity-30"
-                  title="Use AI to identify messages that can be removed while preserving core context (requires API key in Settings)"
-                >
-                  {llmWorking ? "Analyzing..." : "Smart Compress"}
-                </button>
-                <button
-                  onClick={() => setShowFocusInput((v) => !v)}
-                  disabled={llmWorking || messages.length === 0}
-                  className="rounded bg-cyan-600/20 px-2.5 py-1 text-sm font-medium text-cyan-400 transition-colors hover:bg-cyan-600/30 disabled:opacity-30"
-                  title="Focus conversation on a specific topic, removing off-topic segments (requires API key in Settings)"
-                >
-                  Topic Focus
-                </button>
+              {/* Actions row — flex-wrap so groups can flow to the next line */}
+              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                {/* Cleanup / AI tools */}
+                <div className="flex items-center gap-2">
+                  <ToolHoverCard info={TOOL_HOVER_INFO.autoTrim}>
+                    <button
+                      onClick={handleAutoTrim}
+                      className="rounded bg-orange-600/20 px-2.5 py-1 text-sm font-medium text-orange-400 transition-colors hover:bg-orange-600/30"
+                    >
+                      Auto-Trim
+                    </button>
+                  </ToolHoverCard>
+                  <ToolHoverCard info={TOOL_HOVER_INFO.smartCompress}>
+                    <button
+                      onClick={handleSmartCompress}
+                      disabled={llmWorking || messages.length === 0}
+                      className="rounded bg-violet-600/20 px-2.5 py-1 text-sm font-medium text-violet-400 transition-colors hover:bg-violet-600/30 disabled:opacity-30"
+                    >
+                      {llmWorking ? "Analyzing..." : "Smart Compress"}
+                    </button>
+                  </ToolHoverCard>
+                  <ToolHoverCard info={TOOL_HOVER_INFO.topicFocus}>
+                    <button
+                      onClick={handleSegmentTopics}
+                      disabled={llmWorking || messages.length === 0}
+                      className="rounded bg-cyan-600/20 px-2.5 py-1 text-sm font-medium text-cyan-400 transition-colors hover:bg-cyan-600/30 disabled:opacity-30"
+                    >
+                      Topic Focus
+                    </button>
+                  </ToolHoverCard>
+                  <ToolHoverCard
+                    info={{
+                      ...TOOL_HOVER_INFO.compressTools,
+                      summary: `${TOOL_HOVER_INFO.compressTools.summary} Current thresholds: summarize at ${compressOpts.summarizeThreshold}+ tokens, truncate at ${compressOpts.truncateThreshold}+, keep last ${compressOpts.keepLastN}.`,
+                    }}
+                  >
+                    <button
+                      onClick={handleCompressTools}
+                      disabled={llmWorking || messages.length === 0}
+                      className="rounded bg-emerald-600/20 px-2.5 py-1 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-600/30 disabled:opacity-30"
+                    >
+                      Compress Tools
+                    </button>
+                  </ToolHoverCard>
+                </div>
 
                 <div className="h-4 w-px bg-neutral-700" />
 
-                <button
-                  onClick={handleCompressTools}
-                  disabled={llmWorking || messages.length === 0}
-                  className="rounded bg-emerald-600/20 px-2.5 py-1 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-600/30 disabled:opacity-30"
-                  title={`Compress tool results — summarize at ${compressOpts.summarizeThreshold}+ tokens, truncate at ${compressOpts.truncateThreshold}+ tokens, keep last ${compressOpts.keepLastN}. Configure in Settings.`}
-                >
-                  Compress Tools
-                </button>
+                {/* Versioning group */}
+                <div className="flex items-center gap-1">
+                  <ToolHoverCard
+                    info={{
+                      ...TOOL_HOVER_INFO.undo,
+                      summary: canUndo
+                        ? `${TOOL_HOVER_INFO.undo.summary} Next undo: ${versions[versionHead - 2]?.label ?? "previous version"}.`
+                        : `${TOOL_HOVER_INFO.undo.summary} Nothing to undo.`,
+                    }}
+                  >
+                    <button
+                      data-testid="undo-button"
+                      onClick={() => undo()}
+                      disabled={!canUndo}
+                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
+                    >
+                      &#8617; Undo
+                    </button>
+                  </ToolHoverCard>
+                  <ToolHoverCard
+                    info={{
+                      ...TOOL_HOVER_INFO.redo,
+                      summary: canRedo
+                        ? `${TOOL_HOVER_INFO.redo.summary} Next redo: ${versions[versionHead]?.label ?? "next version"}.`
+                        : `${TOOL_HOVER_INFO.redo.summary} Nothing to redo.`,
+                    }}
+                  >
+                    <button
+                      data-testid="redo-button"
+                      onClick={() => redo()}
+                      disabled={!canRedo}
+                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
+                    >
+                      &#8618; Redo
+                    </button>
+                  </ToolHoverCard>
+                  <ToolHoverCard info={TOOL_HOVER_INFO.history}>
+                    <button
+                      data-testid="history-button"
+                      onClick={() => setShowHistory((v) => !v)}
+                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
+                    >
+                      History ({versions.length})
+                    </button>
+                  </ToolHoverCard>
+                </div>
 
                 <div className="h-4 w-px bg-neutral-700" />
 
-                <button
-                  data-testid="undo-button"
-                  onClick={() => undo()}
-                  disabled={!canUndo}
-                  className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
-                  title={
-                    canUndo
-                      ? `Undo: ${versions[versionHead - 2]?.label ?? "previous"}`
-                      : "Nothing to undo"
-                  }
-                >
-                  &#8617; Undo
-                </button>
-                <button
-                  data-testid="redo-button"
-                  onClick={() => redo()}
-                  disabled={!canRedo}
-                  className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
-                  title={
-                    canRedo
-                      ? `Redo: ${versions[versionHead]?.label ?? "next"}`
-                      : "Nothing to redo"
-                  }
-                >
-                  &#8618; Redo
-                </button>
-                <button
-                  data-testid="history-button"
-                  onClick={() => setShowHistory((v) => !v)}
-                  className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
-                  title="Show version history"
-                >
-                  History ({versions.length})
-                </button>
+                {/* Selection group */}
+                <div className="flex items-center gap-1">
+                  <ToolHoverCard info={TOOL_HOVER_INFO.clear}>
+                    <button
+                      onClick={deselectAll}
+                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
+                    >
+                      Clear
+                    </button>
+                  </ToolHoverCard>
+                  <ToolHoverCard info={TOOL_HOVER_INFO.invert}>
+                    <button
+                      onClick={() => {
+                        const next = new Set<number>();
+                        for (const m of messages) {
+                          if (!markedForRemoval.has(m.index)) next.add(m.index);
+                        }
+                        useSessionStore.setState({ markedForRemoval: next });
+                      }}
+                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
+                    >
+                      Invert
+                    </button>
+                  </ToolHoverCard>
+                  <ToolHoverCard info={TOOL_HOVER_INFO.copy}>
+                    <button
+                      onClick={handleCopySelected}
+                      disabled={markedForRemoval.size === 0}
+                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
+                    >
+                      Copy
+                    </button>
+                  </ToolHoverCard>
+                </div>
+              </div>
 
-                <div className="h-4 w-px bg-neutral-700" />
+              <div className="h-px bg-neutral-800" />
 
-                <button
-                  onClick={deselectAll}
-                  className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
-                >
-                  Clear
-                </button>
-
-                <button
-                  onClick={() => {
-                    const next = new Set<number>();
-                    for (const m of messages) {
-                      if (!markedForRemoval.has(m.index)) next.add(m.index);
-                    }
-                    useSessionStore.setState({ markedForRemoval: next });
-                  }}
-                  className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
-                  title="Invert selection"
-                >
-                  Invert
-                </button>
-
-                <div className="h-4 w-px bg-neutral-700" />
-
-                <button
-                  onClick={handleCopySelected}
-                  disabled={markedForRemoval.size === 0}
-                  className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
-                  title="Copy selected message content to clipboard"
-                >
-                  Copy
-                </button>
-
-                <div className="flex-1" />
-
+              {/* Save row — one line, stats left, primary action right, always visible */}
+              <div className="flex items-center justify-between gap-3">
                 <SessionStats
                   messages={messages}
                   markedCount={markedForRemoval.size}
                   totalTokens={totalTokens}
                   markedTokens={markedTokens}
                 />
-
-                <div className="h-4 w-px bg-neutral-700" />
-
-                <button
-                  onClick={handleSave}
-                  disabled={markedForRemoval.size === 0 || saving}
-                  className="rounded bg-red-600/80 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-30"
-                  title="Remove marked messages and save. Original is backed up."
-                >
-                  {saving
-                    ? "Saving..."
-                    : `Remove ${markedForRemoval.size} & Save`}
-                </button>
+                <ToolHoverCard info={TOOL_HOVER_INFO.save}>
+                  <button
+                    onClick={handleSave}
+                    disabled={markedForRemoval.size === 0 || saving}
+                    className="rounded bg-red-600/80 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-30"
+                  >
+                    {saving
+                      ? "Saving..."
+                      : `Remove ${markedForRemoval.size} & Save`}
+                  </button>
+                </ToolHoverCard>
               </div>
 
               {/* Filter chips row */}
@@ -1780,59 +2043,52 @@ export function SessionEditor() {
               )}
             </div>
 
-            {/* Topic focus input */}
-            {showFocusInput && (
-              <div className="shrink-0 flex items-center gap-2 rounded-lg border border-cyan-800/50 bg-cyan-950/20 px-3 py-2">
-                <span className="text-sm text-cyan-400">Focus on:</span>
-                <input
-                  type="text"
-                  value={focusQuery}
-                  onChange={(e) => setFocusQuery(e.target.value)}
-                  onKeyDown={(e) => {
-                    if (e.key === "Enter") handleTopicFocus();
-                    if (e.key === "Escape") setShowFocusInput(false);
-                  }}
-                  placeholder='e.g. "authentication implementation" or "bug fix for routing"'
-                  className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder-neutral-600 outline-none focus:border-cyan-500"
-                  autoFocus
-                />
-                <button
-                  onClick={handleTopicFocus}
-                  disabled={!focusQuery.trim() || llmWorking}
-                  className="rounded bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-cyan-500 disabled:opacity-30"
-                >
-                  Analyze
-                </button>
-                <button
-                  onClick={() => setShowFocusInput(false)}
-                  className="rounded px-2 py-1.5 text-sm text-neutral-400 hover:bg-neutral-800"
-                >
-                  Cancel
-                </button>
-              </div>
-            )}
-
-
-            {/* Topic segments overlay */}
+            {/* Topic segments panel — visible whenever segmentation has run.
+                Shows a legend so the meaning of the two chip states is
+                explicit (keep vs will-be-removed), and hosts the optional
+                "Focus on" query that marks off-topic segments automatically.
+                [LAW:one-source-of-truth] `topicSegments` drives visibility;
+                we don't keep a separate "is panel open" flag. */}
             {topicSegments.length > 0 && (
-              <div className="shrink-0 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2">
-                <div className="flex items-center justify-between mb-2">
-                  <span className="text-sm font-medium text-neutral-300">
+              <div className="shrink-0 space-y-2 rounded-lg border border-cyan-900/40 bg-cyan-950/10 px-3 py-2">
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-medium text-neutral-200">
                     Topic Segments
                   </span>
                   <button
-                    onClick={() => setTopicSegments([])}
+                    onClick={() => {
+                      setTopicSegments([]);
+                      setFocusQuery("");
+                    }}
                     className="rounded px-2 py-0.5 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
                   >
                     Dismiss
                   </button>
                 </div>
+
+                {/* Legend — removes ambiguity about which chip state is kept */}
+                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-400">
+                  <span className="flex items-center gap-1.5">
+                    <span className="rounded bg-cyan-600/20 px-1.5 py-0.5 text-cyan-400">
+                      kept
+                    </span>
+                    <span>stays in the session</span>
+                  </span>
+                  <span className="flex items-center gap-1.5">
+                    <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-neutral-500 line-through">
+                      removed
+                    </span>
+                    <span>will be deleted on Save</span>
+                  </span>
+                  <span className="text-neutral-500">Click any chip to toggle.</span>
+                </div>
+
+                {/* Chips */}
                 <div className="flex flex-wrap gap-1.5">
                   {topicSegments.map((seg, i) => (
                     <button
                       key={i}
                       onClick={() => {
-                        // Toggle segment relevance — mark/unmark its messages
                         const next = new Set(markedForRemoval);
                         const wasRelevant = seg.relevant;
                         for (let idx = seg.startIndex; idx <= seg.endIndex; idx++) {
@@ -1848,14 +2104,39 @@ export function SessionEditor() {
                       }}
                       className={`rounded px-2 py-1 text-sm transition-colors ${
                         seg.relevant
-                          ? "bg-cyan-600/20 text-cyan-400"
-                          : "bg-neutral-800 text-neutral-500 line-through"
+                          ? "bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30"
+                          : "bg-neutral-800 text-neutral-500 line-through hover:bg-neutral-700"
                       }`}
                       title={`Messages ${seg.startIndex}-${seg.endIndex} (${formatTokens(seg.tokenCount)}). Click to toggle.`}
                     >
                       {seg.topic} ({formatTokens(seg.tokenCount)})
                     </button>
                   ))}
+                </div>
+
+                {/* Focus query input — the second triggers off the user's
+                    intent. Typing a query and submitting re-runs the analysis
+                    and auto-marks off-topic segments. */}
+                <div className="flex items-center gap-2 border-t border-cyan-900/30 pt-2">
+                  <span className="text-sm text-cyan-400">Focus on:</span>
+                  <input
+                    type="text"
+                    value={focusQuery}
+                    onChange={(e) => setFocusQuery(e.target.value)}
+                    onKeyDown={(e) => {
+                      if (e.key === "Enter") void handleApplyFocusQuery();
+                    }}
+                    placeholder='e.g. "authentication implementation" or "routing bug"'
+                    className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder-neutral-600 outline-none focus:border-cyan-500"
+                  />
+                  <button
+                    onClick={() => void handleApplyFocusQuery()}
+                    disabled={!focusQuery.trim() || llmWorking}
+                    className="rounded bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-cyan-500 disabled:opacity-30"
+                    title="Re-segment and auto-mark everything outside this topic"
+                  >
+                    Mark off-topic
+                  </button>
                 </div>
               </div>
             )}

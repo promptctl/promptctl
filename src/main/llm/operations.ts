@@ -73,7 +73,10 @@ Only suggest removals where you're confident the information is not needed for c
 }
 
 /**
- * Segment a conversation into topics and identify which are relevant to a focus query.
+ * Segment a conversation into topics. When focusQuery is empty, every segment
+ * is returned as relevant (segment-only mode). When focusQuery is non-empty,
+ * segments unrelated to the query are marked relevant=false so the caller can
+ * mark them for removal.
  */
 export async function segmentTopics(
   messages: MessageSummary[],
@@ -86,8 +89,14 @@ export async function segmentTopics(
       `[${m.index}] ${m.type} (${m.tokens} tok): ${m.preview.slice(0, 120)}`,
   );
 
-  const response = await chatComplete(
-    `You are a conversation analyst. You segment AI coding session transcripts into topic blocks and identify which blocks are relevant to a user's focus query.
+  const query = focusQuery.trim();
+  const hasQuery = query.length > 0;
+
+  // [LAW:dataflow-not-control-flow] Same call path either way; the prompt and
+  // user message differ by data. Relevance judgement is asked only when the
+  // caller supplies a query.
+  const systemPrompt = hasQuery
+    ? `You are a conversation analyst. You segment AI coding session transcripts into topic blocks and identify which blocks are relevant to a user's focus query.
 
 A topic block is a contiguous sequence of messages about the same task or subject. Boundaries occur when:
 - The user changes direction ("now let's work on X")
@@ -98,8 +107,26 @@ Return a JSON array of topic segments:
 [{"topic": "short description", "startIndex": 0, "endIndex": 5, "tokenCount": 1234, "relevant": true}]
 
 Set "relevant": true for segments that are related to the focus query, false for segments that are not.
-Be inclusive — if a segment provides context needed to understand a relevant segment, mark it relevant too.`,
-    `Focus query: "${focusQuery}"\n\nConversation (${messages.length} messages):\n\n${lines.join("\n")}`,
+Be inclusive — if a segment provides context needed to understand a relevant segment, mark it relevant too.`
+    : `You are a conversation analyst. You segment AI coding session transcripts into topic blocks for a reader who wants to understand what the conversation covers at a glance.
+
+A topic block is a contiguous sequence of messages about the same task or subject. Boundaries occur when:
+- The user changes direction ("now let's work on X")
+- A new task begins after the previous one is complete
+- The subject matter shifts significantly
+
+Return a JSON array of topic segments:
+[{"topic": "short description", "startIndex": 0, "endIndex": 5, "tokenCount": 1234, "relevant": true}]
+
+Set "relevant": true for every segment — the reader is not filtering, just browsing the structure.`;
+
+  const userPrompt = hasQuery
+    ? `Focus query: "${query}"\n\nConversation (${messages.length} messages):\n\n${lines.join("\n")}`
+    : `Conversation (${messages.length} messages):\n\n${lines.join("\n")}`;
+
+  const response = await chatComplete(
+    systemPrompt,
+    userPrompt,
     handle?.signal,
   );
   handle?.throwIfCancelled();
