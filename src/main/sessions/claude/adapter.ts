@@ -60,12 +60,11 @@ function isVisibleMessage(line: ClaudeLine): boolean {
   return VISIBLE_TYPES.has(line.type) && line.isSidechain !== true;
 }
 
-function isUserTextMessage(line: ClaudeLine): boolean {
-  return (
-    line.type === "user" &&
-    line.message?.role === "user" &&
-    typeof line.message.content === "string"
-  );
+function userTextContent(line: ClaudeLine): string | null {
+  if (line.type !== "user") return null;
+  const msg = line.message;
+  if (msg?.role !== "user") return null;
+  return typeof msg.content === "string" ? msg.content : null;
 }
 
 function extractTextPreview(line: ClaudeLine): string {
@@ -287,12 +286,12 @@ function buildSummary(
 }
 
 // Parses content into [parsed, physicalIndex] pairs for visible messages only.
-function parseVisibleMessages(content: string): Array<{
+function parseVisibleMessages(content: string): {
   parsed: ClaudeLine;
   physIdx: number;
-}> {
+}[] {
   const lines = content.split("\n");
-  const visible: Array<{ parsed: ClaudeLine; physIdx: number }> = [];
+  const visible: { parsed: ClaudeLine; physIdx: number }[] = [];
   for (let physIdx = 0; physIdx < lines.length; physIdx++) {
     const raw = lines[physIdx];
     if (!raw.trim()) continue;
@@ -505,12 +504,9 @@ export const claudeAdapter: ProviderAdapter = {
             }
 
             // Collect previews from user text messages
-            if (
-              previewMessages.length < 3 &&
-              isUserTextMessage(parsed)
-            ) {
-              const text = parsed.message!.content as string;
-              if (text.length > 5) {
+            if (previewMessages.length < 3) {
+              const text = userTextContent(parsed);
+              if (text !== null && text.length > 5) {
                 previewMessages.push(
                   text.slice(0, 200).replace(/\n/g, " "),
                 );

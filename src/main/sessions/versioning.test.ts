@@ -1,6 +1,6 @@
 // @vitest-environment node
 import { describe, it, expect, beforeEach, afterEach } from "vitest";
-import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
+import { mkdtemp, rm, writeFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 import {
@@ -16,6 +16,11 @@ import {
 
 let tmpDir: string;
 let sessionPath: string;
+
+function assertPresent<T>(value: T | null | undefined): asserts value is T {
+  expect(value).toBeDefined();
+  expect(value).not.toBeNull();
+}
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(path.join(os.tmpdir(), "versioning-test-"));
@@ -177,9 +182,9 @@ describe("undo", () => {
     await recordVersion(sessionPath, "claude", "v2", "B", 0);
 
     const result = await undo(sessionPath);
-    expect(result).not.toBeNull();
-    expect(result!.content).toBe("v1");
-    expect(result!.newHead).toBe(1);
+    assertPresent(result);
+    expect(result.content).toBe("v1");
+    expect(result.newHead).toBe(1);
 
     const meta = await listVersions(sessionPath);
     expect(meta.head).toBe(1);
@@ -201,8 +206,12 @@ describe("undo", () => {
     await recordVersion(sessionPath, "claude", "v2", "B", 0);
     await recordVersion(sessionPath, "claude", "v3", "C", 0);
 
-    expect((await undo(sessionPath))!.newHead).toBe(2);
-    expect((await undo(sessionPath))!.newHead).toBe(1);
+    const u1 = await undo(sessionPath);
+    assertPresent(u1);
+    expect(u1.newHead).toBe(2);
+    const u2 = await undo(sessionPath);
+    assertPresent(u2);
+    expect(u2.newHead).toBe(1);
     expect(await undo(sessionPath)).toBeNull();
   });
 });
@@ -218,9 +227,9 @@ describe("redo", () => {
     await undo(sessionPath); // head=1
 
     const result = await redo(sessionPath);
-    expect(result).not.toBeNull();
-    expect(result!.content).toBe("v2");
-    expect(result!.newHead).toBe(2);
+    assertPresent(result);
+    expect(result.content).toBe("v2");
+    expect(result.newHead).toBe(2);
 
     const meta = await listVersions(sessionPath);
     expect(meta.head).toBe(2);
@@ -250,9 +259,9 @@ describe("restoreVersion", () => {
     await recordVersion(sessionPath, "claude", "v3", "C", 300);
 
     const restored = await restoreVersion(sessionPath, "claude", 1);
-    expect(restored).not.toBeNull();
-    expect(restored!.idx).toBe(4);
-    expect(restored!.label).toBe("Restored from v1");
+    assertPresent(restored);
+    expect(restored.idx).toBe(4);
+    expect(restored.label).toBe("Restored from v1");
 
     const meta = await listVersions(sessionPath);
     expect(meta.head).toBe(4);

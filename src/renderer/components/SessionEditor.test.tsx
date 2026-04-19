@@ -338,7 +338,9 @@ describe("Task toast — Compress Tools", () => {
       ],
     });
 
-    let resolve: (v: unknown) => void = () => {};
+    let resolve: (v: unknown) => void = () => {
+      // Placeholder replaced synchronously by the Promise executor below.
+    };
     const pending = new Promise((r) => {
       resolve = r;
     });

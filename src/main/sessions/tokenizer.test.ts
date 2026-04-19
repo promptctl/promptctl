@@ -49,8 +49,8 @@ describe("truncateMiddle", () => {
     const text = "x ".repeat(1000);
     const result = truncateMiddle(text, 50);
     const match = result.match(/(\d+) tokens omitted/);
-    expect(match).not.toBeNull();
-    const dropped = parseInt(match![1], 10);
+    if (!match) throw new Error("expected match for 'N tokens omitted'");
+    const dropped = parseInt(match[1], 10);
     expect(dropped).toBeGreaterThan(0);
     // dropped + 2*keep should approximate the original token count
     const originalTokens = countTokens(text);

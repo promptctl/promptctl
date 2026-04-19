@@ -52,7 +52,7 @@ function extractPreview(msg: RawMessage): string {
     }
   }
   if ("toolCalls" in msg && Array.isArray(msg.toolCalls)) {
-    const calls = msg.toolCalls as Array<{ name?: string }>;
+    const calls = msg.toolCalls as { name?: string }[];
     const names = calls.map((tc) => tc.name ?? "unknown").join(", ");
     return `[tool calls: ${names}]`;
   }
@@ -68,7 +68,7 @@ function extractText(msg: RawMessage): string {
     }
   }
   if ("toolCalls" in msg && Array.isArray(msg.toolCalls)) {
-    const calls = msg.toolCalls as Array<{ name?: string }>;
+    const calls = msg.toolCalls as { name?: string }[];
     for (const tc of calls) {
       parts.push(`[Tool call: ${tc.name ?? "unknown"}]`);
     }
@@ -79,7 +79,7 @@ function extractText(msg: RawMessage): string {
 
 function extractToolNames(msg: RawMessage): string[] {
   if (!("toolCalls" in msg) || !Array.isArray(msg.toolCalls)) return [];
-  const calls = msg.toolCalls as Array<{ name?: string }>;
+  const calls = msg.toolCalls as { name?: string }[];
   const names = new Set<string>();
   for (const tc of calls) {
     if (tc.name) names.add(tc.name);
@@ -233,14 +233,12 @@ export const geminiAdapter: ProviderAdapter = {
       if (!entry.isDirectory()) continue;
       const projectDir = path.join(GEMINI_TMP, entry.name);
 
-      let projectRoot = "";
-      try {
-        projectRoot = (
-          await readFile(path.join(projectDir, ".project_root"), "utf-8")
-        ).trim();
-      } catch {
-        projectRoot = folderToRoot.get(entry.name) ?? "";
-      }
+      const projectRoot = await readFile(
+        path.join(projectDir, ".project_root"),
+        "utf-8",
+      )
+        .then((raw) => raw.trim())
+        .catch(() => folderToRoot.get(entry.name) ?? "");
 
       const displayName = projectRoot.startsWith("/")
         ? path.basename(projectRoot)
@@ -384,11 +382,12 @@ export const geminiAdapter: ProviderAdapter = {
   },
 
   getMessagesContent(indices: number[]): string {
-    if (!loadedSession) return "";
+    const session = loadedSession;
+    if (!session) return "";
     const sorted = [...indices].sort((a, b) => a - b);
     return sorted
       .map((i) => {
-        const msg = loadedSession!.messages[i];
+        const msg = session.messages[i];
         if (!msg) return "";
         return extractText(msg);
       })

@@ -123,13 +123,22 @@ function systemMessage(text: string) {
 // --- Helpers ---
 
 let tmpDir: string;
-let sessionFile: string;
 
 async function writeSession(...lines: Record<string, unknown>[]): Promise<string> {
   const filePath = path.join(tmpDir, "test-session.jsonl");
   await writeFile(filePath, jsonl(...lines), "utf-8");
-  sessionFile = filePath;
   return filePath;
+}
+
+// The adapter interface declares compressToolResults optional so test stubs can
+// skip it, but the Claude adapter always implements it. Narrow once here.
+function compress(
+  ...args: Parameters<NonNullable<typeof claudeAdapter.compressToolResults>>
+): ReturnType<NonNullable<typeof claudeAdapter.compressToolResults>> {
+  if (!claudeAdapter.compressToolResults) {
+    throw new Error("claude adapter must implement compressToolResults");
+  }
+  return claudeAdapter.compressToolResults(...args);
 }
 
 beforeEach(async () => {
@@ -521,7 +530,7 @@ describe("compressToolResults — truncate path", () => {
     const originalTokens = msgs[targetIdx].tokens;
     expect(originalTokens).toBeGreaterThan(1000);
 
-    const result = await claudeAdapter.compressToolResults!(
+    const result = await compress(
       [targetIdx],
       TRUNCATE_ONLY,
     );
@@ -547,7 +556,7 @@ describe("compressToolResults — truncate path", () => {
     );
     await claudeAdapter.loadSession(fp);
 
-    await claudeAdapter.compressToolResults!([0], TRUNCATE_ONLY);
+    await compress([0], TRUNCATE_ONLY);
 
     // Check in-memory state (not yet saved to disk)
     const raw = claudeAdapter.getMessageContent(0);
@@ -567,7 +576,7 @@ describe("compressToolResults — truncate path", () => {
     );
     await claudeAdapter.loadSession(fp);
 
-    const result = await claudeAdapter.compressToolResults!([0], TRUNCATE_ONLY);
+    const result = await compress([0], TRUNCATE_ONLY);
     expect(result.updated).toHaveLength(0);
     expect(result.skippedTooSmall).toBeGreaterThan(0);
   });
@@ -584,7 +593,7 @@ describe("compressToolResults — truncate path", () => {
     await claudeAdapter.loadSession(fp);
 
     // Try to clear all 5; expect tr3-tr5 (last 3) to be protected
-    const result = await claudeAdapter.compressToolResults!(
+    const result = await compress(
       [0, 1, 2, 3, 4],
       TRUNCATE_ONLY,
     );
@@ -604,7 +613,7 @@ describe("compressToolResults — truncate path", () => {
     );
     await claudeAdapter.loadSession(fp);
 
-    await claudeAdapter.compressToolResults!([1], TRUNCATE_ONLY);
+    await compress([1], TRUNCATE_ONLY);
     await claudeAdapter.saveSession([]);
 
     const saved = await readFile(fp, "utf-8");
@@ -637,7 +646,7 @@ describe("compressToolResults — summarize path", () => {
     const msgs = await claudeAdapter.loadSession(fp);
 
     const originalTokens = msgs[0].tokens;
-    const result = await claudeAdapter.compressToolResults!([0], SUMMARIZE_ONLY);
+    const result = await compress([0], SUMMARIZE_ONLY);
 
     expect(result.updated).toHaveLength(1);
     expect(result.updated[0].tokens).toBeLessThan(originalTokens);
@@ -683,7 +692,7 @@ describe("compressToolResults — threshold dispatch", () => {
     );
     await claudeAdapter.loadSession(fp);
 
-    const result = await claudeAdapter.compressToolResults!(
+    const result = await compress(
       [0, 1, 2],
       {
         summarizeThreshold: 3000,
@@ -711,7 +720,7 @@ describe("compressToolResults — threshold dispatch", () => {
     );
     await claudeAdapter.loadSession(fp);
 
-    const progressCalls: Array<{ done: number; total: number }> = [];
+    const progressCalls: { done: number; total: number }[] = [];
     const abort = new AbortController();
     const handle = {
       id: "test",
@@ -723,7 +732,7 @@ describe("compressToolResults — threshold dispatch", () => {
       },
     };
 
-    await claudeAdapter.compressToolResults!([0, 1], TRUNCATE_ONLY, handle);
+    await compress([0, 1], TRUNCATE_ONLY, handle);
 
     // We should see an initial 0/2 and at least one done-count update per item.
     expect(progressCalls[0]).toEqual({ done: 0, total: 2 });
@@ -758,7 +767,7 @@ describe("compressToolResults — threshold dispatch", () => {
     };
 
     await expect(
-      claudeAdapter.compressToolResults!([0, 1, 2], TRUNCATE_ONLY, handle),
+      compress([0, 1, 2], TRUNCATE_ONLY, handle),
     ).rejects.toThrow("cancelled");
     // At least one item was processed; the loop exited before all three.
     expect(processed).toBeGreaterThanOrEqual(1);

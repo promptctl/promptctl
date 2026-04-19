@@ -21,13 +21,13 @@ export interface MockElectronAPI {
   on: Mock;
   writeClipboard: Mock;
   // Map of channel → listeners for `on` testing helpers
-  listeners: Map<string, Array<(...args: unknown[]) => void>>;
+  listeners: Map<string, ((...args: unknown[]) => void)[]>;
   /** Trigger an `on` listener manually (simulates main → renderer event). */
   emit: (channel: string, ...args: unknown[]) => void;
 }
 
 export function installElectronMock(): MockElectronAPI {
-  const listeners = new Map<string, Array<(...args: unknown[]) => void>>();
+  const listeners = new Map<string, ((...args: unknown[]) => void)[]>();
 
   const mock: MockElectronAPI = {
     invoke: vi.fn(),

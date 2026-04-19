@@ -10,7 +10,7 @@ export function countTokens(text: string): number {
 }
 
 /** Keep the first and last `keep` tokens, replace the middle with ellipsis. */
-export function truncateMiddle(text: string, keep: number = 100): string {
+export function truncateMiddle(text: string, keep = 100): string {
   const tokens = enc.encode(text);
   if (tokens.length <= keep * 2) return text;
   const head = enc.decode(tokens.slice(0, keep));

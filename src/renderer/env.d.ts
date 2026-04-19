@@ -16,6 +16,8 @@ import type {
   CompressToolsResult,
   SessionSearchResult,
   TaskEvent,
+  VersionMeta,
+  DiffEntry,
 } from "../shared/types";
 
 // Settings shape mirrored from main/settings/store.ts. Duplicated here so the
@@ -78,7 +80,7 @@ export interface ElectronAPI {
     projectPaths: string[],
   ): Promise<SessionInfo[]>;
   invoke(
-    channel: "session:load",
+    channel: "session:load" | "session:peek",
     provider: ProviderKind,
     filePath: string,
   ): Promise<MessageSummary[]>;
@@ -100,22 +102,19 @@ export interface ElectronAPI {
     indicesToRemove: number[],
     outputPath?: string,
   ): Promise<string>;
-  invoke(channel: "session:list-versions"): Promise<import("../shared/types").VersionMeta>;
+  invoke(channel: "session:list-versions"): Promise<VersionMeta>;
   invoke(
-    channel: "session:undo",
-  ): Promise<import("../shared/types").MessageSummary[] | null>;
-  invoke(
-    channel: "session:redo",
-  ): Promise<import("../shared/types").MessageSummary[] | null>;
+    channel: "session:undo" | "session:redo",
+  ): Promise<MessageSummary[] | null>;
   invoke(
     channel: "session:restore-version",
     targetIdx: number,
-  ): Promise<import("../shared/types").MessageSummary[] | null>;
+  ): Promise<MessageSummary[] | null>;
   invoke(
     channel: "session:diff-versions",
     fromIdx: number,
     toIdx: number,
-  ): Promise<import("../shared/types").DiffEntry[]>;
+  ): Promise<DiffEntry[]>;
   invoke(channel: "settings:load"): Promise<AppSettingsShape>;
   invoke(
     channel: "settings:save",
@@ -151,14 +150,9 @@ export interface ElectronAPI {
     taskId: string,
     query: string,
   ): Promise<SessionSearchResult[]>;
-  invoke(
-    channel: "session:peek",
-    provider: ProviderKind,
-    filePath: string,
-  ): Promise<MessageSummary[]>;
   invoke(channel: "task:cancel", taskId: string): Promise<boolean>;
-  writeClipboard(text: string): void;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  writeClipboard(text: string): void;
 
   on(
     channel: "tmux:snapshot",

@@ -17,7 +17,7 @@ interface RawMessageFixture {
   id: string;
   timestamp: string;
   type: string;
-  content?: string | Array<{ text?: string }>;
+  content?: string | { text?: string }[];
   toolCalls?: unknown[];
 }
 

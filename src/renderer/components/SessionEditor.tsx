@@ -1177,7 +1177,6 @@ export function SessionEditor() {
     previewRaw,
     loading,
     saving,
-    autoTrimIndices,
     versions,
     versionHead,
     loadProjects,
@@ -1315,13 +1314,13 @@ export function SessionEditor() {
       });
   }, []);
   const [topicSegments, setTopicSegments] = useState<
-    Array<{
+    {
       topic: string;
       startIndex: number;
       endIndex: number;
       tokenCount: number;
       relevant: boolean;
-    }>
+    }[]
   >([]);
 
   const [diffState, setDiffState] = useState<{
@@ -1455,7 +1454,7 @@ export function SessionEditor() {
         "llm:suggest-compression",
         taskId,
         messages,
-      )) as Array<{ indices: number[]; reason: string }>;
+      )) as { indices: number[]; reason: string }[];
     });
     if (!suggestions) return; // caught by runHandlerTask
     const next = new Set(markedForRemoval);

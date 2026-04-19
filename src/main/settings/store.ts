@@ -29,13 +29,11 @@ let cached: AppSettings | null = null;
 
 export async function loadSettings(): Promise<AppSettings> {
   if (cached) return cached;
-  try {
-    const raw = await readFile(SETTINGS_FILE, "utf-8");
-    cached = { ...DEFAULTS, ...JSON.parse(raw) };
-  } catch {
-    cached = { ...DEFAULTS };
-  }
-  return cached!;
+  const loaded = await readFile(SETTINGS_FILE, "utf-8")
+    .then((raw) => ({ ...DEFAULTS, ...JSON.parse(raw) }) as AppSettings)
+    .catch(() => ({ ...DEFAULTS }));
+  cached = loaded;
+  return loaded;
 }
 
 export async function saveSettings(

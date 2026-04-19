@@ -131,7 +131,7 @@ function RouteRestorer() {
       }
       restored.current = true;
     });
-  }, []); // eslint-disable-line react-hooks/exhaustive-deps
+  }, []);
 
   // Persist route on every navigation after restore
   useEffect(() => {
