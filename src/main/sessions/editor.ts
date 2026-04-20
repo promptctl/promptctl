@@ -12,7 +12,9 @@ import type {
   VersionMeta,
   CompressToolsOptions,
   CompressToolsResult,
+  SessionSaveResult,
 } from "../../shared/types";
+import { validateClaudeContent } from "./claude/validator";
 import type { TaskHandle } from "../tasks/runner";
 import type { ProviderAdapter } from "./types";
 import { getAllProviders, getProvider } from "./registry";
@@ -120,26 +122,65 @@ async function ensureBaselineForActive(): Promise<void> {
   await ensureBaseline(filePath, provider, tokens);
 }
 
+// [LAW:single-enforcer] Pre-save validation runs here, not in the adapter. The
+// adapter is the format translator; policy (block vs. force) is a coordinator
+// decision. Validators that apply across providers register here.
+//
+// Only Claude today — Gemini's edit surface only removes entries from
+// messages[] before JSON.stringify, which can't break session_object_shape
+// (format-enforced) or message_id_stability (adapter preserves ids in its
+// filter). There is no failure path through the editor, so no validator runs.
+// A validator would be [LAW:no-defensive-null-guards] with no else-branch.
+//
+// [LAW:dataflow-not-control-flow] providers that don't implement
+// previewSaveContent contribute an empty violation list — same code path, data
+// decides the outcome.
+function validatePreSave(
+  adapter: ProviderAdapter,
+  indicesToRemove: number[],
+): SessionSaveResult["violations"] {
+  if (adapter.id !== "claude") return [];
+  if (!adapter.previewSaveContent) return [];
+  const content = adapter.previewSaveContent(indicesToRemove);
+  return validateClaudeContent(content).violations;
+}
+
 export async function saveSession(
   indicesToRemove: number[],
   outputPath?: string,
-): Promise<string> {
+  force = false,
+): Promise<SessionSaveResult> {
+  const adapter = active();
+
+  const violations = validatePreSave(adapter, indicesToRemove);
+  if (violations.length > 0 && !force) {
+    return { path: null, violations, forced: false, blocked: true };
+  }
+
   // Capture pre-edit baseline if first edit
   await ensureBaselineForActive();
 
-  const result = await active().saveSession(indicesToRemove, outputPath);
+  const writtenPath = await adapter.saveSession(indicesToRemove, outputPath);
 
   // If outputPath was used and differs from active, switch active path
   if (outputPath && outputPath !== activeFilePath) {
     activeFilePath = outputPath;
   }
 
-  const label =
+  const removalLabel =
     indicesToRemove.length === 0
       ? "Saved (no removals)"
       : `Removed ${indicesToRemove.length} message${indicesToRemove.length === 1 ? "" : "s"}`;
+  const label =
+    violations.length > 0 ? `${removalLabel} (saved with ${violations.length} violation${violations.length === 1 ? "" : "s"})` : removalLabel;
   await recordCurrentVersion(label);
-  return result;
+
+  return {
+    path: writtenPath,
+    violations,
+    forced: violations.length > 0,
+    blocked: false,
+  };
 }
 
 export async function compressToolResults(

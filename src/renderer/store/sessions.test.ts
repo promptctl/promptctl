@@ -254,7 +254,12 @@ describe("save action", () => {
     });
 
     setInvokeHandlers(api, {
-      "session:save": () => "/test.jsonl",
+      "session:save": () => ({
+        path: "/test.jsonl",
+        violations: [],
+        forced: false,
+        blocked: false,
+      }),
       "session:load": () => [makeMessage(0)],
       "session:list-versions": () => makeVersionMeta(2, 2),
     });

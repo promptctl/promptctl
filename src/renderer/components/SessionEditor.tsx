@@ -10,9 +10,11 @@ import type {
   VersionInfo,
   CompressToolsOptions,
   CompressToolsResult,
+  SessionSaveResult,
   SessionSearchResult,
   SessionSearchMatch,
 } from "../../shared/types";
+import { ValidationViolationsDialog } from "./ValidationViolationsDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { DiffViewer } from "./DiffViewer";
 import { TaskToast } from "./TaskToast";
@@ -1272,7 +1274,7 @@ export function SessionEditor() {
       });
     }
   }, [expandedRows, rawByIndex]);
-  const [saveResult, setSaveResult] = useState<string | null>(null);
+  const [saveResult, setSaveResult] = useState<SessionSaveResult | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
   const [copyStatus, setCopyStatus] = useState<string | null>(null);
@@ -1774,7 +1776,7 @@ export function SessionEditor() {
               </div>
 
               <div className="flex items-center gap-2">
-                {saveResult && (
+                {saveResult && !saveResult.blocked && (
                   <span className="text-sm text-green-400">
                     Saved (backup created)
                   </span>
@@ -2141,7 +2143,7 @@ export function SessionEditor() {
             )}
 
             {/* Resume reminder after save */}
-            {saveResult && activeMetadata && (
+            {saveResult && !saveResult.blocked && activeMetadata && (
               <div className="shrink-0 rounded-lg border border-green-800/50 bg-green-950/20 px-4 py-3">
                 <p className="text-sm text-neutral-400">
                   Saved. Original backed up. Resume with:
@@ -2313,6 +2315,21 @@ export function SessionEditor() {
           setHandlerOutcome(null);
         }}
       />
+
+      {/* Pre-save validation surfaced structural violations (broken tool_use/
+          tool_result pairing, orphaned parent refs). User can cancel and fix
+          their selection, or force through for debugging. */}
+      {saveResult?.blocked && (
+        <ValidationViolationsDialog
+          result={saveResult}
+          onCancel={() => setSaveResult(null)}
+          onForceSave={async () => {
+            const result = await save(true);
+            setSaveResult(result);
+          }}
+          saving={saving}
+        />
+      )}
     </div>
   );
 }

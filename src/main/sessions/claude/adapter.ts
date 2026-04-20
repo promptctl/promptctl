@@ -362,6 +362,21 @@ let loadedParsed: ClaudeLine[] = [];
 let physicalLineMap: number[] = []; // physicalLineMap[logicalIndex] = physical line number
 let loadedPath: string | null = null;
 
+// [LAW:one-source-of-truth] Single definition of "what saveSession writes" —
+// used both by previewSaveContent (no I/O, for pre-save validation) and by
+// saveSession itself. Keeping the logic in one place means the validator can
+// never see a different content than what lands on disk.
+function computeSaveContent(indicesToRemove: number[]): string {
+  if (!loadedPath) {
+    throw new Error("No session loaded");
+  }
+  const physicalToRemove = new Set(
+    indicesToRemove.map((i) => physicalLineMap[i]),
+  );
+  const trimmedLines = loadedLines.filter((_, i) => !physicalToRemove.has(i));
+  return trimmedLines.join("\n");
+}
+
 
 // --- Adapter implementation ---
 
@@ -656,6 +671,14 @@ export const claudeAdapter: ProviderAdapter = {
     return [...toRemove].sort((a, b) => a - b);
   },
 
+  // [LAW:single-enforcer] Shape what saveSession would write, without I/O.
+  // The editor coordinator calls this to run the validator pre-write; any
+  // consumer that wants to preflight an edit (proxy, schema:check) can use
+  // the same entrypoint.
+  previewSaveContent(indicesToRemove: number[]): string {
+    return computeSaveContent(indicesToRemove);
+  },
+
   async saveSession(
     indicesToRemove: number[],
     outputPath?: string,
@@ -664,18 +687,9 @@ export const claudeAdapter: ProviderAdapter = {
       throw new Error("No session loaded");
     }
 
-    // Translate logical indices to physical line numbers
-    const physicalToRemove = new Set(
-      indicesToRemove.map((i) => physicalLineMap[i]),
-    );
-
-    // Filter out removed lines, preserving all non-visible lines
-    const trimmedLines = loadedLines.filter(
-      (_, i) => !physicalToRemove.has(i),
-    );
-
+    const content = computeSaveContent(indicesToRemove);
     const dest = outputPath ?? loadedPath;
-    await writeFile(dest, trimmedLines.join("\n"), "utf-8");
+    await writeFile(dest, content, "utf-8");
 
     // Reload
     loadedPath = dest;

@@ -411,7 +411,10 @@ describe("listVersions metadata", () => {
     );
     await loadSession("claude", fp);
 
-    await saveSession([0]); // v2: Removed 1
+    // The toolResult fixture emits orphaned tool_result blocks (no paired
+    // tool_use) which the validator correctly blocks. This test is about
+    // versioning metadata, not validation, so force through.
+    await saveSession([0], undefined, true); // v2: Removed 1
     await loadSession("claude", fp);
     // After removing index 0, tr-target shifted from idx 2 to idx 1
     await compressToolResults([1], TRUNCATE_ONLY); // v3: Truncated
@@ -419,7 +422,8 @@ describe("listVersions metadata", () => {
     const meta = await listVersions();
     expect(meta.versions.map((v) => v.label)).toEqual([
       "Initial snapshot",
-      "Removed 1 message",
+      // Label decorated because the force-save went through with a violation.
+      "Removed 1 message (saved with 1 violation)",
       "Truncated 1 tool result",
     ]);
     expect(meta.head).toBe(3);

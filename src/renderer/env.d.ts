@@ -14,6 +14,7 @@ import type {
   ProviderUIMetadata,
   CompressToolsOptions,
   CompressToolsResult,
+  SessionSaveResult,
   SessionSearchResult,
   TaskEvent,
   VersionMeta,
@@ -106,7 +107,8 @@ export interface ElectronAPI {
     channel: "session:save",
     indicesToRemove: number[],
     outputPath?: string,
-  ): Promise<string>;
+    force?: boolean,
+  ): Promise<SessionSaveResult>;
   invoke(channel: "session:list-versions"): Promise<VersionMeta>;
   invoke(
     channel: "session:undo" | "session:redo",

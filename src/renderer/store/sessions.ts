@@ -7,6 +7,7 @@ import type {
   ProviderUIMetadata,
   VersionInfo,
   DiffEntry,
+  SessionSaveResult,
   SessionSearchResult,
 } from "../../shared/types";
 import { cancelTask, newTaskId } from "./tasks";
@@ -69,7 +70,7 @@ interface SessionEditorState {
   closePreview: () => void;
   runAutoTrim: () => Promise<void>;
   applyAutoTrim: () => void;
-  save: () => Promise<string>;
+  save: (force?: boolean) => Promise<SessionSaveResult>;
 
   // Versioning actions
   loadVersions: () => Promise<void>;
@@ -360,13 +361,22 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     set({ markedForRemoval: next });
   },
 
-  save: async () => {
+  save: async (force = false) => {
     set({ saving: true });
     const indices = [...get().markedForRemoval];
-    const result = (await window.electronAPI.invoke(
+    const result = await window.electronAPI.invoke(
       "session:save",
       indices,
-    )) as string;
+      undefined,
+      force,
+    );
+    // Blocked by validation: keep in-memory edit state intact so the user can
+    // review violations and either force-save or deselect the problematic
+    // changes. No reload, no version bump.
+    if (result.blocked) {
+      set({ saving: false });
+      return result;
+    }
     // Reload the trimmed session — reuse active adapter (already set)
     const session = get().selectedSession;
     const provider = get().selectedProvider;

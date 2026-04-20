@@ -72,8 +72,8 @@ export function registerSessionHandlers(): void {
 
   ipcMain.handle(
     "session:save",
-    (_e, indicesToRemove: number[], outputPath?: string) =>
-      saveSession(indicesToRemove, outputPath),
+    (_e, indicesToRemove: number[], outputPath?: string, force?: boolean) =>
+      saveSession(indicesToRemove, outputPath, force ?? false),
   );
 
   ipcMain.handle(

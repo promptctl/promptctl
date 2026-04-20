@@ -171,6 +171,33 @@ export interface MessageSummary {
   extras: Record<string, string>; // rich metadata (model, tokens, branch) — empty for providers without it
 }
 
+// Pre-save structural validation — run by the editor coordinator before
+// writing a session file. Currently only Claude adapter supports it; Gemini
+// sessions have a different failure surface (whole-file JSON integrity,
+// enforced by the filesystem).
+// [LAW:dataflow-not-control-flow] The UI reads severity/offenders; no branching on id.
+export interface SessionValidationOffender {
+  lineIndex: number;
+  uuid?: string;
+  detail: string;
+  preview?: string;
+}
+export interface SessionValidationViolation {
+  invariantId: string;
+  summary: string;
+  offenders: SessionValidationOffender[];
+}
+export interface SessionSaveResult {
+  // path the adapter wrote (or would have written, if blocked).
+  path: string | null;
+  violations: SessionValidationViolation[];
+  // True when the editor wrote despite violations (user forced through).
+  forced: boolean;
+  // True when the editor refused to write because violations were present
+  // and force was not set. The renderer surfaces the violations dialog.
+  blocked: boolean;
+}
+
 // Options for compressToolResults — one operation dispatches truncate vs summarize
 // by token thresholds, so the UI exposes a single surface instead of two modes.
 // [LAW:dataflow-not-control-flow] Strategy lives in token count, not a branch.

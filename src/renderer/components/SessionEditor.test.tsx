@@ -274,7 +274,12 @@ describe("Backup confirmation dialog removed", () => {
     setInvokeHandlers(api, {
       "session:list-projects": () => [],
       "session:provider-metadata": () => ({}),
-      "session:save": () => "/test/session.jsonl",
+      "session:save": () => ({
+        path: "/test/session.jsonl",
+        violations: [],
+        forced: false,
+        blocked: false,
+      }),
       "session:load": () => [makeMessage(0)],
       "session:list-versions": () => ({
         sessionPath: "/test",
@@ -293,8 +298,13 @@ describe("Backup confirmation dialog removed", () => {
 
     // Confirm should NOT have been called (backup dialog removed)
     expect(confirmSpy).not.toHaveBeenCalled();
-    // session:save should have been invoked
-    expect(api.invoke).toHaveBeenCalledWith("session:save", [0]);
+    // session:save should have been invoked with (indices, outputPath, force)
+    expect(api.invoke).toHaveBeenCalledWith(
+      "session:save",
+      [0],
+      undefined,
+      false,
+    );
 
     confirmSpy.mockRestore();
     cleanup();
@@ -307,7 +317,12 @@ describe("Backup confirmation dialog removed", () => {
     setInvokeHandlers(api, {
       "session:list-projects": () => [],
       "session:provider-metadata": () => ({}),
-      "session:save": () => "/test/session.jsonl",
+      "session:save": () => ({
+        path: "/test/session.jsonl",
+        violations: [],
+        forced: false,
+        blocked: false,
+      }),
       "session:load": () => [],
       "session:list-versions": () => ({
         sessionPath: "/test",

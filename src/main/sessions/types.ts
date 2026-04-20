@@ -62,4 +62,9 @@ export interface ProviderAdapter {
     indicesToRemove: number[],
     outputPath?: string,
   ): Promise<string>;
+
+  // [LAW:single-enforcer] Return what saveSession would write, without I/O.
+  // The editor coordinator calls this to run pre-save validation. Adapters
+  // that don't support pre-save validation (Gemini today) can omit it.
+  previewSaveContent?(indicesToRemove: number[]): string;
 }
