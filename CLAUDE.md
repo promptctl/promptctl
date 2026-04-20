@@ -2,6 +2,8 @@
 
 This file provides guidance to Claude Code (claude.ai/code) when working with code in this repository.
 
+See also: @AGENTS.md — tool-neutral agent workflow for this repo (issue tracking via `lit`).
+
 ## Commands
 
 ```sh
