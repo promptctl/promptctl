@@ -16,7 +16,9 @@
     "format:check": "prettier --check 'src/**/*.{ts,tsx,css,html}'",
     "test": "vitest run",
     "test:watch": "vitest",
-    "typecheck": "tsc --noEmit"
+    "typecheck": "tsc --noEmit",
+    "schema:extract": "tsx scripts/schema/run.ts all",
+    "schema:check": "tsx scripts/schema/run.ts all --check"
   },
   "keywords": [],
   "author": {
@@ -66,6 +68,7 @@
     "jsdom": "^29.0.1",
     "prettier": "^3.8.1",
     "tailwindcss": "^4.2.2",
+    "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.1",
     "vitest": "^4.1.0"

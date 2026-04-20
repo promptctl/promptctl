@@ -6,33 +6,9 @@ import path from "node:path";
 import type { Project, SessionInfo, MessageSummary, DiffEntry } from "../../../shared/types";
 import type { ProviderAdapter } from "../types";
 import { countTokens } from "../tokenizer";
+import type { RawSession, RawMessage, RawContent } from "./types";
 
-// --- Raw JSON shapes from Gemini CLI session files ---
-
-interface RawSession {
-  sessionId: string;
-  projectHash: string;
-  startTime: string;
-  lastUpdated: string;
-  messages: RawMessage[];
-  kind: string;
-  summary: string;
-}
-
-interface RawMessage {
-  id: string;
-  timestamp: string;
-  type: string;
-  content?: string | RawContent[];
-  displayContent?: unknown[];
-  [key: string]: unknown;
-}
-
-type RawContent =
-  | { text: string }
-  | { toolCalls: unknown[] }
-  | { functionResponse: unknown }
-  | Record<string, unknown>;
+export type { RawSession, RawMessage, RawContent } from "./types";
 
 // --- Internal helpers ---
 

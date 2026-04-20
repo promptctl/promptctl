@@ -15,39 +15,9 @@ import type { ProviderAdapter } from "../types";
 import type { TaskHandle } from "../../tasks/runner";
 import { countTokens, truncateMiddle } from "../tokenizer";
 import { chatComplete } from "../../llm/client";
+import type { ClaudeLine } from "./types";
 
-// --- JSONL line shapes ---
-
-interface ClaudeLine {
-  type: string;
-  uuid?: string;
-  timestamp?: string;
-  sessionId?: string;
-  cwd?: string;
-  gitBranch?: string;
-  message?: {
-    role?: string;
-    content?: string | ClaudeContentBlock[];
-    model?: string;
-    usage?: {
-      input_tokens?: number;
-      output_tokens?: number;
-    };
-  };
-  customTitle?: string;
-  toolUseResult?: unknown;
-  isSidechain?: boolean;
-  [key: string]: unknown;
-}
-
-interface ClaudeContentBlock {
-  type: string;
-  text?: string;
-  name?: string;
-  input?: unknown;
-  thinking?: string;
-  [key: string]: unknown;
-}
+export type { ClaudeLine, ClaudeContentBlock } from "./types";
 
 // --- Internal helpers ---
 
