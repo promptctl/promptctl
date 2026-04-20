@@ -329,6 +329,18 @@ export const geminiAdapter: ProviderAdapter = {
     return sessions;
   },
 
+  // Scan projects for a matching session id. Gemini sessions are few per project,
+  // so the naive scan is fine.
+  async findSession(sessionId: string) {
+    const projects = await this.listProjects();
+    for (const project of projects) {
+      const sessions = await this.listSessions(project.paths);
+      const session = sessions.find((s) => s.sessionId === sessionId);
+      if (session) return { project, session };
+    }
+    return null;
+  },
+
   async loadSession(filePath: string): Promise<MessageSummary[]> {
     const raw = await readFile(filePath, "utf-8");
     loadedSession = JSON.parse(raw) as RawSession;

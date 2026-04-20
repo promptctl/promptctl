@@ -20,6 +20,12 @@ export interface ProviderAdapter {
   // Discovery
   listProjects(): Promise<Project[]>;
   listSessions(projectPaths: string[]): Promise<SessionInfo[]>;
+  // Locate a session by id without materializing every project/session.
+  // Returns the owning project alongside its SessionInfo, or null if not found.
+  // Used by deep-link handling (promptctl://open?provider=...&sessionId=...).
+  findSession(
+    sessionId: string,
+  ): Promise<{ project: Project; session: SessionInfo } | null>;
 
   // Loading — adapter parses its format and returns uniform MessageSummary[].
   // For JSONL formats, adapter internally tracks logical→physical line mapping.

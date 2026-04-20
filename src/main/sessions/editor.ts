@@ -6,6 +6,7 @@ import type {
   ProviderKind,
   ProviderUIMetadata,
   Project,
+  SessionInfo,
   MessageSummary,
   DiffEntry,
   VersionMeta,
@@ -42,6 +43,15 @@ export function getAllProviderMetadata(): Record<string, ProviderUIMetadata> {
     meta[adapter.id] = adapter.uiMetadata;
   }
   return meta;
+}
+
+// [LAW:single-enforcer] Deep-link session discovery. The URL carries (provider,
+// sessionId); this resolves to the (project, session) pair selectSession needs.
+export async function findSession(
+  provider: ProviderKind,
+  sessionId: string,
+): Promise<{ project: Project; session: SessionInfo } | null> {
+  return getProvider(provider).findSession(sessionId);
 }
 
 export async function loadSession(

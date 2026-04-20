@@ -6,6 +6,7 @@ import {
   getAllProviderMetadata,
   loadSession,
   listSessions,
+  findSession,
   getMessageContent,
   getMessageRaw,
   getMessagesContent,
@@ -41,6 +42,14 @@ export function registerSessionHandlers(): void {
     "session:load",
     (_e, provider: ProviderKind, filePath: string) =>
       loadSession(provider, filePath),
+  );
+
+  // Locate a session by id across the provider's project dirs. Powers the
+  // promptctl://open?provider=&sessionId= deep link.
+  ipcMain.handle(
+    "session:find",
+    (_e, provider: ProviderKind, sessionId: string) =>
+      findSession(provider, sessionId),
   );
 
   // All remaining handlers delegate to the active adapter via coordinator

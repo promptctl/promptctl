@@ -85,6 +85,11 @@ export interface ElectronAPI {
     filePath: string,
   ): Promise<MessageSummary[]>;
   invoke(
+    channel: "session:find",
+    provider: ProviderKind,
+    sessionId: string,
+  ): Promise<{ project: Project; session: SessionInfo } | null>;
+  invoke(
     channel: "session:message-content",
     index: number,
   ): Promise<string>;

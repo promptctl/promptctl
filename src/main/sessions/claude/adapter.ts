@@ -301,6 +301,60 @@ async function extractProjectPath(projectDir: string): Promise<string | null> {
   return null;
 }
 
+// Minimal SessionInfo build for a single known JSONL file. Used by findSession
+// to avoid rescanning every project.
+async function buildSessionInfoForFile(
+  filePath: string,
+  fileSizeBytes: number,
+): Promise<SessionInfo> {
+  const filename = path.basename(filePath);
+  let sessionId = filename.replace(/\.jsonl$/, "");
+  let summary = "";
+  let startTime = "";
+  let lastUpdated = "";
+  let messageCount = 0;
+  const previewMessages: string[] = [];
+
+  const content = await readFile(filePath, "utf-8").catch(() => "");
+  for (const rawLine of content.split("\n")) {
+    if (!rawLine.trim()) continue;
+    let parsed: ClaudeLine;
+    try {
+      parsed = JSON.parse(rawLine) as ClaudeLine;
+    } catch {
+      continue;
+    }
+    if (parsed.sessionId) sessionId = parsed.sessionId;
+    if (parsed.type === "custom-title" && parsed.customTitle) {
+      summary = parsed.customTitle;
+    }
+    if (parsed.timestamp) {
+      if (!startTime) startTime = parsed.timestamp;
+      lastUpdated = parsed.timestamp;
+    }
+    if (isVisibleMessage(parsed)) messageCount++;
+    if (previewMessages.length < 3) {
+      const text = userTextContent(parsed);
+      if (text !== null && text.length > 5) {
+        previewMessages.push(text.slice(0, 200).replace(/\n/g, " "));
+      }
+    }
+  }
+  if (!summary && previewMessages.length > 0) {
+    summary = previewMessages[0].slice(0, 80);
+  }
+  return {
+    sessionId,
+    filePath,
+    summary,
+    startTime,
+    lastUpdated,
+    messageCount,
+    fileSizeBytes,
+    previewMessages,
+  };
+}
+
 // --- Adapter state ---
 
 let loadedLines: string[] = [];
@@ -513,6 +567,37 @@ export const claudeAdapter: ProviderAdapter = {
         new Date(b.lastUpdated).getTime() - new Date(a.lastUpdated).getTime(),
     );
     return sessions;
+  },
+
+  // [LAW:dataflow-not-control-flow] Deep link and tree-click both flow through
+  // selectSession(project, session); findSession is the URL path's way to produce
+  // that same (project, session) pair without materializing every project.
+  async findSession(sessionId: string) {
+    const filename = `${sessionId}.jsonl`;
+    let entries: string[];
+    try {
+      entries = await readdir(CLAUDE_PROJECTS);
+    } catch {
+      return null;
+    }
+    for (const dirName of entries) {
+      const projectDir = path.join(CLAUDE_PROJECTS, dirName);
+      const filePath = path.join(projectDir, filename);
+      const fileStat = await stat(filePath).catch(() => null);
+      if (!fileStat?.isFile()) continue;
+
+      const projectRoot = await extractProjectPath(projectDir);
+      if (!projectRoot) return null;
+      const session = await buildSessionInfoForFile(filePath, fileStat.size);
+      const project: Project = {
+        name: path.basename(projectRoot),
+        paths: [projectDir],
+        projectRoot,
+        provider: "claude",
+      };
+      return { project, session };
+    }
+    return null;
   },
 
   async loadSession(filePath: string): Promise<MessageSummary[]> {

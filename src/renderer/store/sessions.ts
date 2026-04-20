@@ -52,6 +52,13 @@ interface SessionEditorState {
   loadProjects: () => Promise<void>;
   toggleProject: (project: Project) => Promise<void>;
   selectSession: (session: SessionInfo, project: Project) => Promise<void>;
+  // Deep-link entry: resolve (provider, sessionId) → (project, session) via
+  // main, then delegate to selectSession. Same final state as clicking in the
+  // tree, reached through a different input.
+  selectSessionById: (
+    provider: ProviderKind,
+    sessionId: string,
+  ) => Promise<boolean>;
   clearSession: () => void;
   toggleMessage: (index: number) => void;
   toggleRange: (startIndex: number, endIndex: number) => void;
@@ -249,6 +256,28 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     set({ messages, loading: false });
     // Load versions after the session is active (server-side coordinator needs the active path)
     await get().loadVersions();
+  },
+
+  selectSessionById: async (provider, sessionId) => {
+    const current = get().selectedSession;
+    if (current?.sessionId === sessionId) return true;
+    const found = (await window.electronAPI.invoke(
+      "session:find",
+      provider,
+      sessionId,
+    )) as { project: Project; session: SessionInfo } | null;
+    if (!found) return false;
+    // Make sure the project is registered so the tree reflects it too.
+    const projects = get().projects;
+    if (!projects.find((p) => p.projectRoot === found.project.projectRoot)) {
+      set({ projects: [...projects, found.project] });
+    }
+    // Auto-expand the project so the tree shows where we landed.
+    const expanded = new Set(get().expandedProjects);
+    expanded.add(found.project.projectRoot);
+    set({ expandedProjects: expanded });
+    await get().selectSession(found.session, found.project);
+    return true;
   },
 
   clearSession: () => {

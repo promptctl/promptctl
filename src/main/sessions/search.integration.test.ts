@@ -84,6 +84,9 @@ function makeFakeProvider(
       }
       return out;
     },
+    async findSession() {
+      return null;
+    },
     async loadSession(): Promise<MessageSummary[]> {
       return [];
     },

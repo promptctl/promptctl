@@ -1,7 +1,13 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useSessionStore } from "./sessions";
 import { installElectronMock, setInvokeHandlers, type MockElectronAPI } from "../../test/electron-mock";
-import type { MessageSummary, VersionMeta, DiffEntry } from "../../shared/types";
+import type {
+  MessageSummary,
+  VersionMeta,
+  DiffEntry,
+  Project,
+  SessionInfo,
+} from "../../shared/types";
 
 let api: MockElectronAPI;
 
@@ -259,5 +265,80 @@ describe("save action", () => {
     expect(state.versions).toHaveLength(2);
     expect(state.versionHead).toBe(2);
     expect(state.markedForRemoval.size).toBe(0);
+  });
+});
+
+// ============================================================
+// selectSessionById (deep-link entry path)
+// ============================================================
+
+describe("selectSessionById", () => {
+  const project: Project = {
+    name: "promptctl",
+    paths: ["/tmp/project-dir"],
+    projectRoot: "/Users/bmf/code/promptctl",
+    provider: "claude",
+  };
+  const session: SessionInfo = {
+    sessionId: "abc-123",
+    filePath: "/tmp/project-dir/abc-123.jsonl",
+    summary: "hello",
+    startTime: "2026-04-18T10:00:00Z",
+    lastUpdated: "2026-04-18T10:00:01Z",
+    messageCount: 2,
+    fileSizeBytes: 100,
+    previewMessages: [],
+  };
+
+  it("resolves and selects when the session exists", async () => {
+    setInvokeHandlers(api, {
+      "session:find": () => ({ project, session }),
+      "session:load": () => [makeMessage(0)],
+      "session:list-versions": () => makeVersionMeta(1, 1),
+    });
+
+    const ok = await useSessionStore
+      .getState()
+      .selectSessionById("claude", "abc-123");
+
+    expect(ok).toBe(true);
+    const state = useSessionStore.getState();
+    expect(state.selectedSession?.sessionId).toBe("abc-123");
+    expect(state.selectedProvider).toBe("claude");
+    expect(state.selectedProjectPath).toBe("/Users/bmf/code/promptctl");
+    expect(state.expandedProjects.has("/Users/bmf/code/promptctl")).toBe(true);
+    expect(state.messages).toHaveLength(1);
+  });
+
+  it("returns false and does not mutate when the session is missing", async () => {
+    setInvokeHandlers(api, {
+      "session:find": () => null,
+    });
+
+    const ok = await useSessionStore
+      .getState()
+      .selectSessionById("claude", "missing");
+
+    expect(ok).toBe(false);
+    expect(useSessionStore.getState().selectedSession).toBeNull();
+  });
+
+  it("short-circuits when the session is already selected", async () => {
+    useSessionStore.setState({ selectedSession: session });
+    setInvokeHandlers(api, {
+      "session:find": () => {
+        throw new Error("should not be called");
+      },
+    });
+
+    const ok = await useSessionStore
+      .getState()
+      .selectSessionById("claude", "abc-123");
+
+    expect(ok).toBe(true);
+    // session:find was never invoked
+    expect(
+      api.invoke.mock.calls.some((c) => c[0] === "session:find"),
+    ).toBe(false);
   });
 });

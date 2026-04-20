@@ -118,6 +118,8 @@ function Sidebar() {
 }
 
 // [LAW:one-source-of-truth] Route persisted in ~/.promptctl/settings.json via settings IPC.
+// Deep-link URLs (promptctl://open?...) carry a sessionId query param; when
+// present, the URL wins over the persisted route.
 function RouteRestorer() {
   const navigate = useNavigate();
   const location = useLocation();
@@ -126,7 +128,13 @@ function RouteRestorer() {
   // Restore saved route on first mount
   useEffect(() => {
     window.electronAPI.invoke("settings:load").then((settings) => {
-      if (settings.lastRoute && settings.lastRoute !== location.pathname) {
+      const params = new URLSearchParams(location.search);
+      const hasDeepLink = params.has("sessionId");
+      if (
+        !hasDeepLink &&
+        settings.lastRoute &&
+        settings.lastRoute !== location.pathname
+      ) {
         navigate(settings.lastRoute, { replace: true });
       }
       restored.current = true;

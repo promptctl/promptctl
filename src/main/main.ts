@@ -14,11 +14,41 @@ import { registerTaskHandlers } from "./ipc/task-handlers";
 import { registerProvider } from "./sessions/registry";
 import { geminiAdapter } from "./sessions/gemini/adapter";
 import { claudeAdapter } from "./sessions/claude/adapter";
+import { findPromptctlUrlInArgv, promptctlUrlToHash } from "./deep-link";
+import {
+  startDeepLinkServer,
+  stopDeepLinkServer,
+} from "./deep-link-server";
+import type { Server } from "node:http";
 
 // Handle Squirrel events for Windows installer
 // eslint-disable-next-line @typescript-eslint/no-require-imports
 if (require("electron-squirrel-startup")) {
   app.quit();
+}
+
+// Expose Chrome DevTools Protocol on a TCP port in dev mode so external tools
+// (MCP electron debuggers, CI harnesses) can drive the renderer. Must be set
+// before app.whenReady(). No effect in packaged builds.
+if (process.defaultApp) {
+  const cdpPort = process.env.PROMPTCTL_CDP_PORT ?? "9333";
+  app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
+  // Write the port to a discovery file; writeFileSync is fine here — we're
+  // still in module-init before whenReady, and the file is tiny.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const fs = require("node:fs") as typeof import("node:fs");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const os = require("node:os") as typeof import("node:os");
+    // eslint-disable-next-line @typescript-eslint/no-require-imports
+    const nodePath = require("node:path") as typeof import("node:path");
+    const file = nodePath.join(os.homedir(), ".promptctl", "cdp-port");
+    fs.mkdirSync(nodePath.dirname(file), { recursive: true });
+    fs.writeFileSync(file, cdpPort, "utf-8");
+    console.log(`[deep-link] CDP enabled on port ${cdpPort} (port file: ${file})`);
+  } catch (err) {
+    console.log(`[deep-link] CDP port file write failed: ${err}`);
+  }
 }
 
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
@@ -27,8 +57,93 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 const tmuxState = new TmuxStateManager();
 const outputManager = new PaneOutputManager();
 const commandEngine = new CommandEngine(tmuxState);
+let deepLinkServer: Server | null = null;
+
+// [LAW:one-source-of-truth] The URL IS the selection; cold-start bakes the hash
+// into the initial loadURL/loadFile, warm-path updates location.hash. Both paths
+// flow through the same renderer code (useSearchParams in SessionsPage).
+let pendingDeepLinkHash: string | null = null;
+
+// Single-instance lock — second `open promptctl://…` spawns a fresh Electron
+// that must relay its argv to the running one and quit. On macOS this also
+// covers dev mode, where macOS launches a new stock Electron rather than
+// delivering open-url to the running instance (the running Electron.app's
+// bundle id is the generic `com.github.Electron`).
+if (!app.requestSingleInstanceLock()) {
+  console.log("[deep-link] secondary instance — quitting");
+  app.quit();
+}
+
+// setAsDefaultProtocolClient registration:
+//  - packaged: 1-arg form; macOS routes via Info.plist
+//  - dev (`electron .`): 3-arg form so macOS relaunches us as
+//    `<execPath> <app-root> <url>` — otherwise it runs bare Electron.app
+//    and the user sees the stock welcome window.
+if (process.defaultApp && process.argv.length >= 2) {
+  const appRoot = path.resolve(process.argv[1]);
+  app.setAsDefaultProtocolClient("promptctl", process.execPath, [appRoot]);
+  console.log(
+    `[deep-link] registered promptctl:// (dev mode) execPath=${process.execPath} appRoot=${appRoot}`,
+  );
+} else {
+  app.setAsDefaultProtocolClient("promptctl");
+  console.log("[deep-link] registered promptctl:// (packaged mode)");
+}
+
+// macOS delivers open-url via the 'open-url' event. It can fire before whenReady,
+// so buffer until the window exists.
+app.on("open-url", (event, url) => {
+  event.preventDefault();
+  console.log(`[deep-link] open-url event: ${url}`);
+  handleDeepLink(url);
+});
+
+// second-instance fires on all platforms when a second app instance relays
+// its argv before quitting under the single-instance lock. In dev mode on
+// macOS, this is the path URL dispatches actually take — `open-url` alone
+// isn't enough because LaunchServices launches a new process.
+app.on("second-instance", (_event, argv) => {
+  console.log(`[deep-link] second-instance argv=${JSON.stringify(argv)}`);
+  const url = findPromptctlUrlInArgv(argv);
+  if (url) handleDeepLink(url);
+  const [win] = BrowserWindow.getAllWindows();
+  if (win) {
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  }
+});
+
+function handleDeepLink(url: string): void {
+  const hash = promptctlUrlToHash(url);
+  console.log(`[deep-link] handleDeepLink url=${url} hash=${hash}`);
+  if (!hash) return;
+  const [win] = BrowserWindow.getAllWindows();
+  if (win && !win.webContents.isLoading()) {
+    console.log(`[deep-link] updating running window to ${hash}`);
+    win.webContents.executeJavaScript(
+      `window.location.hash = ${JSON.stringify(hash)};`,
+    );
+    if (win.isMinimized()) win.restore();
+    win.focus();
+  } else {
+    console.log(`[deep-link] buffering hash (window not ready): ${hash}`);
+    pendingDeepLinkHash = hash;
+  }
+}
 
 const createWindow = (): void => {
+  // Cold-start URL may come from argv (Linux/Windows) or from a buffered
+  // open-url event (macOS fired before whenReady).
+  const argvUrl = findPromptctlUrlInArgv(process.argv);
+  const initialHash =
+    pendingDeepLinkHash ??
+    (argvUrl ? promptctlUrlToHash(argvUrl) : null) ??
+    "";
+  pendingDeepLinkHash = null;
+  console.log(
+    `[deep-link] createWindow argv=${JSON.stringify(process.argv)} initialHash=${JSON.stringify(initialHash)}`,
+  );
+
   const mainWindow = new BrowserWindow({
     width: 1200,
     height: 800,
@@ -49,11 +164,12 @@ const createWindow = (): void => {
   });
 
   if (MAIN_WINDOW_VITE_DEV_SERVER_URL) {
-    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL);
+    mainWindow.loadURL(MAIN_WINDOW_VITE_DEV_SERVER_URL + initialHash);
     mainWindow.webContents.openDevTools({ mode: "detach" });
   } else {
     mainWindow.loadFile(
       path.join(__dirname, `../renderer/${MAIN_WINDOW_VITE_NAME}/index.html`),
+      initialHash ? { hash: initialHash.slice(1) } : undefined,
     );
   }
 };
@@ -72,6 +188,8 @@ app.whenReady().then(async () => {
 
   await outputManager.init();
   tmuxState.start();
+
+  deepLinkServer = await startDeepLinkServer(handleDeepLink);
 
   // Start command engine on output stream (handles both matchers and idle tracking)
   commandEngine.start(outputManager);
@@ -99,4 +217,8 @@ app.on("before-quit", async () => {
   tmuxState.stop();
   commandEngine.stop();
   await outputManager.unwatchAll();
+  if (deepLinkServer) {
+    await stopDeepLinkServer(deepLinkServer);
+    deepLinkServer = null;
+  }
 });
