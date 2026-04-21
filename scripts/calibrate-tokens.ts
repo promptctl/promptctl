@@ -7,7 +7,7 @@
 // rate-limited; at tier 1 the ceiling is 100 RPM.
 //
 // Output: one JSON record per line to calibration/<date>.jsonl with fields
-//   { sessionHash, lineIdx, kind, textLength, tiktokenCount, anthropicTruth,
+//   { sessionHash, lineIdx, kind, textLength, rawEstimate, anthropicTruth,
 //     timestamp, model }
 // The analyzer (scripts/analyze-calibration.ts) reads these records, fits a
 // per-kind linear model, and emits tokenizer-corrections.json.
@@ -32,7 +32,7 @@ import {
   extractBillableChunks,
   isVisibleMessage,
 } from "../src/main/sessions/claude/adapter";
-import { countRawTiktoken } from "../src/main/sessions/tokenizer";
+import { countRawBase } from "../src/main/sessions/tokenizer";
 import type { ClaudeLine, ClaudeContentBlock } from "../src/main/sessions/claude/types";
 import type { BillableChunk, ContentKind } from "../src/shared/types";
 import {
@@ -57,7 +57,10 @@ export interface CalibrationRecord {
   lineIdx: number; // physical line index in the JSONL
   kind: ContentKind;
   textLength: number; // length of the chunk's text
-  tiktokenCount: number;
+  // Pre-calibration raw estimate (chars / kind-specific divisor). The
+  // analyzer fits truth = a*rawEstimate + b; at runtime we apply a,b to
+  // countRawBase to produce a calibrated count.
+  rawEstimate: number;
   anthropicTruth: number;
   timestamp: string;
   model: string;
@@ -126,6 +129,19 @@ export function lineToApiMessage(line: ClaudeLine): AnthropicMessage | null {
   for (const block of msg.content) {
     const translated = translateBlock(block);
     if (translated) blocks.push(translated);
+  }
+  // API contract: an assistant message's final block cannot be `thinking`.
+  // In real runs the next block is usually a tool_use or text; some JSONL
+  // lines store a bare-thinking variant that's not a valid standalone API
+  // turn. Match the API's own rewrite-on-resend behavior by stripping
+  // trailing thinking blocks here.
+  if (role === "assistant") {
+    while (
+      blocks.length > 0 &&
+      blocks[blocks.length - 1].type === "thinking"
+    ) {
+      blocks.pop();
+    }
   }
   if (blocks.length === 0) return null;
   return { role, content: blocks };
@@ -299,6 +315,9 @@ function syntheticMessageForChunk(chunk: BillableChunk): AnthropicMessage {
     }
     case "thinking_text":
     case "thinking_signature":
+      // API rejects assistant messages whose final block is `thinking`. Pad
+      // with a minimal text block; its ~2-token cost is absorbed into the
+      // regression intercept during fitting.
       return {
         role: "assistant",
         content: [
@@ -307,6 +326,7 @@ function syntheticMessageForChunk(chunk: BillableChunk): AnthropicMessage {
             thinking: chunk.kind === "thinking_text" ? chunk.text : "",
             signature: chunk.kind === "thinking_signature" ? chunk.text : "",
           },
+          { type: "text", text: "." },
         ],
       };
   }
@@ -360,6 +380,7 @@ async function loadExistingKeys(outPath: string): Promise<Set<string>> {
 
 // Translate all visible lines up to (but not including) idx into a compact
 // AnthropicMessage[] prefix. Preserves turn ordering expected by the API.
+// The final API-validity pass happens in ensureApiValid, not here.
 export function buildPrefix(lines: string[], upToLineIdx: number): AnthropicMessage[] {
   const out: AnthropicMessage[] = [];
   for (let i = 0; i < upToLineIdx; i++) {
@@ -375,6 +396,54 @@ export function buildPrefix(lines: string[], upToLineIdx: number): AnthropicMess
     if (m) out.push(m);
   }
   return out;
+}
+
+// Enforces the count_tokens API's message-structure invariants on any
+// messages array just before the call. Two rules:
+//   1. An assistant message's final block cannot be `thinking`. We strip
+//      trailing thinking blocks; if nothing non-thinking remains, we drop
+//      the message.
+//   2. `tool_use` blocks must have a matching `tool_result` in the next
+//      message. When the final assistant message has unpaired tool_uses
+//      (the conversation was cut mid-turn), we append a synthetic user
+//      message with empty tool_result blocks closing each id. The few-token
+//      overhead is absorbed into the regression intercept during fitting.
+// Returns a new array; inputs are not mutated.
+export function ensureApiValid(msgs: AnthropicMessage[]): AnthropicMessage[] {
+  const result = [...msgs];
+  if (result.length === 0) return result;
+  const last = result[result.length - 1];
+  if (last.role !== "assistant" || typeof last.content === "string") {
+    return result;
+  }
+  const blocks = [...last.content];
+  while (blocks.length > 0 && blocks[blocks.length - 1].type === "thinking") {
+    blocks.pop();
+  }
+  if (blocks.length === 0) {
+    result.pop();
+    return result;
+  }
+  if (blocks.length !== last.content.length) {
+    result[result.length - 1] = { role: "assistant", content: blocks };
+  }
+  const toolUseIds: string[] = [];
+  for (const b of blocks) {
+    if (b.type === "tool_use") {
+      toolUseIds.push((b as { id: string }).id);
+    }
+  }
+  if (toolUseIds.length > 0) {
+    result.push({
+      role: "user",
+      content: toolUseIds.map((id) => ({
+        type: "tool_result",
+        tool_use_id: id,
+        content: "",
+      })),
+    });
+  }
+  return result;
 }
 
 async function writePreview(plans: PreviewRequest[], outPath: string): Promise<void> {
@@ -410,16 +479,22 @@ async function runCalibration(flags: CliFlags): Promise<void> {
       if (flags.dryRun) continue;
 
       // Execute the plan: sequential calls, rate-limited.
+      // count_tokens rejects empty messages arrays, so skip plans that reduce
+      // to an empty list after validation; counts.get("prefix") falls through
+      // to 0, which is the correct value when prefix is empty.
       const counts = new Map<string, number>(); // purpose|kind? -> tokens
-      for (const p of plans) {
+      const executable = plans
+        .map((p) => ({ plan: p, messages: ensureApiValid(p.messages) }))
+        .filter((x) => x.messages.length > 0);
+      for (const { plan: p, messages } of executable) {
         await limiter.waitTurn();
         const tokens = await anthropicCountTokens({
           model: flags.model,
-          messages: p.messages,
+          messages,
         });
         counts.set(p.kind ? `${p.purpose}|${p.kind}` : p.purpose, tokens);
         process.stdout.write(
-          `[calibrate]  call ${counts.size}/${plans.length} line ${target.lineIdx} ${p.purpose}${p.kind ? `/${p.kind}` : ""} → ${tokens}\n`,
+          `[calibrate]  call ${counts.size}/${executable.length} line ${target.lineIdx} ${p.purpose}${p.kind ? `/${p.kind}` : ""} → ${tokens}\n`,
         );
       }
 
@@ -436,7 +511,7 @@ async function runCalibration(flags: CliFlags): Promise<void> {
           lineIdx: target.lineIdx,
           kind: chunk.kind,
           textLength: chunk.text.length,
-          tiktokenCount: countRawTiktoken(chunk.text),
+          rawEstimate: countRawBase(chunk.text, chunk.kind),
           anthropicTruth: lineTotalContribution,
           timestamp: new Date().toISOString(),
           model: flags.model,
@@ -457,7 +532,7 @@ async function runCalibration(flags: CliFlags): Promise<void> {
             lineIdx: target.lineIdx,
             kind: chunk.kind,
             textLength: chunk.text.length,
-            tiktokenCount: countRawTiktoken(chunk.text),
+            rawEstimate: countRawBase(chunk.text, chunk.kind),
             anthropicTruth: Math.max(0, contribution),
             timestamp: new Date().toISOString(),
             model: flags.model,
