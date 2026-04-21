@@ -225,114 +225,26 @@ export function collectTargets(lines: string[]): SampleTarget[] {
 
 // --- Request plan for one target ---
 
-// To get per-kind contributions when a line has multiple chunks, we build:
-//   1. prefix = API messages for lines[0..i-1]
-//   2. prefix+target = prefix ++ lineToApiMessage(lines[i])
-//   3. For each kind in chunks: prefix ++ synthetic-single-kind-msg
-// The deltas give us isolated per-kind contributions. Single-chunk lines skip
-// step 3 (the delta from 1→2 is already clean).
+// One request per line: count_tokens({messages: [just this line]}). The API
+// returns the cost of that single message in isolation, which is exactly the
+// truth we need to calibrate against the line's rawEstimate. No prefix, no
+// subtraction, no synthetic messages. Multi-chunk lines produce one record
+// per chunk, all sharing the same anthropicTruth (the whole-line total);
+// the analyzer's multivariate fit attributes the total across kinds.
 export function planRequestsForTarget(
   sessionHash: string,
-  prefixMsgs: AnthropicMessage[],
   target: SampleTarget,
 ): PreviewRequest[] {
   const targetMsg = lineToApiMessage(target.parsed);
   if (!targetMsg) return [];
-  const plan: PreviewRequest[] = [];
-  // prefix (needed for subtraction)
-  plan.push({
-    sessionHash,
-    lineIdx: target.lineIdx,
-    purpose: "prefix",
-    messages: prefixMsgs,
-  });
-  // prefix+target (needed to attribute total contribution of this line)
-  plan.push({
-    sessionHash,
-    lineIdx: target.lineIdx,
-    purpose: "prefix+target",
-    messages: [...prefixMsgs, targetMsg],
-  });
-  // Per-kind isolation for multi-chunk lines. For single-chunk lines the
-  // target delta already captures the whole (and only) chunk's contribution,
-  // so we don't need per-kind sub-calls.
-  if (target.chunks.length > 1) {
-    for (const chunk of target.chunks) {
-      plan.push({
-        sessionHash,
-        lineIdx: target.lineIdx,
-        purpose: "prefix+synthetic-kind",
-        kind: chunk.kind,
-        messages: [...prefixMsgs, syntheticMessageForChunk(chunk)],
-      });
-    }
-  }
-  return plan;
-}
-
-// A minimal standalone message that carries a single chunk's content in a
-// shape the API accepts. Role choice aligns with how the real content would
-// appear: tool_use/tool_result go inside user/assistant turns structurally,
-// but for isolation we wrap them in a synthetic role-appropriate message.
-function syntheticMessageForChunk(chunk: BillableChunk): AnthropicMessage {
-  switch (chunk.kind) {
-    case "user_text":
-    case "system_text":
-    case "tool_result_string":
-      return { role: "user", content: chunk.text };
-    case "assistant_text":
-      return { role: "assistant", content: [{ type: "text", text: chunk.text }] };
-    case "tool_use_input": {
-      let input: unknown;
-      try {
-        input = JSON.parse(chunk.text);
-      } catch {
-        input = { raw: chunk.text };
-      }
-      return {
-        role: "assistant",
-        content: [
-          {
-            type: "tool_use",
-            id: "synthetic",
-            name: "Synthetic",
-            input,
-          },
-        ],
-      };
-    }
-    case "tool_result_array": {
-      let content: unknown[];
-      try {
-        content = JSON.parse(chunk.text) as unknown[];
-        if (!Array.isArray(content)) content = [{ type: "text", text: chunk.text }];
-      } catch {
-        content = [{ type: "text", text: chunk.text }];
-      }
-      return {
-        role: "user",
-        content: [
-          { type: "tool_result", tool_use_id: "synthetic", content },
-        ],
-      };
-    }
-    case "thinking_text":
-    case "thinking_signature":
-      // API rejects assistant messages whose final block is `thinking`. Pad
-      // with a minimal text block; its ~2-token cost is absorbed into the
-      // regression intercept during fitting.
-      return {
-        role: "assistant",
-        content: [
-          {
-            type: "thinking",
-            thinking: chunk.kind === "thinking_text" ? chunk.text : "",
-            signature: chunk.kind === "thinking_signature" ? chunk.text : "",
-          },
-          { type: "text", text: "." },
-        ],
-      };
-  }
+  return [
+    {
+      sessionHash,
+      lineIdx: target.lineIdx,
+      purpose: "prefix+target",
+      messages: [targetMsg],
+    },
+  ];
 }
 
 // --- Rate limiter ---
@@ -381,40 +293,46 @@ async function loadExistingKeys(outPath: string): Promise<Set<string>> {
   return set;
 }
 
-// Translate all visible lines up to (but not including) idx into a compact
-// AnthropicMessage[] prefix. Preserves turn ordering expected by the API.
-// The final API-validity pass happens in ensureApiValid, not here.
-export function buildPrefix(lines: string[], upToLineIdx: number): AnthropicMessage[] {
-  const out: AnthropicMessage[] = [];
-  for (let i = 0; i < upToLineIdx; i++) {
-    const raw = lines[i];
-    if (!raw.trim()) continue;
-    let parsed: ClaudeLine;
-    try {
-      parsed = JSON.parse(raw) as ClaudeLine;
-    } catch {
-      continue;
-    }
-    const m = lineToApiMessage(parsed);
-    if (m) out.push(m);
-  }
-  return out;
-}
-
 // Enforces the count_tokens API's message-structure invariants on any
-// messages array just before the call. Two rules:
-//   1. An assistant message's final block cannot be `thinking`. We strip
-//      trailing thinking blocks; if nothing non-thinking remains, we drop
-//      the message.
-//   2. `tool_use` blocks must have a matching `tool_result` in the next
-//      message. When the final assistant message has unpaired tool_uses
-//      (the conversation was cut mid-turn), we append a synthetic user
-//      message with empty tool_result blocks closing each id. The few-token
-//      overhead is absorbed into the regression intercept during fitting.
-// Returns a new array; inputs are not mutated.
+// messages array just before the call. Three rules:
+//   1. An assistant message's final block cannot be `thinking`. Strip trailing
+//      thinking; if nothing non-thinking remains, drop the message.
+//   2. `tool_use` blocks must have a matching `tool_result` in the next message.
+//      Close unpaired trailing tool_uses with a synthetic user tool_result.
+//   3. `tool_result` blocks must have a matching `tool_use` in the *previous*
+//      message. Open unpaired leading tool_results by prepending a synthetic
+//      assistant tool_use with the same id.
+// The synthetic wrappers add a fixed few-token overhead that falls into the
+// regression intercept. Returns a new array; inputs are not mutated.
 export function ensureApiValid(msgs: AnthropicMessage[]): AnthropicMessage[] {
   const result = [...msgs];
   if (result.length === 0) return result;
+
+  // Rule 3: prepend synthetic tool_use when the first message is a user with
+  // orphan tool_result(s). Do this first so the closure pass below sees a
+  // complete head→tail structure.
+  const first = result[0];
+  if (first.role === "user" && Array.isArray(first.content)) {
+    const leadingToolResultIds: string[] = [];
+    for (const b of first.content) {
+      if (b.type === "tool_result") {
+        leadingToolResultIds.push((b as { tool_use_id: string }).tool_use_id);
+      }
+    }
+    if (leadingToolResultIds.length > 0) {
+      result.unshift({
+        role: "assistant",
+        content: leadingToolResultIds.map((id) => ({
+          type: "tool_use",
+          id,
+          name: "synthetic",
+          input: {},
+        })),
+      });
+    }
+  }
+
+  // Rules 1 & 2: trailing thinking / unpaired trailing tool_use.
   const last = result[result.length - 1];
   if (last.role !== "assistant" || typeof last.content === "string") {
     return result;
@@ -478,83 +396,55 @@ async function runCalibration(flags: CliFlags): Promise<void> {
 
     for (const target of targets) {
       if (budgetExhausted) break;
-      const prefix = buildPrefix(lines, target.lineIdx);
-      const plans = planRequestsForTarget(sessionHash, prefix, target);
+
+      // Only single-chunk lines yield clean per-kind records. Multi-chunk
+      // lines mix kinds in one API response and would require multivariate
+      // attribution — skip them. The common kinds all have plenty of
+      // single-chunk representation.
+      if (target.chunks.length !== 1) continue;
+
+      const plans = planRequestsForTarget(sessionHash, target);
       allPlans.push(...plans);
       totalRequests += plans.length;
 
       if (flags.dryRun) continue;
 
-      // Execute the plan: sequential calls, rate-limited.
-      // count_tokens rejects empty messages arrays, so skip plans that reduce
-      // to an empty list after validation; counts.get("prefix") falls through
-      // to 0, which is the correct value when prefix is empty.
-      const counts = new Map<string, number>(); // purpose|kind? -> tokens
       const executable = plans
         .map((p) => ({ plan: p, messages: ensureApiValid(p.messages) }))
         .filter((x) => x.messages.length > 0);
-      for (const { plan: p, messages } of executable) {
-        if (apiCallBudget > 0 && apiCallsMade >= apiCallBudget) {
-          budgetExhausted = true;
-          break;
-        }
-        await limiter.waitTurn();
-        const tokens = await anthropicCountTokens({
-          model: flags.model,
-          messages,
-        });
-        apiCallsMade++;
-        counts.set(p.kind ? `${p.purpose}|${p.kind}` : p.purpose, tokens);
-        process.stdout.write(
-          `[calibrate]  call ${apiCallsMade}${apiCallBudget ? `/${apiCallBudget}` : ""} line ${target.lineIdx} ${p.purpose}${p.kind ? `/${p.kind}` : ""} → ${tokens}\n`,
-        );
-      }
-      if (budgetExhausted) break;
+      if (executable.length === 0) continue;
 
-      const prefixTokens = counts.get("prefix") ?? 0;
-      const withTargetTokens = counts.get("prefix+target") ?? 0;
-      const lineTotalContribution = withTargetTokens - prefixTokens;
+      const chunk = target.chunks[0];
+      const key = `${sessionHash}|${target.lineIdx}|${chunk.kind}`;
+      if (existingKeys.has(key)) continue;
 
-      if (target.chunks.length === 1) {
-        const chunk = target.chunks[0];
-        const key = `${sessionHash}|${target.lineIdx}|${chunk.kind}`;
-        if (existingKeys.has(key)) continue;
-        const rec: CalibrationRecord = {
-          sessionHash,
-          lineIdx: target.lineIdx,
-          kind: chunk.kind,
-          textLength: chunk.text.length,
-          rawEstimate: countRawBase(chunk.text, chunk.kind),
-          anthropicTruth: lineTotalContribution,
-          timestamp: new Date().toISOString(),
-          model: flags.model,
-        };
-        allRecords.push(rec);
-        await appendFile(flags.out, JSON.stringify(rec) + "\n", "utf-8");
-        existingKeys.add(key);
-      } else {
-        // Multi-chunk: use per-kind synthetic deltas against the same prefix.
-        for (const chunk of target.chunks) {
-          const key = `${sessionHash}|${target.lineIdx}|${chunk.kind}`;
-          if (existingKeys.has(key)) continue;
-          const synth = counts.get(`prefix+synthetic-kind|${chunk.kind}`);
-          if (synth === undefined) continue;
-          const contribution = synth - prefixTokens;
-          const rec: CalibrationRecord = {
-            sessionHash,
-            lineIdx: target.lineIdx,
-            kind: chunk.kind,
-            textLength: chunk.text.length,
-            rawEstimate: countRawBase(chunk.text, chunk.kind),
-            anthropicTruth: Math.max(0, contribution),
-            timestamp: new Date().toISOString(),
-            model: flags.model,
-          };
-          allRecords.push(rec);
-          await appendFile(flags.out, JSON.stringify(rec) + "\n", "utf-8");
-          existingKeys.add(key);
-        }
+      if (apiCallBudget > 0 && apiCallsMade >= apiCallBudget) {
+        budgetExhausted = true;
+        break;
       }
+      await limiter.waitTurn();
+      const truth = await anthropicCountTokens({
+        model: flags.model,
+        messages: executable[0].messages,
+      });
+      apiCallsMade++;
+      process.stdout.write(
+        `[calibrate]  call ${apiCallsMade}${apiCallBudget ? `/${apiCallBudget}` : ""} line ${target.lineIdx} ${chunk.kind} → ${truth}\n`,
+      );
+
+      const rec: CalibrationRecord = {
+        sessionHash,
+        lineIdx: target.lineIdx,
+        kind: chunk.kind,
+        textLength: chunk.text.length,
+        rawEstimate: countRawBase(chunk.text, chunk.kind),
+        anthropicTruth: truth,
+        timestamp: new Date().toISOString(),
+        model: flags.model,
+      };
+      allRecords.push(rec);
+      await appendFile(flags.out, JSON.stringify(rec) + "\n", "utf-8");
+      existingKeys.add(key);
     }
   }
 

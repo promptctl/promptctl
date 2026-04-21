@@ -10,7 +10,6 @@ import {
   collectTargets,
   planRequestsForTarget,
   lineToApiMessage,
-  buildPrefix,
 } from "../calibrate-tokens";
 import type { ClaudeLine } from "../../src/main/sessions/claude/types";
 
@@ -135,56 +134,16 @@ describe("lineToApiMessage", () => {
 });
 
 describe("planRequestsForTarget", () => {
-  it("single-chunk line emits exactly prefix + (prefix+target) = 2 requests", () => {
+  it("single-chunk line emits exactly one request (the line alone)", () => {
     const line = userLine("u1", "hello world");
     const chunks = [{ kind: "user_text" as const, text: "hello world" }];
-    const plans = planRequestsForTarget(
-      "hash1",
-      [],
-      { lineIdx: 5, parsed: line, chunks },
-    );
-    expect(plans).toHaveLength(2);
-    expect(plans[0].purpose).toBe("prefix");
-    expect(plans[1].purpose).toBe("prefix+target");
-  });
-
-  it("multi-chunk line adds one synthetic-kind request per chunk", () => {
-    const line = assistantMultiBlock("a1");
-    const chunks = [
-      { kind: "thinking_signature" as const, text: "SIG".repeat(100) },
-      { kind: "assistant_text" as const, text: "Here is the answer." },
-      {
-        kind: "tool_use_input" as const,
-        text: JSON.stringify({ file_path: "/src/main.ts" }),
-      },
-    ];
-    const plans = planRequestsForTarget(
-      "hash1",
-      [],
-      { lineIdx: 7, parsed: line, chunks },
-    );
-    // 2 fixed + 3 synthetic-kind = 5
-    expect(plans).toHaveLength(5);
-    const syntheticKinds = plans
-      .filter((p) => p.purpose === "prefix+synthetic-kind")
-      .map((p) => p.kind);
-    expect(syntheticKinds.sort()).toEqual(
-      ["assistant_text", "thinking_signature", "tool_use_input"].sort(),
-    );
-  });
-});
-
-describe("buildPrefix", () => {
-  it("yields an AnthropicMessage per visible line strictly before the target", () => {
-    const lines = [
-      JSON.stringify(userLine("u1", "first")),
-      JSON.stringify({ type: "attachment", uuid: "att1" }), // skipped
-      JSON.stringify(assistantText("a1", "response")),
-      JSON.stringify(userLine("u2", "target")),
-    ];
-    const prefix = buildPrefix(lines, 3); // stop before user 'target'
-    expect(prefix).toHaveLength(2);
-    expect(prefix[0]).toEqual({ role: "user", content: "first" });
-    expect(prefix[1]?.role).toBe("assistant");
+    const plans = planRequestsForTarget("hash1", {
+      lineIdx: 5,
+      parsed: line,
+      chunks,
+    });
+    expect(plans).toHaveLength(1);
+    expect(plans[0].purpose).toBe("prefix+target");
+    expect(plans[0].messages).toHaveLength(1);
   });
 });
