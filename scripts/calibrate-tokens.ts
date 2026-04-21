@@ -50,6 +50,7 @@ interface CliFlags {
   resume: boolean;
   model: string;
   dryRun: boolean;
+  maxRequests: number; // hard cap on API calls (0 = unlimited)
 }
 
 export interface CalibrationRecord {
@@ -87,6 +88,7 @@ function parseArgs(argv: string[]): CliFlags {
     resume: false,
     model: "claude-opus-4-7",
     dryRun: false,
+    maxRequests: 0,
   };
   for (let i = 0; i < argv.length; i++) {
     const a = argv[i];
@@ -95,6 +97,7 @@ function parseArgs(argv: string[]): CliFlags {
     else if (a === "--resume") flags.resume = true;
     else if (a === "--model") flags.model = argv[++i];
     else if (a === "--dry-run") flags.dryRun = true;
+    else if (a === "--max-requests") flags.maxRequests = Number(argv[++i]);
     else if (!a.startsWith("--")) flags.sessions.push(a);
     else {
       process.stderr.write(`unknown flag: ${a}\n`);
@@ -459,6 +462,9 @@ async function runCalibration(flags: CliFlags): Promise<void> {
   const allPlans: PreviewRequest[] = [];
   const allRecords: CalibrationRecord[] = [];
   let totalRequests = 0;
+  let apiCallsMade = 0;
+  const apiCallBudget = flags.maxRequests; // 0 = unlimited
+  let budgetExhausted = false;
 
   for (const sessionPath of flags.sessions) {
     const sessionHash = sessionHashOf(sessionPath);
@@ -471,6 +477,7 @@ async function runCalibration(flags: CliFlags): Promise<void> {
     );
 
     for (const target of targets) {
+      if (budgetExhausted) break;
       const prefix = buildPrefix(lines, target.lineIdx);
       const plans = planRequestsForTarget(sessionHash, prefix, target);
       allPlans.push(...plans);
@@ -487,16 +494,22 @@ async function runCalibration(flags: CliFlags): Promise<void> {
         .map((p) => ({ plan: p, messages: ensureApiValid(p.messages) }))
         .filter((x) => x.messages.length > 0);
       for (const { plan: p, messages } of executable) {
+        if (apiCallBudget > 0 && apiCallsMade >= apiCallBudget) {
+          budgetExhausted = true;
+          break;
+        }
         await limiter.waitTurn();
         const tokens = await anthropicCountTokens({
           model: flags.model,
           messages,
         });
+        apiCallsMade++;
         counts.set(p.kind ? `${p.purpose}|${p.kind}` : p.purpose, tokens);
         process.stdout.write(
-          `[calibrate]  call ${counts.size}/${executable.length} line ${target.lineIdx} ${p.purpose}${p.kind ? `/${p.kind}` : ""} → ${tokens}\n`,
+          `[calibrate]  call ${apiCallsMade}${apiCallBudget ? `/${apiCallBudget}` : ""} line ${target.lineIdx} ${p.purpose}${p.kind ? `/${p.kind}` : ""} → ${tokens}\n`,
         );
       }
+      if (budgetExhausted) break;
 
       const prefixTokens = counts.get("prefix") ?? 0;
       const withTargetTokens = counts.get("prefix+target") ?? 0;
@@ -554,8 +567,11 @@ async function runCalibration(flags: CliFlags): Promise<void> {
     return;
   }
 
+  const budgetNote = budgetExhausted
+    ? ` (stopped at --max-requests=${apiCallBudget})`
+    : "";
   process.stdout.write(
-    `[calibrate] done — wrote ${allRecords.length} records to ${flags.out}\n`,
+    `[calibrate] done — wrote ${allRecords.length} records in ${apiCallsMade} API calls to ${flags.out}${budgetNote}\n`,
   );
 }
 
