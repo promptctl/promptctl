@@ -167,25 +167,27 @@ describe("token counting", () => {
     expect(msgs[0].tokens).toBeGreaterThan(0);
   });
 
-  it("excludes thinking block tokens entirely", async () => {
+  it("counts thinking block tokens (they are billed on re-send)", async () => {
+    // The API preserves thinking blocks in context across turns by default
+    // (cache-read bills them) — thinking is NOT free. Verified empirically
+    // against real sessions via scripts/validate-tokens.ts.
     const longThinking = "Let me reason step by step. ".repeat(200);
     const fp = await writeSession(assistantThinking(longThinking));
     const msgs = await claudeAdapter.loadSession(fp);
 
     expect(msgs).toHaveLength(1);
-    expect(msgs[0].tokens).toBe(0);
+    expect(msgs[0].tokens).toBeGreaterThan(100);
   });
 
-  it("counts only the text portion when thinking + text are mixed", async () => {
+  it("counts both thinking and text portions when mixed", async () => {
     const thinking = "Internal reasoning ".repeat(100);
     const text = "Here is my answer.";
     const fp = await writeSession(assistantWithThinkingAndText(thinking, text));
     const msgs = await claudeAdapter.loadSession(fp);
 
     expect(msgs).toHaveLength(1);
-    // Should only count "Here is my answer." — a few tokens
-    expect(msgs[0].tokens).toBeLessThan(15);
-    expect(msgs[0].tokens).toBeGreaterThan(0);
+    // Both blocks contribute; total should dwarf the short text alone
+    expect(msgs[0].tokens).toBeGreaterThan(50);
   });
 
   it("counts tool_use name and input", async () => {
@@ -253,13 +255,13 @@ describe("flags", () => {
     expect(msgs[0].flags).toContain("oversized");
   });
 
-  it("does not flag thinking-only as oversized even with large thinking", async () => {
+  it("flags oversized thinking-only messages (thinking is billable)", async () => {
     const hugeThinking = "reasoning ".repeat(20_000);
     const fp = await writeSession(assistantThinking(hugeThinking));
     const msgs = await claudeAdapter.loadSession(fp);
 
-    // 0 billable tokens → no oversized flag
-    expect(msgs[0].flags).not.toContain("oversized");
+    // Large thinking DOES cost tokens — flag it so the user can choose to trim.
+    expect(msgs[0].flags).toContain("oversized");
     expect(msgs[0].flags).toContain("thinking");
   });
 
@@ -856,13 +858,12 @@ describe("realistic conversation", () => {
     // User message: has tokens
     expect(msgs[0].tokens).toBeGreaterThan(0);
 
-    // Thinking-only: 0 tokens
-    expect(msgs[1].tokens).toBe(0);
+    // Thinking-only: billable (the API preserves thinking signatures in context)
+    expect(msgs[1].tokens).toBeGreaterThan(0);
     expect(msgs[1].flags).toContain("thinking");
 
-    // Thinking + text: only text tokens
+    // Thinking + text: billable for both blocks
     expect(msgs[2].tokens).toBeGreaterThan(0);
-    expect(msgs[2].tokens).toBeLessThan(30); // just "I'll start by examining..."
     expect(msgs[2].flags).not.toContain("thinking");
 
     // Tool use: has tokens (tool name + input)
@@ -876,9 +877,9 @@ describe("realistic conversation", () => {
     // Assistant text: has tokens
     expect(msgs[5].tokens).toBeGreaterThan(0);
 
-    // Total should be reasonable — not inflated by thinking or JSON
+    // Total should be reasonable for a small mixed conversation.
     const total = msgs.reduce((s, m) => s + m.tokens, 0);
-    expect(total).toBeLessThan(200); // small conversation
+    expect(total).toBeLessThan(500);
   });
 });
 

@@ -18,7 +18,10 @@
     "test:watch": "vitest",
     "typecheck": "tsc --noEmit",
     "schema:extract": "tsx scripts/schema/run.ts all",
-    "schema:check": "tsx scripts/schema/run.ts all --check"
+    "schema:check": "tsx scripts/schema/run.ts all --check",
+    "tokens:validate": "tsx scripts/validate-tokens.ts",
+    "tokens:calibrate": "tsx scripts/calibrate-tokens.ts",
+    "tokens:analyze": "tsx scripts/analyze-calibration.ts"
   },
   "keywords": [],
   "author": {

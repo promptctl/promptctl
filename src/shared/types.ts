@@ -171,6 +171,25 @@ export interface MessageSummary {
   extras: Record<string, string>; // rich metadata (model, tokens, branch) — empty for providers without it
 }
 
+// [LAW:one-source-of-truth] One enum of content kinds for the whole app.
+// The adapter emits BillableChunk[] tagged by kind; the tokenizer applies a
+// per-kind correction factor learned from the Anthropic count_tokens oracle.
+// Variability — "which correction to apply" — lives in data, not branches.
+export type ContentKind =
+  | "user_text"
+  | "assistant_text"
+  | "tool_use_input"
+  | "tool_result_string"
+  | "tool_result_array"
+  | "thinking_signature"
+  | "thinking_text"
+  | "system_text";
+
+export interface BillableChunk {
+  kind: ContentKind;
+  text: string;
+}
+
 // Pre-save structural validation — run by the editor coordinator before
 // writing a session file. Currently only Claude adapter supports it; Gemini
 // sessions have a different failure surface (whole-file JSON integrity,

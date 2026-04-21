@@ -3,6 +3,7 @@ import { useEffect, useState, useCallback } from "react";
 interface SettingsState {
   openaiApiKey: string;
   openaiModel: string;
+  anthropicApiKey: string;
   compressSummarizeThreshold: number;
   compressTruncateThreshold: number;
   compressKeepLastN: number;
@@ -17,6 +18,7 @@ export function Settings() {
   const [settings, setSettings] = useState<SettingsState>({
     openaiApiKey: "",
     openaiModel: "gpt-5.4",
+    anthropicApiKey: "",
     compressSummarizeThreshold: 5000,
     compressTruncateThreshold: 1000,
     compressKeepLastN: 3,
@@ -24,6 +26,9 @@ export function Settings() {
   const [saved, setSaved] = useState(false);
   const [testing, setTesting] = useState(false);
   const [testResult, setTestResult] = useState<string | null>(null);
+  const [anthSaved, setAnthSaved] = useState(false);
+  const [anthTesting, setAnthTesting] = useState(false);
+  const [anthTestResult, setAnthTestResult] = useState<string | null>(null);
 
   useEffect(() => {
     window.electronAPI
@@ -35,6 +40,33 @@ export function Settings() {
     await window.electronAPI.invoke("settings:save", settings);
     setSaved(true);
     setTimeout(() => setSaved(false), 2000);
+  }, [settings]);
+
+  const handleAnthSave = useCallback(async () => {
+    await window.electronAPI.invoke("settings:save", settings);
+    setAnthSaved(true);
+    setTimeout(() => setAnthSaved(false), 2000);
+  }, [settings]);
+
+  const handleAnthTest = useCallback(async () => {
+    setAnthTesting(true);
+    setAnthTestResult(null);
+    try {
+      // Save first so the backend reads the current value.
+      await window.electronAPI.invoke("settings:save", settings);
+      const result = await window.electronAPI.invoke(
+        "anthropic:test-count-tokens",
+      );
+      setAnthTestResult(
+        result.ok
+          ? `Connection successful — endpoint returned ${result.tokens} tokens for "ping"`
+          : `Error: ${result.error ?? "unknown"}`,
+      );
+    } catch (e) {
+      setAnthTestResult(`Error: ${(e as Error).message}`);
+    } finally {
+      setAnthTesting(false);
+    }
   }, [settings]);
 
   const handleTest = useCallback(async () => {
@@ -162,6 +194,69 @@ export function Settings() {
               className={`text-sm ${testResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}
             >
               {testResult}
+            </span>
+          )}
+        </div>
+      </div>
+
+      {/* Anthropic API — used only by offline tokenizer calibration, not at runtime */}
+      <div className="space-y-6 rounded-xl border border-neutral-800 bg-neutral-900 p-6">
+        <div>
+          <h3 className="text-lg font-semibold text-neutral-200">
+            Anthropic API
+          </h3>
+          <p className="mt-1 text-sm text-neutral-500">
+            Used only by the offline tokenizer calibration harness (
+            <code className="rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-300">
+              npm run tokens:calibrate
+            </code>
+            ). The count_tokens endpoint is free to call but rate-limited, so
+            the app never uses it at runtime — only once to learn per-content-kind
+            correction factors for the local estimator.
+          </p>
+        </div>
+
+        <div className="space-y-1.5">
+          <label className="block text-sm font-medium text-neutral-300">
+            API Key
+          </label>
+          <input
+            type="password"
+            value={settings.anthropicApiKey}
+            onChange={(e) =>
+              setSettings((s) => ({ ...s, anthropicApiKey: e.target.value }))
+            }
+            placeholder="sk-ant-..."
+            className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 placeholder-neutral-600 outline-none focus:border-neutral-500"
+          />
+          <p className="text-sm text-neutral-600">
+            Stored locally at ~/.promptctl/settings.json. Not sent anywhere
+            except api.anthropic.com during calibration.
+          </p>
+        </div>
+
+        <div className="flex items-center gap-3">
+          <button
+            onClick={handleAnthSave}
+            className="rounded-md bg-blue-600 px-4 py-2 text-sm font-medium text-white transition-colors hover:bg-blue-500"
+          >
+            Save
+          </button>
+          <button
+            onClick={handleAnthTest}
+            disabled={!settings.anthropicApiKey || anthTesting}
+            className="rounded-md border border-neutral-700 px-4 py-2 text-sm font-medium text-neutral-300 transition-colors hover:bg-neutral-800 disabled:opacity-30"
+          >
+            {anthTesting ? "Testing..." : "Test Connection"}
+          </button>
+          {anthSaved && (
+            <span className="text-sm text-green-400">Saved</span>
+          )}
+          {anthTestResult && (
+            <span
+              className={`text-sm ${anthTestResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}
+            >
+              {anthTestResult}
             </span>
           )}
         </div>

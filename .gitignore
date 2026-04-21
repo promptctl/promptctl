@@ -93,3 +93,8 @@ out/
 
 # MCP config (local paths)
 .mcp.json
+
+# Tokenizer calibration data — may contain session content length metadata.
+# The learned constants (src/main/sessions/tokenizer-corrections.json) are
+# committed; the raw calibration records are not.
+calibration/

@@ -8,6 +8,9 @@ const SETTINGS_FILE = path.join(SETTINGS_DIR, "settings.json");
 export interface AppSettings {
   openaiApiKey: string;
   openaiModel: string;
+  // Only used by the offline tokenizer calibration harness (scripts/calibrate-tokens.ts)
+  // and any future count_tokens-backed UI affordance. Not used for chat completion.
+  anthropicApiKey: string;
   lastRoute: string;
   // Tool-result compression thresholds. One operation dispatches both strategies
   // by token count, so these are the only knobs needed.
@@ -19,6 +22,7 @@ export interface AppSettings {
 const DEFAULTS: AppSettings = {
   openaiApiKey: "",
   openaiModel: "gpt-5.4",
+  anthropicApiKey: "",
   lastRoute: "/loops",
   compressSummarizeThreshold: 5000,
   compressTruncateThreshold: 1000,

@@ -26,6 +26,7 @@ import type {
 interface AppSettingsShape {
   openaiApiKey: string;
   openaiModel: string;
+  anthropicApiKey: string;
   lastRoute: string;
   compressSummarizeThreshold: number;
   compressTruncateThreshold: number;
@@ -127,6 +128,9 @@ export interface ElectronAPI {
     channel: "settings:save",
     updates: Partial<AppSettingsShape>,
   ): Promise<AppSettingsShape>;
+  invoke(
+    channel: "anthropic:test-count-tokens",
+  ): Promise<{ ok: boolean; tokens?: number; error?: string }>;
   invoke(
     channel: "llm:suggest-compression",
     taskId: string,

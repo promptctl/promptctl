@@ -10,10 +10,12 @@ import type {
   DiffEntry,
   CompressToolsOptions,
   CompressToolsResult,
+  BillableChunk,
+  ContentKind,
 } from "../../../shared/types";
 import type { ProviderAdapter } from "../types";
 import type { TaskHandle } from "../../tasks/runner";
-import { countTokens, truncateMiddle } from "../tokenizer";
+import { countTokens, sumChunks, truncateMiddle } from "../tokenizer";
 import { chatComplete } from "../../llm/client";
 import type { ClaudeLine } from "./types";
 
@@ -26,7 +28,10 @@ const CLAUDE_PROJECTS = path.join(process.env.HOME ?? "", ".claude", "projects")
 // Which JSONL line types are visible as messages in the editor
 const VISIBLE_TYPES = new Set(["user", "assistant", "system"]);
 
-function isVisibleMessage(line: ClaudeLine): boolean {
+// [LAW:one-source-of-truth] Exported so validators (scripts/validate-tokens.ts)
+// and the calibration harness reason about the same set of billable lines the
+// editor does — one definition.
+export function isVisibleMessage(line: ClaudeLine): boolean {
   return VISIBLE_TYPES.has(line.type) && line.isSidechain !== true;
 }
 
@@ -142,38 +147,89 @@ function detectRepetition(text: string): boolean {
   return phrases !== null;
 }
 
-// [LAW:one-source-of-truth] Billable input tokens = only content the API charges on re-send.
-// Thinking blocks are stripped automatically by the API and never charged as input.
-function extractBillableText(line: ClaudeLine): string {
+// [LAW:one-source-of-truth] Billable content = anything the API charges for on
+// re-send. Thinking blocks ARE billed: the API preserves thinking from the last
+// assistant turn for cache continuity by default, and Claude Code opts into
+// `keep: "all"` to maximize cache hits — so thinking tokens land in
+// cache_read_input_tokens across the whole session. Empirically confirmed via
+// scripts/validate-tokens.ts (excluding thinking under-counted by ~64k tokens
+// on a real 410-turn session).
+//
+// [LAW:dataflow-not-control-flow] We emit typed chunks here; the tokenizer
+// applies the correct per-kind correction factor. No branching on kind in
+// downstream consumers — one reducer (`sumChunks`) handles all callers.
+//
+// Exported so scripts/validate-tokens.ts and scripts/calibrate-tokens.ts can
+// reason about the same decomposition the editor counts from.
+export function extractBillableChunks(line: ClaudeLine): BillableChunk[] {
   const msg = line.message;
-  if (!msg) return "";
+  if (!msg) {
+    // Top-level system content (rare)
+    if (line.type === "system" && typeof line.content === "string") {
+      return [{ kind: "system_text", text: line.content }];
+    }
+    return [];
+  }
 
-  // User message with string content
-  if (typeof msg.content === "string") return msg.content;
+  // String content — user typed a plain message.
+  if (typeof msg.content === "string") {
+    const kind: ContentKind =
+      line.type === "system" ? "system_text" : "user_text";
+    return [{ kind, text: msg.content }];
+  }
 
-  // Content block array — include text, tool_use, tool_result; exclude thinking
+  // Content block array — one chunk per block, tagged by kind.
   if (Array.isArray(msg.content)) {
-    const parts: string[] = [];
+    const chunks: BillableChunk[] = [];
+    const userish = line.type === "user";
     for (const block of msg.content) {
-      if (block.type === "thinking") continue; // free — API strips these
       if (block.type === "text" && typeof block.text === "string") {
-        parts.push(block.text);
+        chunks.push({
+          kind: userish ? "user_text" : "assistant_text",
+          text: block.text,
+        });
+      } else if (block.type === "thinking") {
+        // Thinking ships as a signed blob: the `thinking` field is usually
+        // empty and the `signature` carries the token weight. Emit two chunks
+        // when both are present so the calibrator can learn them separately.
+        if (typeof block.thinking === "string" && block.thinking.length > 0) {
+          chunks.push({ kind: "thinking_text", text: block.thinking });
+        }
+        const signature = (block as { signature?: unknown }).signature;
+        if (typeof signature === "string" && signature.length > 0) {
+          chunks.push({ kind: "thinking_signature", text: signature });
+        }
       } else if (block.type === "tool_use") {
-        // Tool name + serialized input contribute to token count
-        parts.push(block.name ?? "");
-        if (block.input != null) parts.push(JSON.stringify(block.input));
+        // Tool name is a short fixed-ish overhead (absorbed into the
+        // regression intercept during calibration); the variable cost is the
+        // serialized input argument object.
+        if (block.input != null) {
+          chunks.push({
+            kind: "tool_use_input",
+            text: JSON.stringify(block.input),
+          });
+        }
       } else if (block.type === "tool_result") {
-        parts.push(JSON.stringify(block));
+        const rb = block as { content?: unknown };
+        if (typeof rb.content === "string") {
+          chunks.push({ kind: "tool_result_string", text: rb.content });
+        } else if (Array.isArray(rb.content)) {
+          chunks.push({
+            kind: "tool_result_array",
+            text: JSON.stringify(rb.content),
+          });
+        }
       }
     }
-    return parts.join("\n");
+    return chunks;
   }
 
   // System messages with top-level content
-  const content = line.content;
-  if (typeof content === "string") return content;
+  if (typeof line.content === "string") {
+    return [{ kind: "system_text", text: line.content }];
+  }
 
-  return "";
+  return [];
 }
 
 function isThinkingOnly(line: ClaudeLine): boolean {
@@ -239,7 +295,7 @@ function buildSummary(
   logicalIndex: number,
   physIdx: number,
 ): MessageSummary {
-  const tokens = countTokens(extractBillableText(parsed));
+  const tokens = sumChunks(extractBillableChunks(parsed));
   return {
     index: logicalIndex,
     id: parsed.uuid ?? `line-${physIdx}`,
@@ -664,7 +720,7 @@ export const claudeAdapter: ProviderAdapter = {
     const toRemove = new Set<number>();
     for (let i = 0; i < loadedParsed.length; i++) {
       const parsed = loadedParsed[i];
-      const flags = analyzeFlags(parsed, countTokens(extractBillableText(parsed)));
+      const flags = analyzeFlags(parsed, sumChunks(extractBillableChunks(parsed)));
       if (flags.includes("repetitive")) toRemove.add(i);
       if (flags.includes("system-noise")) toRemove.add(i);
     }
@@ -754,11 +810,14 @@ export const claudeAdapter: ProviderAdapter = {
       let didSummarize = false;
       for (const block of content) {
         if (block.type !== "tool_result") continue;
-        const text =
-          typeof block.content === "string"
-            ? block.content
-            : JSON.stringify(block.content ?? "");
-        const tokens = countTokens(text);
+        const isString = typeof block.content === "string";
+        const text = isString
+          ? (block.content as string)
+          : JSON.stringify(block.content ?? "");
+        const kind: ContentKind = isString
+          ? "tool_result_string"
+          : "tool_result_array";
+        const tokens = sumChunks([{ kind, text }]);
 
         // Threshold dispatch — the token count decides the strategy.
         // [LAW:dataflow-not-control-flow] Variability lives in the data, not

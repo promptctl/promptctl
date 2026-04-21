@@ -5,8 +5,26 @@ import type { MessageSummary } from "../../shared/types";
 import { suggestCompression, segmentTopics } from "../llm/operations";
 import type { CompressSuggestion, TopicSegment } from "../llm/operations";
 import { runTask } from "../tasks/runner";
+import { countTokens as anthropicCountTokens } from "../llm/anthropic-count";
 
 export function registerLlmHandlers(): void {
+  // Test connectivity for the Anthropic count_tokens endpoint. Free to call;
+  // used by the Settings page's "Test Connection" button to verify the key.
+  ipcMain.handle("anthropic:test-count-tokens", async (): Promise<{
+    ok: boolean;
+    tokens?: number;
+    error?: string;
+  }> => {
+    try {
+      const tokens = await anthropicCountTokens({
+        messages: [{ role: "user", content: "ping" }],
+      });
+      return { ok: true, tokens };
+    } catch (err) {
+      return { ok: false, error: (err as Error).message };
+    }
+  });
+
   ipcMain.handle(
     "llm:suggest-compression",
     (
