@@ -93,10 +93,25 @@ function setStoreLoaded(opts: {
 
 beforeEach(() => {
   api = installElectronMock();
-  // Default IPC handlers — return empty data for the discovery calls SessionEditor makes on mount
+  // Default IPC handlers — mount-time calls SessionEditor fires. Individual
+  // tests layer additional/overriding handlers on top via setInvokeHandlers.
   setInvokeHandlers(api, {
     "session:list-projects": () => [],
     "session:provider-metadata": () => ({}),
+    "settings:load": () => ({
+      openaiApiKey: "",
+      openaiModel: "gpt-5.4",
+      lastRoute: "/workshop",
+      compressSummarizeThreshold: 5000,
+      compressTruncateThreshold: 1000,
+      compressKeepLastN: 3,
+    }),
+    "session:list-versions": () => ({
+      sessionPath: "",
+      provider: "claude",
+      head: 0,
+      versions: [],
+    }),
   });
   // Reset store
   useSessionStore.setState({
