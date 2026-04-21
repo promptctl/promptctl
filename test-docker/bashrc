@@ -1,0 +1,3 @@
+# Minimal bashrc for the container test.
+# Mirrors the real install: function dispatches to the script.
+promptctl-open() { ~/.claude/hooks/promptctl-open-dispatch.sh; }

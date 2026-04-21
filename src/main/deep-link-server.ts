@@ -7,7 +7,7 @@
 // Writes the listening port to ~/.promptctl/deep-link-port so the hook can
 // discover it without env var or hardcoded port coordination.
 import http from "node:http";
-import { writeFile, unlink } from "node:fs/promises";
+import { mkdir, writeFile, unlink } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
 
@@ -48,6 +48,7 @@ export function startDeepLinkServer(
         return;
       }
       try {
+        await mkdir(path.dirname(PORT_FILE), { recursive: true });
         await writeFile(PORT_FILE, String(addr.port), "utf-8");
         console.log(
           `[deep-link] http listening on 127.0.0.1:${addr.port} (port file: ${PORT_FILE})`,

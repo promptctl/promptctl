@@ -31,7 +31,7 @@ if (require("electron-squirrel-startup")) {
 // (MCP electron debuggers, CI harnesses) can drive the renderer. Must be set
 // before app.whenReady(). No effect in packaged builds.
 if (process.defaultApp) {
-  const cdpPort = process.env.PROMPTCTL_CDP_PORT ?? "9333";
+  const cdpPort = process.env.PROMPTCTL_CDP_PORT ?? "48599";
   app.commandLine.appendSwitch("remote-debugging-port", cdpPort);
   // Write the port to a discovery file; writeFileSync is fine here — we're
   // still in module-init before whenReady, and the file is tiny.

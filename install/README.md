@@ -1,75 +1,59 @@
 # Open Claude Code session in promptctl (shell one-liner)
 
-Inside Claude Code, type `! promptctl-open`. The currently running session
-opens in promptctl's Context Workshop — no tokens spent, no session id to
-look up.
+Inside Claude Code, type `! promptctl-open`. The current session opens in
+promptctl's Context Workshop — no tokens spent, no session id to look up,
+deterministic.
 
 ## How it works
 
-1. `! promptctl-open` runs a trivial shell function that prints the literal
-   marker `__PROMPTCTL_OPEN__`.
-2. Claude Code fires a `PostToolUse` hook with a JSON payload on stdin that
-   includes `session_id` and the Bash tool input (the command text with the
-   marker).
-3. The hook matches the marker, extracts `session_id`, and runs
-   `open promptctl://open?provider=claude&sessionId=<id>`.
-4. promptctl receives the URL (via the `promptctl://` protocol registered on
-   launch), navigates to `/workshop`, resolves the session id to its file,
-   and loads it.
+The `!` prefix in Claude Code is a pure local shell passthrough: it bypasses
+both `PostToolUse` and `UserPromptSubmit` hooks (confirmed empirically). So
+the dispatch can't rely on hooks — it has to run entirely inside the shell
+function.
 
-No race, no filesystem heuristic, no token cost.
+1. `! promptctl-open` runs the shell function from your rc file.
+2. The function calls `~/.claude/hooks/promptctl-open-dispatch.sh`.
+3. That script walks up the process tree from itself until it finds a
+   process with a `~/.claude/projects/<encoded-cwd>/<sessionId>.jsonl` open
+   (via `lsof -p`). That process is the Claude Code instance writing the
+   current session's transcript; the filename IS the session id. No mtime
+   heuristic, no race, no ambiguity.
+4. The script reads `~/.promptctl/deep-link-port` (written by the running
+   promptctl at startup), `curl`s
+   `POST http://127.0.0.1:<port>/open` with the deep-link URL.
+5. promptctl's HTTP handler calls `handleDeepLink`; the renderer's hash
+   updates to `#/workshop?provider=claude&sessionId=...`;
+   `useDeepLinkSelection` picks it up and loads the session.
 
 ## Install
 
-### 1. Copy the hook script
+### 1. Copy the dispatch script
 
 ```sh
 mkdir -p ~/.claude/hooks
-cp install/promptctl-open.sh ~/.claude/hooks/promptctl-open.sh
-chmod +x ~/.claude/hooks/promptctl-open.sh
+cp install/promptctl-open-dispatch.sh ~/.claude/hooks/promptctl-open-dispatch.sh
+chmod +x ~/.claude/hooks/promptctl-open-dispatch.sh
 ```
 
-### 2. Register the hook in `~/.claude/settings.json`
+(The script lives under `~/.claude/hooks/` by convention — it's not
+registered as a hook; the directory is just a convenient home for
+Claude-adjacent scripts.)
 
-Merge this into your existing `hooks` block:
+### 2. Add the shell function
 
-```json
-{
-  "hooks": {
-    "PostToolUse": [
-      {
-        "matcher": "Bash",
-        "hooks": [
-          {
-            "type": "command",
-            "command": "/Users/YOU/.claude/hooks/promptctl-open.sh"
-          }
-        ]
-      }
-    ]
-  }
-}
-```
-
-(Replace `/Users/YOU` with `$HOME` — the file needs an absolute path.)
-
-### 3. Add the shell function
-
-In your shell rc (`~/.zshrc`, `~/.bashrc`, etc.):
+In your shell rc (`~/.bashrc`, `~/.zshrc`, etc.):
 
 ```sh
-promptctl-open() {
-  echo "__PROMPTCTL_OPEN__ — opening in promptctl"
-}
+promptctl-open() { ~/.claude/hooks/promptctl-open-dispatch.sh; }
 ```
 
 Reload your shell (or `source` the rc file).
 
-### 4. Launch promptctl once
+### 3. Launch promptctl
 
-The app registers `promptctl://` as a default protocol client the first time
-it runs under macOS / your DE. After that, `open promptctl://...` from any
-shell will hand the URL to the running instance (or launch one).
+When promptctl starts, it writes its deep-link HTTP port to
+`~/.promptctl/deep-link-port`. The dispatch script reads that file, so
+promptctl must be running for `! promptctl-open` to work.
 
 ## Usage
 
@@ -79,19 +63,18 @@ Inside a Claude Code session:
 ! promptctl-open
 ```
 
-The Context Workshop tab opens with the current session loaded.
+The Context Workshop tab in promptctl switches to the current session.
 
 ## Troubleshooting
 
-- **Nothing happens:** verify the hook ran — `~/.claude/logs/` and the
-  script's own stderr (the hook prints to stderr when `session_id` is
-  missing). You can also drop `echo "hook fired: $cmd" >&2` near the top
-  of the script while debugging.
-- **URL didn't dispatch:** test the URL directly — `open
-  "promptctl://open?provider=claude&sessionId=<real-session-uuid>"`. If the
-  app opens but the session doesn't load, `session:find` in the main
-  process couldn't locate the file; check that
-  `~/.claude/projects/<encoded-cwd>/<id>.jsonl` exists.
-- **Wrong session:** the hook uses the `session_id` Claude Code puts in
-  the payload — that's the authoritative current session. If it's wrong,
-  Claude Code itself is confused (rare; restart).
+- **`promptctl not running`:** the port file `~/.promptctl/deep-link-port`
+  is missing. Start promptctl (`npm start` in its repo, or launch the
+  packaged app).
+- **`could not find Claude Code JSONL in ancestor processes`:** the script
+  walked 20 PPID levels without finding a Claude Code process with an open
+  session JSONL. This would mean the dispatch is being invoked outside a
+  Claude Code session — or `lsof` is blocked. Try `lsof -p $PPID` manually
+  to confirm.
+- **`HTTP POST failed`:** the port in `~/.promptctl/deep-link-port` is
+  stale (app crashed without cleanup) or the port is blocked. Restart
+  promptctl; it rewrites the port file at startup.
