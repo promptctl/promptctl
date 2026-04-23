@@ -17,6 +17,11 @@ export interface AppSettings {
   compressSummarizeThreshold: number; // tokens at/above -> summarize via LLM
   compressTruncateThreshold: number;  // tokens at/above (but below summarize) -> truncate
   compressKeepLastN: number;           // preserve the last N tool results untouched
+  // Live proxy settings — the proxy auto-starts on app launch, but stays
+  // dormant (no HAR file) until the first request completes.
+  proxyPort: number;                   // 0 = OS-assigned (default)
+  proxyTarget: string;                 // upstream URL — defaults to api.anthropic.com
+  proxyRecordingsDir: string;          // directory for HAR recordings
 }
 
 const DEFAULTS: AppSettings = {
@@ -27,6 +32,9 @@ const DEFAULTS: AppSettings = {
   compressSummarizeThreshold: 5000,
   compressTruncateThreshold: 1000,
   compressKeepLastN: 3,
+  proxyPort: 0,
+  proxyTarget: "https://api.anthropic.com",
+  proxyRecordingsDir: path.join(SETTINGS_DIR, "proxy-recordings"),
 };
 
 let cached: AppSettings | null = null;

@@ -6,7 +6,8 @@
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
-    "start": "electron-forge start",
+    "start": "tsx scripts/dev.ts",
+    "start:forge": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
@@ -44,6 +45,7 @@
     "react-router": "^7.13.1",
     "tiktoken": "^1.0.22",
     "tmux-control-mode-js": "file:../tmux-control-mode-js",
+    "undici": "^8.1.0",
     "zustand": "^5.0.12"
   },
   "devDependencies": {
@@ -70,6 +72,7 @@
     "eslint-config-prettier": "^10.1.8",
     "jsdom": "^29.0.1",
     "prettier": "^3.8.1",
+    "selfsigned": "^5.5.0",
     "tailwindcss": "^4.2.2",
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",

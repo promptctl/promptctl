@@ -20,6 +20,7 @@ import type {
   VersionMeta,
   DiffEntry,
 } from "../shared/types";
+import type { ProxyEvent, ProxyStatus } from "../shared/proxy-events";
 
 // Settings shape mirrored from main/settings/store.ts. Duplicated here so the
 // renderer doesn't import main-process modules. Keep in sync with AppSettings.
@@ -31,10 +32,20 @@ interface AppSettingsShape {
   compressSummarizeThreshold: number;
   compressTruncateThreshold: number;
   compressKeepLastN: number;
+  proxyPort: number;
+  proxyTarget: string;
+  proxyRecordingsDir: string;
 }
 
 export interface ElectronAPI {
-  send(channel: "tmux:subscribe" | "tmux:unsubscribe" | "command:subscribe"): void;
+  send(
+    channel:
+      | "tmux:subscribe"
+      | "tmux:unsubscribe"
+      | "command:subscribe"
+      | "proxy:subscribe"
+      | "proxy:unsubscribe",
+  ): void;
   send(channel: "tmux:watch-pane" | "tmux:unwatch-pane", paneId: string): void;
   send(channel: string, ...args: unknown[]): void;
 
@@ -162,12 +173,23 @@ export interface ElectronAPI {
     query: string,
   ): Promise<SessionSearchResult[]>;
   invoke(channel: "task:cancel", taskId: string): Promise<boolean>;
+  invoke(channel: "proxy:status"): Promise<ProxyStatus>;
+  invoke(channel: "proxy:load-har", filePath: string): Promise<ProxyStatus>;
+  invoke(channel: "proxy:pick-har"): Promise<string | null>;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   writeClipboard(text: string): void;
 
   on(
     channel: "tmux:snapshot",
     listener: (snapshot: TmuxSnapshot) => void,
+  ): () => void;
+  on(
+    channel: "proxy:event",
+    listener: (event: ProxyEvent) => void,
+  ): () => void;
+  on(
+    channel: "proxy:status",
+    listener: (status: ProxyStatus) => void,
   ): () => void;
   on(
     channel: "tmux:pane-output",

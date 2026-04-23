@@ -11,6 +11,9 @@ import { registerPromptHandlers } from "./ipc/prompt-handlers";
 import { registerSettingsHandlers } from "./ipc/settings-handlers";
 import { registerLlmHandlers } from "./ipc/llm-handlers";
 import { registerTaskHandlers } from "./ipc/task-handlers";
+import { registerProxyHandlers } from "./ipc/proxy-handlers";
+import { proxyManager, shutdownProxy } from "./proxy";
+import { loadSettings } from "./settings/store";
 import { registerProvider } from "./sessions/registry";
 import { geminiAdapter } from "./sessions/gemini/adapter";
 import { claudeAdapter } from "./sessions/claude/adapter";
@@ -185,9 +188,26 @@ app.whenReady().then(async () => {
   registerSettingsHandlers();
   registerLlmHandlers();
   registerTaskHandlers();
+  registerProxyHandlers();
 
   await outputManager.init();
   tmuxState.start();
+
+  // Auto-start the proxy. HAR file is lazy-created on the first response
+  // — until then, no file appears on disk. Settings drive port/target/dir.
+  const settings = await loadSettings();
+  try {
+    await proxyManager.start({
+      port: settings.proxyPort,
+      upstreamTarget: settings.proxyTarget,
+      recordingsDir: settings.proxyRecordingsDir,
+    });
+    console.log(
+      `[proxy] listening on 127.0.0.1:${proxyManager.status().port} -> ${settings.proxyTarget}`,
+    );
+  } catch (err) {
+    console.error("[proxy] failed to auto-start:", err);
+  }
 
   deepLinkServer = await startDeepLinkServer(handleDeepLink);
 
@@ -217,6 +237,7 @@ app.on("before-quit", async () => {
   tmuxState.stop();
   commandEngine.stop();
   await outputManager.unwatchAll();
+  await shutdownProxy();
   if (deepLinkServer) {
     await stopDeepLinkServer(deepLinkServer);
     deepLinkServer = null;

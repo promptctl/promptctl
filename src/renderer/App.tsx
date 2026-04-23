@@ -13,12 +13,14 @@ import { Settings } from "./pages/Settings";
 import { CommandsPage } from "./pages/Commands";
 import { SessionsPage } from "./pages/Sessions";
 import { PromptsPage } from "./pages/Prompts";
+import { Live } from "./pages/Live";
 import { TmuxTree } from "./components/TmuxTree";
 import { CommandBar } from "./components/CommandBar";
 import { LaunchToolDialog } from "./components/LaunchToolDialog";
 import { initTmuxSubscription } from "./store/tmux";
 import { initOutputSubscription } from "./store/pane-output";
 import { initCommandSubscription } from "./store/command";
+import { initProxySubscription } from "./store/proxy";
 
 function TopTab({
   to,
@@ -49,6 +51,7 @@ function TopTabBar() {
     <div className="flex items-end border-b border-neutral-800 bg-neutral-950 pl-20">
       <TopTab to="/loops">Loops</TopTab>
       <TopTab to="/workshop">Context Workshop</TopTab>
+      <TopTab to="/live">Live</TopTab>
       <TopTab to="/settings">Settings</TopTab>
     </div>
   );
@@ -172,6 +175,7 @@ export function App() {
   useEffect(() => {
     const unsubTmux = initTmuxSubscription();
     const unsubOutput = initOutputSubscription();
+    const unsubProxy = initProxySubscription();
     let unsubCommand: (() => void) | undefined;
 
     initCommandSubscription().then((unsub) => {
@@ -181,6 +185,7 @@ export function App() {
     return () => {
       unsubTmux();
       unsubOutput();
+      unsubProxy();
       unsubCommand?.();
     };
   }, []);
@@ -198,6 +203,14 @@ export function App() {
               element={
                 <main className="flex-1 overflow-auto p-6">
                   <SessionsPage />
+                </main>
+              }
+            />
+            <Route
+              path="/live"
+              element={
+                <main className="flex flex-1 flex-col overflow-hidden">
+                  <Live />
                 </main>
               }
             />
