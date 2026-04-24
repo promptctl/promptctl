@@ -4,9 +4,11 @@ import userEvent from "@testing-library/user-event";
 import { Live } from "./Live";
 import { useProxyStore } from "../store/proxy";
 import type { ClientInfo, ProxyEvent } from "../../shared/proxy-events";
+import { installElectronMock } from "../../test/electron-mock";
 
 beforeEach(() => {
   cleanup();
+  installElectronMock();
   useProxyStore.setState({
     status: {
       running: true,
@@ -23,11 +25,14 @@ beforeEach(() => {
 });
 
 describe("Live", () => {
-  it("renders grouped request rows, client tabs, filtering, and expansion", async () => {
+  it("renders grouped request rows, client tabs, filtering, and request detail pane", async () => {
     const state = useProxyStore.getState();
     state.upsertClient(client("client-a", "Claude @ app"));
     state.upsertClient(client("client-b", "Codex @ app"));
-    for (const event of [...events("req-a", "client-a"), ...events("req-b", "client-b")]) {
+    for (const event of [
+      ...events("req-a", "client-a"),
+      ...events("req-b", "client-b"),
+    ]) {
       useProxyStore.getState().appendEvent(event);
     }
 
@@ -43,9 +48,22 @@ describe("Live", () => {
     expect(screen.getAllByText(/req-a/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/req-b/)).toBeNull();
 
+    await user.click(screen.getByText("All"));
     await user.click(screen.getAllByText(/req-a/)[0]);
-    expect(screen.getByText("request_headers")).toBeTruthy();
-    expect(screen.getByText("response_complete")).toBeTruthy();
+    expect(screen.getByText("Overview")).toBeTruthy();
+    expect(screen.getByText(/HTTP --/)).toBeTruthy();
+
+    await user.click(screen.getByRole("button", { name: "Request" }));
+    expect(screen.getAllByText(/claude-test/).length).toBeGreaterThan(0);
+
+    await user.click(screen.getAllByText(/req-b/)[0]);
+    expect(screen.getByText("Messages (1)")).toBeTruthy();
+    expect(screen.getByText("hello req-b")).toBeTruthy();
+
+    await user.click(screen.getAllByText(/req-b/)[0]);
+    expect(
+      screen.getByText("Select a request to inspect details."),
+    ).toBeTruthy();
   });
 });
 
@@ -78,6 +96,18 @@ function events(requestId: string, clientId: string): ProxyEvent[] {
       clientId,
       globalSeq: requestId === "req-a" ? 2 : 4,
       recvNs: 2,
+      kind: "request_body",
+      body: {
+        model: "claude-test",
+        system: "Test system",
+        messages: [{ role: "user", content: `hello ${requestId}` }],
+      },
+    },
+    {
+      requestId,
+      clientId,
+      globalSeq: requestId === "req-a" ? 3 : 5,
+      recvNs: 3,
       kind: "response_complete",
       body: {
         id: `msg_${requestId}`,

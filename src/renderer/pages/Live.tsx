@@ -1,8 +1,14 @@
 // [LAW:dataflow-not-control-flow] The Live tab renders RequestRecord
 // projections from the store; live capture and replay share the same path.
 import { useEffect, useMemo, useRef, useState } from "react";
+import { RequestDetail } from "../components/live-detail";
+import {
+  formatNs,
+  stateClass,
+  tabClass,
+} from "../components/live-detail/format";
 import { useProxyStore, visibleRequests } from "../store/proxy";
-import type { ClientInfo, ProxyEvent, RequestRecord } from "../../shared/proxy-events";
+import type { ClientInfo, RequestRecord } from "../../shared/proxy-events";
 
 export function Live() {
   const state = useProxyStore();
@@ -14,6 +20,12 @@ export function Live() {
   const [loadError, setLoadError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
   const requests = useMemo(() => visibleRequests(state), [state]);
+  const selectedRecord =
+    state.selectedRequestId === null
+      ? null
+      : (requests.find(
+          (record) => record.requestId === state.selectedRequestId,
+        ) ?? null);
   const requestCount = state.requests.size;
 
   useEffect(() => {
@@ -45,7 +57,10 @@ export function Live() {
         status={state.status}
         proxyUrl={proxyUrl}
         requestCount={requestCount}
-        eventCount={[...state.requests.values()].reduce((sum, r) => sum + r.events.length, 0)}
+        eventCount={[...state.requests.values()].reduce(
+          (sum, r) => sum + r.events.length,
+          0,
+        )}
         follow={follow}
         onToggleFollow={() => setFollow((f) => !f)}
         onClear={clearEvents}
@@ -54,7 +69,9 @@ export function Live() {
       <ClientTabs
         clients={[...state.clients.values()]}
         selectedClientId={state.selectedClientId}
-        activeClientIds={new Set([...state.requests.values()].map((r) => r.clientId))}
+        activeClientIds={
+          new Set([...state.requests.values()].map((r) => r.clientId))
+        }
         onSelect={selectClient}
         onClearInactive={clearInactiveClients}
       />
@@ -63,21 +80,32 @@ export function Live() {
           Failed to load HAR: {loadError}
         </div>
       )}
-      <div
-        ref={logRef}
-        className="min-h-0 flex-1 overflow-y-auto bg-neutral-950 font-mono text-xs"
-      >
-        {requestCount === 0 ? (
-          <EmptyHint proxyUrl={proxyUrl} target={state.status.upstreamTarget} />
-        ) : (
-          requests.map((record) => (
-            <RequestRow
-              key={record.requestId}
-              record={record}
-              expanded={state.selectedRequestId === record.requestId}
-              onToggle={() => toggleRequest(record.requestId)}
+      <div className="flex min-h-0 flex-1 bg-neutral-950 font-mono text-xs">
+        <div
+          ref={logRef}
+          className="min-h-0 w-[28rem] shrink-0 overflow-y-auto"
+        >
+          {requestCount === 0 ? (
+            <EmptyHint
+              proxyUrl={proxyUrl}
+              target={state.status.upstreamTarget}
             />
-          ))
+          ) : (
+            requests.map((record) => (
+              <RequestRow
+                key={record.requestId}
+                record={record}
+                selected={state.selectedRequestId === record.requestId}
+                onToggle={() => toggleRequest(record.requestId)}
+              />
+            ))
+          )}
+        </div>
+        {selectedRecord === null ? (
+          <DetailHint />
+        ) : (
+          // [LAW:one-source-of-truth] RequestRecord remains the only detail source; the pane is a pure projection of the selected row.
+          <RequestDetail record={selectedRecord} />
         )}
       </div>
     </div>
@@ -94,7 +122,12 @@ function StatusBar({
   onClear,
   onResume,
 }: {
-  status: { running: boolean; recordingPath: string | null; entryCount: number; upstreamTarget: string };
+  status: {
+    running: boolean;
+    recordingPath: string | null;
+    entryCount: number;
+    upstreamTarget: string;
+  };
   proxyUrl: string;
   requestCount: number;
   eventCount: number;
@@ -118,12 +151,15 @@ function StatusBar({
       </span>
       <span className="ml-auto flex items-center gap-3">
         <span className="text-neutral-500">
-          {requestCount} requests · {eventCount} events · {status.entryCount} entries
+          {requestCount} requests · {eventCount} events · {status.entryCount}{" "}
+          entries
         </span>
         <span className="text-neutral-500">
           HAR:{" "}
           <span className="font-mono text-neutral-300">
-            {status.recordingPath ? shortPath(status.recordingPath) : "(none yet)"}
+            {status.recordingPath
+              ? shortPath(status.recordingPath)
+              : "(none yet)"}
           </span>
         </span>
         <button
@@ -203,18 +239,20 @@ function ClientTabs({
 
 function RequestRow({
   record,
-  expanded,
+  selected,
   onToggle,
 }: {
   record: RequestRecord;
-  expanded: boolean;
+  selected: boolean;
   onToggle: () => void;
 }) {
   return (
     <div className="border-b border-neutral-900">
       <button
         onClick={onToggle}
-        className="grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_1fr_8rem] gap-2 px-3 py-2 text-left hover:bg-neutral-900"
+        className={`grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_1fr_8rem] gap-2 px-3 py-2 text-left hover:bg-neutral-900 ${
+          selected ? "bg-neutral-900" : ""
+        }`}
       >
         <span className="text-neutral-600" title={String(record.startedNs)}>
           {formatNs(record.startedNs)}
@@ -226,17 +264,16 @@ function RequestRow({
           {record.requestId.slice(0, 6)}
         </span>
         <span className="text-blue-400">{record.method || "?"}</span>
-        <span className={stateClass(record.state)}>{record.status ?? record.state}</span>
-        <span className="truncate text-neutral-300">{requestSummary(record)}</span>
-        <span className="text-right text-neutral-500">{record.events.length} events</span>
+        <span className={stateClass(record.state)}>
+          {record.status ?? record.state}
+        </span>
+        <span className="truncate text-neutral-300">
+          {requestSummary(record)}
+        </span>
+        <span className="text-right text-neutral-500">
+          {record.events.length} events
+        </span>
       </button>
-      {expanded && (
-        <div className="bg-neutral-950/80 pb-2">
-          {record.events.map((event) => (
-            <EventRow key={event.globalSeq} event={event} />
-          ))}
-        </div>
-      )}
     </div>
   );
 }
@@ -251,24 +288,12 @@ function EmptyHint({ proxyUrl, target }: { proxyUrl: string; target: string }) {
       </pre>
       <div className="mt-3 text-xs text-neutral-500">
         Requests will be forwarded to{" "}
-        <span className="font-mono text-neutral-400">{target || "(no target set)"}</span> and
-        a HAR file will appear in your recordings directory once the first
+        <span className="font-mono text-neutral-400">
+          {target || "(no target set)"}
+        </span>{" "}
+        and a HAR file will appear in your recordings directory once the first
         response completes.
       </div>
-    </div>
-  );
-}
-
-function EventRow({ event }: { event: ProxyEvent }) {
-  const summary = useMemo(() => describe(event), [event]);
-  return (
-    <div className="grid grid-cols-[6rem_2.5rem_8rem_1fr] gap-2 px-8 py-1 hover:bg-neutral-900">
-      <span className="text-neutral-600" title={String(event.recvNs)}>
-        {formatNs(event.recvNs)}
-      </span>
-      <span className="text-neutral-600">#{event.globalSeq}</span>
-      <span className={kindClass(event.kind)}>{event.kind}</span>
-      <span className="truncate text-neutral-300">{summary}</span>
     </div>
   );
 }
@@ -284,93 +309,15 @@ function requestSummary(record: RequestRecord): string {
   return `${url}${model}`;
 }
 
-function describe(event: ProxyEvent): string {
-  switch (event.kind) {
-    case "request_headers":
-      return `${event.method} ${event.url}`;
-    case "request_body": {
-      if (typeof event.body === "object" && event.body !== null) {
-        const b = event.body as Record<string, unknown>;
-        const model = typeof b.model === "string" ? b.model : "";
-        const msgs = Array.isArray(b.messages) ? `${b.messages.length} messages` : "";
-        return [model, msgs].filter(Boolean).join(", ") || "(json body)";
-      }
-      return "(body)";
-    }
-    case "response_headers":
-      return `status ${event.status}`;
-    case "sse_event":
-      return event.sse.type === "content_block_delta"
-        ? deltaSummary(event.sse)
-        : event.sse.type;
-    case "response_complete": {
-      const body = event.body as { stop_reason?: string | null; usage?: { output_tokens?: number } };
-      const stop = body.stop_reason ? ` stop=${body.stop_reason}` : "";
-      const out = body.usage?.output_tokens ?? "?";
-      return `assembled · out=${out}${stop}`;
-    }
-    case "response_done":
-      return "—";
-    case "proxy_error":
-      return event.error;
-  }
-}
-
-function deltaSummary(sse: { type: string; delta?: { type?: string; text?: string; partial_json?: string } }): string {
-  const d = sse.delta;
-  if (!d) return "delta";
-  if (d.type === "text_delta") return `Δtext "${truncate(d.text ?? "", 40)}"`;
-  if (d.type === "input_json_delta") return `Δjson "${truncate(d.partial_json ?? "", 40)}"`;
-  return d.type ?? "delta";
-}
-
-function tabClass(active: boolean): string {
-  return active
-    ? "rounded bg-neutral-700 px-2 py-0.5 text-neutral-100"
-    : "rounded px-2 py-0.5 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200";
-}
-
-function stateClass(state: RequestRecord["state"]): string {
-  switch (state) {
-    case "in_flight":
-      return "text-blue-400";
-    case "streaming":
-      return "text-cyan-400";
-    case "complete":
-      return "text-green-400";
-    case "errored":
-      return "text-red-400";
-  }
-}
-
-function kindClass(kind: ProxyEvent["kind"]): string {
-  switch (kind) {
-    case "request_headers":
-    case "request_body":
-      return "text-blue-400";
-    case "response_headers":
-      return "text-cyan-400";
-    case "sse_event":
-      return "text-neutral-500";
-    case "response_complete":
-      return "text-green-400";
-    case "response_done":
-      return "text-neutral-600";
-    case "proxy_error":
-      return "text-red-400";
-  }
-}
-
 function shortPath(p: string): string {
   const parts = p.split("/");
-  return parts.length <= 2 ? p : `…/${parts[parts.length - 1]}`;
+  return parts.length <= 2 ? p : `.../${parts[parts.length - 1]}`;
 }
 
-function truncate(s: string, n: number): string {
-  return s.length <= n ? s : `${s.slice(0, n)}…`;
-}
-
-function formatNs(ns: number): string {
-  const ms = Math.floor(ns / 1_000_000) % 100_000;
-  return `+${ms.toString().padStart(5, "0")}ms`;
+function DetailHint() {
+  return (
+    <div className="flex min-w-0 flex-1 items-center justify-center border-l border-neutral-800 text-sm text-neutral-500">
+      Select a request to inspect details.
+    </div>
+  );
 }
