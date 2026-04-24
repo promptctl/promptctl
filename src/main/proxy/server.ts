@@ -350,9 +350,10 @@ function emit(event: ProxyEvent): void {
 
 async function clientInfoFor(socket: ClientSocket) {
   const info = await (socket[CLIENT_INFO] ?? resolveClientId(socket));
-  socket[CLIENT_INFO] = Promise.resolve(info);
-  proxyEventBus.publishClient(info);
-  return info;
+  const refreshed = { ...info, lastSeenNs: Number(process.hrtime.bigint()) };
+  socket[CLIENT_INFO] = Promise.resolve(refreshed);
+  proxyEventBus.publishClient(refreshed);
+  return refreshed;
 }
 
 function parseJsonBody(buf: Buffer): unknown {

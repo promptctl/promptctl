@@ -80,13 +80,13 @@ export interface AnthropicMessage {
 
 // ─── Pipeline events (the canonical bus payload) ──────────────────────────
 // [LAW:single-enforcer] All proxy observations flow through this union.
-// requestId/seq/recvNs envelope appears on every variant (no inheritance in
+// requestId/globalSeq/recvNs envelope appears on every variant (no inheritance in
 // TS unions) — use makeEnvelope() to construct consistently.
 
 export interface ProxyEventEnvelope {
   requestId: string;
   clientId: string;
-  seq: number;
+  globalSeq: number;
   recvNs: number;
 }
 
@@ -214,5 +214,5 @@ export interface ProxyStatus {
   entryCount: number;
 }
 
-// Helpers (envelope construction, seq counter) live in src/main/proxy/envelope.ts —
+// Helpers (envelope construction, global sequence counter) live in src/main/proxy/envelope.ts —
 // they call Node APIs that aren't available in the renderer.

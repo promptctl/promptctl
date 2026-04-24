@@ -59,6 +59,21 @@ describe("proxy store request projection", () => {
     expect([...state.clients.keys()].sort()).toEqual(["client-a", "client-b"]);
     expect([...state.requests.values()].filter((r) => r.clientId === state.selectedClientId)).toHaveLength(1);
   });
+
+  it("clears selectedRequestId when request trimming evicts the selected record", () => {
+    const first = requestEvents("req-0", "client-a")[0];
+    useProxyStore.getState().appendEvent(first);
+    useProxyStore.getState().toggleRequest("req-0");
+
+    for (let i = 1; i <= 1000; i += 1) {
+      const event = requestEvents(`req-${i}`, "client-a")[0];
+      useProxyStore.getState().appendEvent({ ...event, globalSeq: i + 1, recvNs: i + 1 });
+    }
+
+    const state = useProxyStore.getState();
+    expect(state.requests.has("req-0")).toBe(false);
+    expect(state.selectedRequestId).toBeNull();
+  });
 });
 
 function requestEvents(requestId: string, clientId: string): ProxyEvent[] {
@@ -66,7 +81,7 @@ function requestEvents(requestId: string, clientId: string): ProxyEvent[] {
     {
       requestId,
       clientId,
-      seq: 1,
+      globalSeq: 1,
       recvNs: 1,
       kind: "request_headers",
       method: "POST",
@@ -76,7 +91,7 @@ function requestEvents(requestId: string, clientId: string): ProxyEvent[] {
     {
       requestId,
       clientId,
-      seq: 2,
+      globalSeq: 2,
       recvNs: 2,
       kind: "response_headers",
       status: 200,
@@ -85,7 +100,7 @@ function requestEvents(requestId: string, clientId: string): ProxyEvent[] {
     {
       requestId,
       clientId,
-      seq: 3,
+      globalSeq: 3,
       recvNs: 3,
       kind: "response_complete",
       body: {

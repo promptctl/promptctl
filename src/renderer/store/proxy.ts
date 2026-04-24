@@ -25,7 +25,6 @@ interface ProxyStore {
   toggleRequest: (requestId: string) => void;
   clearInactiveClients: () => void;
   clearEvents: () => void;
-  resetEvents: () => void;
 }
 
 const INITIAL_STATUS: ProxyStatus = {
@@ -47,9 +46,15 @@ export const useProxyStore = create<ProxyStore>((set) => ({
     set((state) => {
       const clients = new Map(state.clients);
       clients.set(event.clientId, clientFromEvent(event, clients.get(event.clientId)));
+      const requests = foldRequests(state.requests, event);
+      const selectedRequestId =
+        state.selectedRequestId !== null && !requests.has(state.selectedRequestId)
+          ? null
+          : state.selectedRequestId;
       return {
-        requests: foldRequests(state.requests, event),
+        requests,
         clients,
+        selectedRequestId,
       };
     }),
   upsertClient: (info) =>
@@ -82,7 +87,6 @@ export const useProxyStore = create<ProxyStore>((set) => ({
       };
     }),
   clearEvents: () => set({ requests: new Map(), selectedRequestId: null }),
-  resetEvents: () => set({ requests: new Map(), selectedRequestId: null }),
 }));
 
 export function initProxySubscription(): () => void {

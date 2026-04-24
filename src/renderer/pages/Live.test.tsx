@@ -66,7 +66,7 @@ function events(requestId: string, clientId: string): ProxyEvent[] {
     {
       requestId,
       clientId,
-      seq: requestId === "req-a" ? 1 : 3,
+      globalSeq: requestId === "req-a" ? 1 : 3,
       recvNs: 1,
       kind: "request_headers",
       method: "POST",
@@ -76,7 +76,7 @@ function events(requestId: string, clientId: string): ProxyEvent[] {
     {
       requestId,
       clientId,
-      seq: requestId === "req-a" ? 2 : 4,
+      globalSeq: requestId === "req-a" ? 2 : 4,
       recvNs: 2,
       kind: "response_complete",
       body: {

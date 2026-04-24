@@ -7,7 +7,6 @@ import type { ClientInfo, ProxyEvent, RequestRecord } from "../../shared/proxy-e
 export function Live() {
   const state = useProxyStore();
   const clearEvents = useProxyStore((s) => s.clearEvents);
-  const resetEvents = useProxyStore((s) => s.resetEvents);
   const selectClient = useProxyStore((s) => s.selectClient);
   const toggleRequest = useProxyStore((s) => s.toggleRequest);
   const clearInactiveClients = useProxyStore((s) => s.clearInactiveClients);
@@ -32,7 +31,7 @@ export function Live() {
     const filePath = await window.electronAPI.invoke("proxy:pick-har");
     if (!filePath) return;
     try {
-      resetEvents();
+      clearEvents();
       const next = await window.electronAPI.invoke("proxy:load-har", filePath);
       useProxyStore.getState().setStatus(next);
     } catch (err) {
@@ -234,7 +233,7 @@ function RequestRow({
       {expanded && (
         <div className="bg-neutral-950/80 pb-2">
           {record.events.map((event) => (
-            <EventRow key={event.seq} event={event} />
+            <EventRow key={event.globalSeq} event={event} />
           ))}
         </div>
       )}
@@ -267,7 +266,7 @@ function EventRow({ event }: { event: ProxyEvent }) {
       <span className="text-neutral-600" title={String(event.recvNs)}>
         {formatNs(event.recvNs)}
       </span>
-      <span className="text-neutral-600">#{event.seq}</span>
+      <span className="text-neutral-600">#{event.globalSeq}</span>
       <span className={kindClass(event.kind)}>{event.kind}</span>
       <span className="truncate text-neutral-300">{summary}</span>
     </div>

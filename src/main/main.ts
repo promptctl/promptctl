@@ -1,4 +1,6 @@
 import { app, BrowserWindow } from "electron";
+import fs from "node:fs";
+import os from "node:os";
 import path from "node:path";
 import { TmuxStateManager } from "./tmux/state";
 import { PaneOutputManager } from "./tmux/output";
@@ -39,14 +41,8 @@ if (process.defaultApp) {
   // Write the port to a discovery file; writeFileSync is fine here — we're
   // still in module-init before whenReady, and the file is tiny.
   try {
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const fs = require("node:fs") as typeof import("node:fs");
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const os = require("node:os") as typeof import("node:os");
-    // eslint-disable-next-line @typescript-eslint/no-require-imports
-    const nodePath = require("node:path") as typeof import("node:path");
-    const file = nodePath.join(os.homedir(), ".promptctl", "cdp-port");
-    fs.mkdirSync(nodePath.dirname(file), { recursive: true });
+    const file = path.join(os.homedir(), ".promptctl", "cdp-port");
+    fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, cdpPort, "utf-8");
     console.log(`[deep-link] CDP enabled on port ${cdpPort} (port file: ${file})`);
   } catch (err) {

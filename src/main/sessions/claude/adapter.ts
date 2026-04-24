@@ -15,7 +15,7 @@ import type {
 } from "../../../shared/types";
 import type { ProviderAdapter } from "../types";
 import type { TaskHandle } from "../../tasks/runner";
-import { countTokens, sumChunks, truncateMiddle } from "../tokenizer";
+import { sumChunks, truncateMiddle } from "../tokenizer";
 import { chatComplete } from "../../llm/client";
 import type { ClaudeLine } from "./types";
 

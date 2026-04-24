@@ -9,7 +9,7 @@ import { readFile, readlink, readdir } from "node:fs/promises";
 import type { ClientInfo } from "../../shared/proxy-events";
 
 const CLIENT_BINS = new Set(["claude", "codex", "gemini", "copilot-cli"]);
-const RESOLVE_TIMEOUT_MS = 300;
+const RESOLVE_TIMEOUT_MS = 1000;
 const MAX_PARENT_DEPTH = 10;
 
 interface ProcessRow {
@@ -61,10 +61,15 @@ async function findSocketPid(socket: net.Socket): Promise<number> {
   const remotePort = socket.remotePort;
   if (remotePort === undefined) throw new Error("socket remotePort unavailable");
   if (platform() === "linux") return findLinuxSocketPid(socket);
-  return findMacSocketPid(remotePort);
+  return findMacSocketPid(socket);
 }
 
-async function findMacSocketPid(remotePort: number): Promise<number> {
+async function findMacSocketPid(socket: net.Socket): Promise<number> {
+  const remotePort = socket.remotePort;
+  const localPort = socket.localPort;
+  if (remotePort === undefined || localPort === undefined) {
+    throw new Error("socket ports unavailable");
+  }
   const stdout = await exec("lsof", [
     "-nP",
     "-iTCP",
@@ -72,7 +77,13 @@ async function findMacSocketPid(remotePort: number): Promise<number> {
     "-sTCP:ESTABLISHED",
     "-Fpn",
   ]);
-  const pid = parseLsofPid(stdout);
+  const entries = parseLsofEntries(stdout);
+  const peer = entries.find((entry) =>
+    entry.name.includes(`:${remotePort}->`) && entry.name.includes(`:${localPort}`),
+  );
+  const candidates = entries.map((entry) => entry.pid);
+  const pid =
+    peer?.pid ?? candidates.find((candidate) => candidate !== process.pid) ?? candidates[0] ?? null;
   if (pid === null) throw new Error("no socket pid from lsof");
   return pid;
 }
@@ -133,9 +144,25 @@ function portHex(port: number): string {
 }
 
 export function parseLsofPid(stdout: string): number | null {
-  const line = stdout.split("\n").find((part) => part.startsWith("p"));
-  const pid = line ? Number(line.slice(1)) : NaN;
-  return Number.isFinite(pid) && pid > 0 ? pid : null;
+  return parseLsofPids(stdout)[0] ?? null;
+}
+
+export function parseLsofPids(stdout: string): number[] {
+  return parseLsofEntries(stdout).map((entry) => entry.pid);
+}
+
+export function parseLsofEntries(stdout: string): { pid: number; name: string }[] {
+  const entries: { pid: number; name: string }[] = [];
+  let currentPid: number | null = null;
+  for (const part of stdout.split("\n")) {
+    if (part.startsWith("p")) {
+      const pid = Number(part.slice(1));
+      currentPid = Number.isFinite(pid) && pid > 0 ? pid : null;
+    } else if (part.startsWith("n") && currentPid !== null) {
+      entries.push({ pid: currentPid, name: part.slice(1) });
+    }
+  }
+  return entries;
 }
 
 async function findClientRoot(pid: number): Promise<ProcessRow> {
