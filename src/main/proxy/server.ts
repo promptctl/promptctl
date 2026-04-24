@@ -13,6 +13,7 @@ import type {
   SseEvent,
 } from "../../shared/proxy-events";
 import { ResponseAssembler } from "./assembler";
+import { resolveClientId } from "./client-identity";
 import { makeEnvelope, newRequestId } from "./envelope";
 import { proxyEventBus } from "./events";
 import { parseSseFrame } from "./sse-parser";
@@ -93,6 +94,12 @@ export interface RunningServer {
   close(): Promise<void>;
 }
 
+const CLIENT_INFO = Symbol("promptctl.clientInfo");
+
+type ClientSocket = http.IncomingMessage["socket"] & {
+  [CLIENT_INFO]?: ReturnType<typeof resolveClientId>;
+};
+
 // Notification path for completed entries (HAR recorder subscribes here).
 // We pass entries via a dedicated callback rather than the event bus because
 // HarEntry is a derived/synthetic shape, not a wire observation.
@@ -117,6 +124,14 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
       }
     }),
   );
+  server.on("connection", (socket) => {
+    // [LAW:single-enforcer] Connection ownership is resolved once per socket;
+    // requests only consume the cached ClientInfo projection.
+    (socket as ClientSocket)[CLIENT_INFO] = resolveClientId(socket).then((info) => {
+      proxyEventBus.publishClient(info);
+      return info;
+    });
+  });
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -154,6 +169,8 @@ async function handleRequest(
   onEntry: EntrySink,
 ): Promise<void> {
   const requestId = newRequestId();
+  const clientInfo = await clientInfoFor(req.socket as ClientSocket);
+  const envelope = () => makeEnvelope(requestId, clientInfo.clientId);
   const startedAt = Date.now();
   const startedNs = process.hrtime.bigint();
 
@@ -162,7 +179,7 @@ async function handleRequest(
   const incomingHeaders = rawHeaders(req);
 
   emit({
-    ...makeEnvelope(requestId),
+    ...envelope(),
     kind: "request_headers",
     method: req.method ?? "GET",
     url: targetUrl,
@@ -172,7 +189,7 @@ async function handleRequest(
   const body = await readRequestBody(req);
   const parsedBody = parseJsonBody(body);
   emit({
-    ...makeEnvelope(requestId),
+    ...envelope(),
     kind: "request_body",
     body: parsedBody,
   });
@@ -190,7 +207,7 @@ async function handleRequest(
     const cause = (err as Error & { cause?: { code?: string; message?: string } }).cause;
     const detail = cause ? ` (cause: ${cause.code ?? ""} ${cause.message ?? ""})` : "";
     emit({
-      ...makeEnvelope(requestId),
+      ...envelope(),
       kind: "proxy_error",
       error: `${message}${detail}`,
     });
@@ -200,7 +217,7 @@ async function handleRequest(
   }
 
   emit({
-    ...makeEnvelope(requestId),
+    ...envelope(),
     kind: "response_headers",
     status: upstream.status,
     headers: safeHeaders(upstream.headers),
@@ -246,14 +263,14 @@ async function handleRequest(
             sseEvents.push(ev);
             assembler.onEvent(ev);
             emit({
-              ...makeEnvelope(requestId),
+              ...envelope(),
               kind: "sse_event",
               sse: ev,
             });
           }
         } catch (err) {
           emit({
-            ...makeEnvelope(requestId),
+            ...envelope(),
             kind: "proxy_error",
             error: `SSE parse error: ${(err as Error).message}`,
           });
@@ -274,13 +291,13 @@ async function handleRequest(
     try {
       assembledMessage = assembler.complete();
       emit({
-        ...makeEnvelope(requestId),
+        ...envelope(),
         kind: "response_complete",
         body: assembledMessage,
       });
     } catch (err) {
       emit({
-        ...makeEnvelope(requestId),
+        ...envelope(),
         kind: "proxy_error",
         error: `Response assembly error: ${(err as Error).message}`,
       });
@@ -295,7 +312,7 @@ async function handleRequest(
       // not JSON — leave as string
     }
     emit({
-      ...makeEnvelope(requestId),
+      ...envelope(),
       kind: "response_complete",
       // For non-SSE responses we still emit response_complete with the raw
       // body. Type assertion is intentional: HAR consumers tolerate any shape
@@ -306,7 +323,7 @@ async function handleRequest(
   }
 
   emit({
-    ...makeEnvelope(requestId),
+    ...envelope(),
     kind: "response_done",
   });
 
@@ -329,6 +346,13 @@ async function handleRequest(
 
 function emit(event: ProxyEvent): void {
   proxyEventBus.emit(event);
+}
+
+async function clientInfoFor(socket: ClientSocket) {
+  const info = await (socket[CLIENT_INFO] ?? resolveClientId(socket));
+  socket[CLIENT_INFO] = Promise.resolve(info);
+  proxyEventBus.publishClient(info);
+  return info;
 }
 
 function parseJsonBody(buf: Buffer): unknown {

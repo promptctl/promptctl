@@ -5,10 +5,11 @@
 import path from "node:path";
 import { homedir } from "node:os";
 
-import type { HarEntry, ProxyStatus } from "../../shared/proxy-events";
+import type { ClientInfo, HarEntry, ProxyStatus } from "../../shared/proxy-events";
 import { HarRecorder } from "./har-recorder";
 import { replayHarFile } from "./har-replayer";
 import { startServer, type RunningServer } from "./server";
+import { proxyEventBus } from "./events";
 import { closeUpstream } from "./upstream";
 
 export interface ProxyStartOptions {
@@ -73,6 +74,10 @@ class ProxyManager {
       recordingPath: this.recorder?.getCurrentPath() ?? null,
       entryCount: this.recorder?.getEntries().length ?? 0,
     };
+  }
+
+  listClients(): ClientInfo[] {
+    return proxyEventBus.listClients();
   }
 
   // Test/dev hooks.

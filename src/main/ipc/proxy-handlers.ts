@@ -6,21 +6,30 @@ import { BrowserWindow, dialog, ipcMain, type WebContents } from "electron";
 import { proxyManager } from "../proxy";
 import { proxyEventBus } from "../proxy/events";
 import { loadSettings } from "../settings/store";
-import type { ProxyEvent } from "../../shared/proxy-events";
+import type { ClientInfo, ProxyEvent } from "../../shared/proxy-events";
 
 const subscribers = new Set<WebContents>();
 
 // Single bus subscription forwards to all renderer subscribers — avoids one
 // EventEmitter listener per subscriber (which would cap out at maxListeners).
 let busUnsub: (() => void) | null = null;
+let clientUnsub: (() => void) | null = null;
 
 function ensureBusSubscription(): void {
-  if (busUnsub !== null) return;
-  busUnsub = proxyEventBus.subscribe((event: ProxyEvent) => {
-    for (const wc of subscribers) {
-      if (!wc.isDestroyed()) wc.send("proxy:event", event);
-    }
-  });
+  if (busUnsub === null) {
+    busUnsub = proxyEventBus.subscribe((event: ProxyEvent) => {
+      for (const wc of subscribers) {
+        if (!wc.isDestroyed()) wc.send("proxy:event", event);
+      }
+    });
+  }
+  if (clientUnsub === null) {
+    clientUnsub = proxyEventBus.subscribeClients((info: ClientInfo) => {
+      for (const wc of subscribers) {
+        if (!wc.isDestroyed()) wc.send("proxy:client", info);
+      }
+    });
+  }
 }
 
 function broadcastStatus(): void {
@@ -40,6 +49,7 @@ export function registerProxyHandlers(): void {
     // Send current status immediately so the renderer can paint without a
     // separate invoke.
     wc.send("proxy:status", proxyManager.status());
+    wc.send("proxy:clients", proxyManager.listClients());
   });
 
   ipcMain.on("proxy:unsubscribe", (event) => {
@@ -47,6 +57,7 @@ export function registerProxyHandlers(): void {
   });
 
   ipcMain.handle("proxy:status", () => proxyManager.status());
+  ipcMain.handle("proxy:list-clients", () => proxyManager.listClients());
 
   ipcMain.handle("proxy:load-har", async (_e, filePath: string) => {
     const status = await proxyManager.loadHar(filePath);

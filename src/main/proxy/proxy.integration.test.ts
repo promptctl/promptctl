@@ -190,6 +190,7 @@ describe("proxy integration", () => {
     // Emitted events: secrets stripped from request_headers.
     const reqHeaderEvents = collectedEvents.filter((e) => e.kind === "request_headers");
     expect(reqHeaderEvents).toHaveLength(1);
+    expect(collectedEvents.every((e) => e.clientId.length > 0)).toBe(true);
     if (reqHeaderEvents[0].kind === "request_headers") {
       expect(reqHeaderEvents[0].headers["x-api-key"]).toBeUndefined();
       expect(reqHeaderEvents[0].headers["anthropic-version"]).toBe("2023-06-01");

@@ -1,40 +1,39 @@
-// [LAW:dataflow-not-control-flow] The Live tab is a pure projection of the
-// proxy event stream — no branch on "is this replay vs live", just render
-// whatever's in the store.
+// [LAW:dataflow-not-control-flow] The Live tab renders RequestRecord
+// projections from the store; live capture and replay share the same path.
 import { useEffect, useMemo, useRef, useState } from "react";
-import { useProxyStore } from "../store/proxy";
-import type { ProxyEvent } from "../../shared/proxy-events";
+import { useProxyStore, visibleRequests } from "../store/proxy";
+import type { ClientInfo, ProxyEvent, RequestRecord } from "../../shared/proxy-events";
 
 export function Live() {
-  const status = useProxyStore((s) => s.status);
-  const events = useProxyStore((s) => s.events);
+  const state = useProxyStore();
   const clearEvents = useProxyStore((s) => s.clearEvents);
   const resetEvents = useProxyStore((s) => s.resetEvents);
+  const selectClient = useProxyStore((s) => s.selectClient);
+  const toggleRequest = useProxyStore((s) => s.toggleRequest);
+  const clearInactiveClients = useProxyStore((s) => s.clearInactiveClients);
   const [follow, setFollow] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
+  const requests = useMemo(() => visibleRequests(state), [state]);
+  const requestCount = state.requests.size;
 
-  // Auto-scroll to bottom when new events arrive (if follow mode is on).
   useEffect(() => {
     if (!follow) return;
     const el = logRef.current;
     if (el) el.scrollTop = el.scrollHeight;
-  }, [events.length, follow]);
+  }, [requestCount, follow]);
 
-  const proxyUrl = status.running
-    ? `http://127.0.0.1:${status.port}`
+  const proxyUrl = state.status.running
+    ? `http://127.0.0.1:${state.status.port}`
     : "(not running)";
 
   async function onResume() {
     setLoadError(null);
-    // Native OS file picker rooted at the recordings dir. window.prompt is
-    // disabled in Electron renderers by default, so we route through main.
     const filePath = await window.electronAPI.invoke("proxy:pick-har");
-    if (!filePath) return; // user cancelled
+    if (!filePath) return;
     try {
       resetEvents();
       const next = await window.electronAPI.invoke("proxy:load-har", filePath);
-      // status will also arrive via the broadcast event
       useProxyStore.getState().setStatus(next);
     } catch (err) {
       setLoadError((err as Error).message);
@@ -44,13 +43,21 @@ export function Live() {
   return (
     <div className="flex h-full flex-col">
       <StatusBar
-        status={status}
+        status={state.status}
         proxyUrl={proxyUrl}
-        eventCount={events.length}
+        requestCount={requestCount}
+        eventCount={[...state.requests.values()].reduce((sum, r) => sum + r.events.length, 0)}
         follow={follow}
         onToggleFollow={() => setFollow((f) => !f)}
         onClear={clearEvents}
         onResume={onResume}
+      />
+      <ClientTabs
+        clients={[...state.clients.values()]}
+        selectedClientId={state.selectedClientId}
+        activeClientIds={new Set([...state.requests.values()].map((r) => r.clientId))}
+        onSelect={selectClient}
+        onClearInactive={clearInactiveClients}
       />
       {loadError && (
         <div className="border-b border-red-900 bg-red-950 px-4 py-2 text-xs text-red-300">
@@ -61,10 +68,17 @@ export function Live() {
         ref={logRef}
         className="min-h-0 flex-1 overflow-y-auto bg-neutral-950 font-mono text-xs"
       >
-        {events.length === 0 ? (
-          <EmptyHint proxyUrl={proxyUrl} target={status.upstreamTarget} />
+        {requestCount === 0 ? (
+          <EmptyHint proxyUrl={proxyUrl} target={state.status.upstreamTarget} />
         ) : (
-          events.map((ev, i) => <EventRow key={i} event={ev} />)
+          requests.map((record) => (
+            <RequestRow
+              key={record.requestId}
+              record={record}
+              expanded={state.selectedRequestId === record.requestId}
+              onToggle={() => toggleRequest(record.requestId)}
+            />
+          ))
         )}
       </div>
     </div>
@@ -74,6 +88,7 @@ export function Live() {
 function StatusBar({
   status,
   proxyUrl,
+  requestCount,
   eventCount,
   follow,
   onToggleFollow,
@@ -82,6 +97,7 @@ function StatusBar({
 }: {
   status: { running: boolean; recordingPath: string | null; entryCount: number; upstreamTarget: string };
   proxyUrl: string;
+  requestCount: number;
   eventCount: number;
   follow: boolean;
   onToggleFollow: () => void;
@@ -103,7 +119,7 @@ function StatusBar({
       </span>
       <span className="ml-auto flex items-center gap-3">
         <span className="text-neutral-500">
-          {eventCount} events · {status.entryCount} entries
+          {requestCount} requests · {eventCount} events · {status.entryCount} entries
         </span>
         <span className="text-neutral-500">
           HAR:{" "}
@@ -118,7 +134,7 @@ function StatusBar({
               ? "bg-neutral-700 text-neutral-100"
               : "bg-neutral-800 text-neutral-400 hover:text-neutral-200"
           }`}
-          title="Auto-scroll to new events"
+          title="Auto-scroll to new requests"
         >
           {follow ? "Follow ✓" : "Follow"}
         </button>
@@ -139,13 +155,98 @@ function StatusBar({
   );
 }
 
+function ClientTabs({
+  clients,
+  selectedClientId,
+  activeClientIds,
+  onSelect,
+  onClearInactive,
+}: {
+  clients: ClientInfo[];
+  selectedClientId: string | null;
+  activeClientIds: Set<string>;
+  onSelect: (clientId: string | null) => void;
+  onClearInactive: () => void;
+}) {
+  const sorted = [...clients].sort((a, b) => b.lastSeenNs - a.lastSeenNs);
+  return (
+    <div className="flex items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-4 py-2 text-xs">
+      <button
+        onClick={() => onSelect(null)}
+        className={tabClass(selectedClientId === null)}
+      >
+        All
+      </button>
+      {sorted.map((client) => {
+        const active = activeClientIds.has(client.clientId);
+        return (
+          <button
+            key={client.clientId}
+            onClick={() => onSelect(client.clientId)}
+            className={`${tabClass(selectedClientId === client.clientId)} ${
+              active ? "" : "opacity-50"
+            }`}
+            title={client.command ?? client.cwd ?? client.clientId}
+          >
+            {client.displayName}
+          </button>
+        );
+      })}
+      <button
+        onClick={onClearInactive}
+        className="ml-auto rounded px-2 py-0.5 text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
+      >
+        Clear inactive
+      </button>
+    </div>
+  );
+}
+
+function RequestRow({
+  record,
+  expanded,
+  onToggle,
+}: {
+  record: RequestRecord;
+  expanded: boolean;
+  onToggle: () => void;
+}) {
+  return (
+    <div className="border-b border-neutral-900">
+      <button
+        onClick={onToggle}
+        className="grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_1fr_8rem] gap-2 px-3 py-2 text-left hover:bg-neutral-900"
+      >
+        <span className="text-neutral-600" title={String(record.startedNs)}>
+          {formatNs(record.startedNs)}
+        </span>
+        <span
+          className="truncate text-neutral-500"
+          title={`requestId: ${record.requestId}`}
+        >
+          {record.requestId.slice(0, 6)}
+        </span>
+        <span className="text-blue-400">{record.method || "?"}</span>
+        <span className={stateClass(record.state)}>{record.status ?? record.state}</span>
+        <span className="truncate text-neutral-300">{requestSummary(record)}</span>
+        <span className="text-right text-neutral-500">{record.events.length} events</span>
+      </button>
+      {expanded && (
+        <div className="bg-neutral-950/80 pb-2">
+          {record.events.map((event) => (
+            <EventRow key={event.seq} event={event} />
+          ))}
+        </div>
+      )}
+    </div>
+  );
+}
+
 function EmptyHint({ proxyUrl, target }: { proxyUrl: string; target: string }) {
   return (
     <div className="px-6 py-8 text-neutral-500">
-      <div className="mb-2 text-sm text-neutral-300">No events yet.</div>
-      <div className="text-xs">
-        Point an Anthropic API client at the proxy:
-      </div>
+      <div className="mb-2 text-sm text-neutral-300">No requests yet.</div>
+      <div className="text-xs">Point an Anthropic API client at the proxy:</div>
       <pre className="mt-2 rounded bg-neutral-900 px-3 py-2 text-xs text-neutral-300">
         ANTHROPIC_BASE_URL={proxyUrl} claude
       </pre>
@@ -162,21 +263,26 @@ function EmptyHint({ proxyUrl, target }: { proxyUrl: string; target: string }) {
 function EventRow({ event }: { event: ProxyEvent }) {
   const summary = useMemo(() => describe(event), [event]);
   return (
-    <div className="grid grid-cols-[6rem_2.5rem_3.5rem_8rem_1fr] gap-2 border-b border-neutral-900 px-3 py-1 hover:bg-neutral-900">
+    <div className="grid grid-cols-[6rem_2.5rem_8rem_1fr] gap-2 px-8 py-1 hover:bg-neutral-900">
       <span className="text-neutral-600" title={String(event.recvNs)}>
         {formatNs(event.recvNs)}
       </span>
       <span className="text-neutral-600">#{event.seq}</span>
-      <span
-        className="truncate text-neutral-500"
-        title={`requestId: ${event.requestId}`}
-      >
-        {event.requestId.slice(0, 6)}
-      </span>
       <span className={kindClass(event.kind)}>{event.kind}</span>
       <span className="truncate text-neutral-300">{summary}</span>
     </div>
   );
+}
+
+function requestSummary(record: RequestRecord): string {
+  const url = record.url || "(unknown url)";
+  const model =
+    typeof record.requestBody === "object" &&
+    record.requestBody !== null &&
+    typeof (record.requestBody as Record<string, unknown>).model === "string"
+      ? ` · ${(record.requestBody as Record<string, unknown>).model as string}`
+      : "";
+  return `${url}${model}`;
 }
 
 function describe(event: ProxyEvent): string {
@@ -219,6 +325,25 @@ function deltaSummary(sse: { type: string; delta?: { type?: string; text?: strin
   return d.type ?? "delta";
 }
 
+function tabClass(active: boolean): string {
+  return active
+    ? "rounded bg-neutral-700 px-2 py-0.5 text-neutral-100"
+    : "rounded px-2 py-0.5 text-neutral-400 hover:bg-neutral-900 hover:text-neutral-200";
+}
+
+function stateClass(state: RequestRecord["state"]): string {
+  switch (state) {
+    case "in_flight":
+      return "text-blue-400";
+    case "streaming":
+      return "text-cyan-400";
+    case "complete":
+      return "text-green-400";
+    case "errored":
+      return "text-red-400";
+  }
+}
+
 function kindClass(kind: ProxyEvent["kind"]): string {
   switch (kind) {
     case "request_headers":
@@ -246,8 +371,6 @@ function truncate(s: string, n: number): string {
   return s.length <= n ? s : `${s.slice(0, n)}…`;
 }
 
-// hrtime nanoseconds -> short relative timestamp. We don't have wall-clock
-// here; show the low 4 digits of the millisecond count for ordering.
 function formatNs(ns: number): string {
   const ms = Math.floor(ns / 1_000_000) % 100_000;
   return `+${ms.toString().padStart(5, "0")}ms`;

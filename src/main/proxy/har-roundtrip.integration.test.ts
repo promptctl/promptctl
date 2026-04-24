@@ -17,7 +17,7 @@ import { startServer, type RunningServer } from "./server";
 import { HarRecorder } from "./har-recorder";
 import { proxyEventBus } from "./events";
 import { replayHarFile } from "./har-replayer";
-import type { ProxyEvent } from "../../shared/proxy-events";
+import type { ClientInfo, ProxyEvent } from "../../shared/proxy-events";
 
 let cert: { key: string; cert: string };
 
@@ -66,17 +66,23 @@ let proxy: RunningServer | null = null;
 let upstream: UpstreamFixture | null = null;
 let recorder: HarRecorder | null = null;
 let unsubscribe: (() => void) | null = null;
+let unsubscribeClients: (() => void) | null = null;
 let collected: ProxyEvent[] = [];
+let collectedClients: ClientInfo[] = [];
 
 beforeEach(async () => {
   tmpDir = await mkdtemp(path.join(os.tmpdir(), "promptctl-roundtrip-"));
   collected = [];
+  collectedClients = [];
   unsubscribe = proxyEventBus.subscribe((ev) => collected.push(ev));
+  unsubscribeClients = proxyEventBus.subscribeClients((info) => collectedClients.push(info));
 });
 
 afterEach(async () => {
   unsubscribe?.();
   unsubscribe = null;
+  unsubscribeClients?.();
+  unsubscribeClients = null;
   if (proxy) {
     await proxy.close();
     proxy = null;
@@ -163,6 +169,8 @@ describe("HAR round-trip", () => {
     expect(replaySummary.url).toBe(liveSummary.url);
     expect(replaySummary.responseStatus).toBe(liveSummary.responseStatus);
     expect(replaySummary.assembledBody).toEqual(liveSummary.assembledBody);
+    expect(replayEvents.every((event) => event.clientId.startsWith("replay-"))).toBe(true);
+    expect(collectedClients.some((client) => client.clientId === replayEvents[0]?.clientId)).toBe(true);
   });
 
   it("appending after replay keeps a single HAR file with growing entries (req #5b)", async () => {

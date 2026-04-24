@@ -1,5 +1,5 @@
-// [LAW:single-enforcer] All ProxyEvent envelope fields (seq, recvNs) are
-// stamped here — every emitter calls makeEnvelope() with just the requestId.
+// [LAW:single-enforcer] All ProxyEvent envelope fields (clientId, seq, recvNs)
+// are stamped here so event construction has one boundary.
 import type { ProxyEventEnvelope } from "../../shared/proxy-events";
 
 let _seqCounter = 0;
@@ -9,9 +9,10 @@ export function nextSeq(): number {
   return _seqCounter;
 }
 
-export function makeEnvelope(requestId: string): ProxyEventEnvelope {
+export function makeEnvelope(requestId: string, clientId: string): ProxyEventEnvelope {
   return {
     requestId,
+    clientId,
     seq: nextSeq(),
     // hrtime.bigint() is monotonic; narrow to Number for IPC-friendliness.
     // Number can hold ~9007 years of nanoseconds before precision loss.

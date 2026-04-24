@@ -85,6 +85,7 @@ export interface AnthropicMessage {
 
 export interface ProxyEventEnvelope {
   requestId: string;
+  clientId: string;
   seq: number;
   recvNs: number;
 }
@@ -106,6 +107,35 @@ export type ProxyEvent =
   | (ProxyEventEnvelope & { kind: "response_complete"; body: AnthropicMessage })
   | (ProxyEventEnvelope & { kind: "response_done" })
   | (ProxyEventEnvelope & { kind: "proxy_error"; error: string });
+
+export interface ClientInfo {
+  clientId: string;
+  pid: number | null;
+  rootPid: number | null;
+  displayName: string;
+  command: string | null;
+  cwd: string | null;
+  lastSeenNs: number;
+}
+
+export type RequestRecordState = "in_flight" | "streaming" | "complete" | "errored";
+
+export interface RequestRecord {
+  requestId: string;
+  clientId: string;
+  method: string;
+  url: string;
+  status: number | null;
+  startedNs: number;
+  firstByteNs: number | null;
+  completedNs: number | null;
+  endedNs: number | null;
+  requestBody: unknown;
+  assembledResponse: AnthropicMessage | null;
+  error: string | null;
+  state: RequestRecordState;
+  events: ProxyEvent[];
+}
 
 // ─── HAR 1.2 shape (the persistent source of truth) ───────────────────────
 // Subset sufficient for our use; HAR has many optional fields we omit.

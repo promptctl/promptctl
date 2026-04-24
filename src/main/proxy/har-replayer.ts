@@ -9,6 +9,7 @@
 //   - request body in the synthesized request_body event has stream:false
 //     (HAR stores the synthetic non-streaming form).
 import { readFile } from "node:fs/promises";
+import { basename } from "node:path";
 
 import type {
   AnthropicContentBlock,
@@ -33,8 +34,9 @@ export async function loadHarFile(filePath: string): Promise<HarEntry[]> {
 // [LAW:single-enforcer] All HAR-to-event synthesis lives here. Callers pass
 // entries (or a file path); they never compose ProxyEvents from HarEntry
 // shapes themselves.
-export function synthesizeEvents(entry: HarEntry): ProxyEvent[] {
+export function synthesizeEvents(entry: HarEntry, clientId = "replay-unknown"): ProxyEvent[] {
   const requestId = entry._requestId ?? newRequestId();
+  const envelope = () => makeEnvelope(requestId, clientId);
   const events: ProxyEvent[] = [];
 
   const requestHeaders = entry.request.headers.reduce<Record<string, string>>(
@@ -53,7 +55,7 @@ export function synthesizeEvents(entry: HarEntry): ProxyEvent[] {
   );
 
   events.push({
-    ...makeEnvelope(requestId),
+    ...envelope(),
     kind: "request_headers",
     method: entry.request.method,
     url: entry.request.url,
@@ -68,13 +70,13 @@ export function synthesizeEvents(entry: HarEntry): ProxyEvent[] {
     // not JSON
   }
   events.push({
-    ...makeEnvelope(requestId),
+    ...envelope(),
     kind: "request_body",
     body: reqBody,
   });
 
   events.push({
-    ...makeEnvelope(requestId),
+    ...envelope(),
     kind: "response_headers",
     status: entry.response.status,
     headers: responseHeaders,
@@ -95,26 +97,26 @@ export function synthesizeEvents(entry: HarEntry): ProxyEvent[] {
     const sseEvents = messageToSseEvents(respBody);
     for (const sse of sseEvents) {
       events.push({
-        ...makeEnvelope(requestId),
+        ...envelope(),
         kind: "sse_event",
         sse,
       });
     }
     events.push({
-      ...makeEnvelope(requestId),
+      ...envelope(),
       kind: "response_complete",
       body: respBody,
     });
   } else {
     events.push({
-      ...makeEnvelope(requestId),
+      ...envelope(),
       kind: "response_complete",
       body: respBody as AnthropicMessage,
     });
   }
 
   events.push({
-    ...makeEnvelope(requestId),
+    ...envelope(),
     kind: "response_done",
   });
 
@@ -125,8 +127,18 @@ export function synthesizeEvents(entry: HarEntry): ProxyEvent[] {
 // the caller can seed the HarRecorder.
 export async function replayHarFile(filePath: string): Promise<HarEntry[]> {
   const entries = await loadHarFile(filePath);
+  const clientId = `replay-${basename(filePath, ".har")}`;
+  proxyEventBus.publishClient({
+    clientId,
+    pid: null,
+    rootPid: null,
+    displayName: `Replay ${basename(filePath)}`,
+    command: null,
+    cwd: filePath,
+    lastSeenNs: Number(process.hrtime.bigint()),
+  });
   for (const entry of entries) {
-    for (const ev of synthesizeEvents(entry)) {
+    for (const ev of synthesizeEvents(entry, clientId)) {
       proxyEventBus.emit(ev);
     }
   }

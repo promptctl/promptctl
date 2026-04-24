@@ -20,7 +20,12 @@ import type {
   VersionMeta,
   DiffEntry,
 } from "../shared/types";
-import type { ProxyEvent, ProxyStatus } from "../shared/proxy-events";
+import type {
+  ClientInfo,
+  ProxyEvent,
+  ProxyStatus,
+  RequestRecord,
+} from "../shared/proxy-events";
 
 // Settings shape mirrored from main/settings/store.ts. Duplicated here so the
 // renderer doesn't import main-process modules. Keep in sync with AppSettings.
@@ -174,6 +179,7 @@ export interface ElectronAPI {
   ): Promise<SessionSearchResult[]>;
   invoke(channel: "task:cancel", taskId: string): Promise<boolean>;
   invoke(channel: "proxy:status"): Promise<ProxyStatus>;
+  invoke(channel: "proxy:list-clients"): Promise<ClientInfo[]>;
   invoke(channel: "proxy:load-har", filePath: string): Promise<ProxyStatus>;
   invoke(channel: "proxy:pick-har"): Promise<string | null>;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
@@ -190,6 +196,14 @@ export interface ElectronAPI {
   on(
     channel: "proxy:status",
     listener: (status: ProxyStatus) => void,
+  ): () => void;
+  on(
+    channel: "proxy:client",
+    listener: (info: ClientInfo) => void,
+  ): () => void;
+  on(
+    channel: "proxy:clients",
+    listener: (infos: ClientInfo[]) => void,
   ): () => void;
   on(
     channel: "tmux:pane-output",
@@ -225,3 +239,5 @@ declare global {
     electronAPI: ElectronAPI;
   }
 }
+
+export type { ClientInfo, RequestRecord };
