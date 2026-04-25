@@ -63,7 +63,7 @@ describe("Live", () => {
       "w-[50rem]",
     );
     expect(screen.getAllByText(/req-a/)[0].closest("button")).toHaveClass(
-      "grid-cols-[6rem_3.5rem_5rem_5rem_minmax(8rem,1fr)_19rem]",
+      "grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_20rem]",
     );
 
     const user = userEvent.setup();

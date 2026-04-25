@@ -262,7 +262,7 @@ function RequestRow({
     <div className="border-b border-neutral-900">
       <button
         onClick={onToggle}
-        className={`grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_minmax(8rem,1fr)_19rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
+        className={`grid w-full grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_20rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
           selected
             ? "border-l-cyan-400 bg-neutral-800 hover:bg-neutral-800"
             : "border-l-transparent"

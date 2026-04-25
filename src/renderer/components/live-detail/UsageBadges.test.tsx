@@ -123,9 +123,11 @@ describe("UsageBadges", () => {
     expect(screen.getByTestId("usage-cache-bar")).toHaveClass("absolute");
     expect(screen.getByTestId("usage-pill-input")).toHaveClass("w-[4rem]");
     expect(screen.getByTestId("usage-pill-cache-creation")).toHaveClass(
-      "w-[5rem]",
+      "w-[5.5rem]",
     );
-    expect(screen.getByTestId("usage-pill-cache-read")).toHaveClass("w-[5rem]");
+    expect(screen.getByTestId("usage-pill-cache-read")).toHaveClass(
+      "w-[5.5rem]",
+    );
     expect(screen.getByTestId("usage-pill-output")).toHaveClass("w-[4rem]");
   });
 

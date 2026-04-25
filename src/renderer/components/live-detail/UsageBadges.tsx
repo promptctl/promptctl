@@ -128,7 +128,7 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.cache_creation_input_tokens,
       className: "bg-amber-950 text-amber-400",
       title: "cache creation input tokens",
-      widthClass: "w-[5rem]",
+      widthClass: "w-[5.5rem]",
     },
     {
       key: "cache-read",
@@ -136,7 +136,7 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.cache_read_input_tokens,
       className: "bg-green-950 text-green-400",
       title: "cache read input tokens",
-      widthClass: "w-[5rem]",
+      widthClass: "w-[5.5rem]",
     },
     {
       key: "output",
