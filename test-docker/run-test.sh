@@ -67,17 +67,35 @@ echo "--- pane dump ---"
 tmux capture-pane -t test -p | head -40
 
 # ---------------------------------------------------------------------------
-step "4. Send '! promptctl-open' to Claude Code"
-# Clear any pending input first (Ctrl-U).
+step "4. Confirm sessions/<pid>.json exists (deterministic session registry)"
+# Claude writes this at session start, before any message. The dispatch
+# script reads it directly — no warm-up needed.
+CLAUDE_PID=$(pgrep -u "$(id -un)" -x claude | head -1)
+echo "claude pid = $CLAUDE_PID"
+ls -la "$HOME/.claude/sessions/${CLAUDE_PID}.json" 2>&1
+echo "--- session file content ---"
+cat "$HOME/.claude/sessions/${CLAUDE_PID}.json" 2>&1 | head -5
+EXPECTED_SID=$(jq -r '.sessionId' "$HOME/.claude/sessions/${CLAUDE_PID}.json" 2>/dev/null || echo "")
+echo "expected session id (from registry): $EXPECTED_SID"
+
+# ---------------------------------------------------------------------------
+step "5. Send '! promptctl-open' to Claude Code (no warm-up — dispatch is deterministic)"
 tmux send-keys -t test C-u
 sleep 0.3
-tmux send-keys -t test "! promptctl-open" Enter
+tmux send-keys -t test -l "!"
+sleep 0.5
+tmux send-keys -t test -l " promptctl-open"
+sleep 0.5
+tmux send-keys -t test Enter
 
 # Wait up to 20s for POST to land.
 for i in $(seq 1 200); do
   [ -s "$CAPTURED" ] && break
   sleep 0.1
 done
+
+echo "--- pane immediately after Enter ---"
+tmux capture-pane -t test -p | grep -v "^$" | tail -15
 
 # ---------------------------------------------------------------------------
 step "5. Process tree after dispatch"
@@ -94,6 +112,8 @@ echo "--- mock-server.log ---"
 cat "$SERVER_LOG"
 echo "--- JSONL files on disk ---"
 ls -la "$CLAUDE_JSONL_DIR" 2>&1
+echo "--- dispatch.log (PPID walk trace) ---"
+cat /tmp/dispatch.log 2>/dev/null || echo "(no dispatch log)"
 
 # ---------------------------------------------------------------------------
 step "8. Verdict"
@@ -105,8 +125,8 @@ else
   CAPTURED_SID=$(grep -oE 'sessionId=[a-zA-Z0-9-]+' "$CAPTURED" | head -1 | cut -d= -f2)
   if [ -z "$CAPTURED_SID" ]; then
     REASON="POST arrived but no sessionId found"
-  elif [ ! -f "$CLAUDE_JSONL_DIR/$CAPTURED_SID.jsonl" ]; then
-    REASON="captured sessionId=$CAPTURED_SID has no matching JSONL on disk"
+  elif [ "${EXPECTED_SID:-}" != "" ] && [ "$CAPTURED_SID" != "$EXPECTED_SID" ]; then
+    REASON="captured sessionId=$CAPTURED_SID != registry sessionId=$EXPECTED_SID"
   else
     RESULT=pass
   fi

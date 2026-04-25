@@ -22,6 +22,7 @@ RUN useradd -m -s /bin/bash runner
 WORKDIR /workspace
 
 COPY promptctl-open-dispatch.sh /home/runner/.claude/hooks/promptctl-open-dispatch.sh
+COPY debug-dispatch.sh /home/runner/.claude/hooks/debug-dispatch.sh
 COPY mock-promptctl-server.py /workspace/mock-promptctl-server.py
 COPY run-test.sh /workspace/run-test.sh
 COPY bashrc /home/runner/.bashrc
@@ -31,6 +32,7 @@ COPY claude-config.json /home/runner/.claude.json
 
 RUN chown -R runner:runner /home/runner /workspace \
  && chmod +x /home/runner/.claude/hooks/promptctl-open-dispatch.sh \
+             /home/runner/.claude/hooks/debug-dispatch.sh \
              /workspace/run-test.sh
 
 USER runner

@@ -1,15 +1,19 @@
 #!/usr/bin/env bash
-# Called by the `promptctl-open` shell function (loaded from ~/.bashrc/.zshrc).
+# Called by the `promptctl-open` shell function (from ~/.bashrc/.zshrc).
 #
-# Identifies the current Claude Code session by walking up the process tree
-# from this shell's PID until it finds a process with a
-# ~/.claude/projects/*/<sessionId>.jsonl file open — that's the Claude Code
-# process writing this session's transcript. The session id is the filename.
-# No mtime heuristic, no race.
+# Deterministic session-id resolution:
+#   1. Walk PPIDs up from this script. At each step, check whether
+#      `~/.claude/sessions/<pid>.json` exists. If so, that PID is a running
+#      Claude Code process and the file contains {pid, sessionId, cwd, ...}.
+#   2. Extract sessionId from that file.
 #
-# Then POSTs the deep-link URL to promptctl's local HTTP endpoint whose port
-# is discovered from ~/.promptctl/deep-link-port (written by the app at
-# startup).
+# No mtime heuristic, no race, no reliance on the JSONL being created or
+# flushed, no process-name matching (which differs between macOS and Linux —
+# on macOS `comm` is the binary path, on Linux it's literally `claude`).
+# The sessions registry file IS the signal.
+#
+# Then POSTs the deep-link URL to promptctl's HTTP endpoint whose port is
+# discovered from ~/.promptctl/deep-link-port (written by the app at startup).
 
 set -euo pipefail
 
@@ -19,19 +23,17 @@ port_file="$HOME/.promptctl/deep-link-port"
 [ -r "$port_file" ] || fail "promptctl not running (no $port_file)"
 port=$(cat "$port_file")
 
-# Walk the process tree up from our parent (the caller). Our own process is
-# bash running the function body; its parent is the shell that sourced the
-# function; eventually we reach the Claude Code process.
+sessions_dir="$HOME/.claude/sessions"
+[ -d "$sessions_dir" ] || fail "no $sessions_dir — claude never started?"
+
+# 1. Walk PPIDs; first one with a matching session file wins.
 pid="${PPID:-$$}"
-sid=""
+session_file=""
 steps=0
 while [ "$pid" != "1" ] && [ "$pid" != "0" ] && [ "$steps" -lt 20 ]; do
-  # lsof returns a non-zero exit when it has warnings. We only care about
-  # whether any output matches our pattern.
-  # `|| true` — grep exits non-zero on no-match; don't let that kill set -e.
-  jsonl=$(lsof -p "$pid" -Fn 2>/dev/null | grep -oE "$HOME/\.claude/projects/[^[:space:]]+\.jsonl" | head -n 1 || true)
-  if [ -n "$jsonl" ]; then
-    sid=$(basename "$jsonl" .jsonl)
+  candidate="$sessions_dir/${pid}.json"
+  if [ -r "$candidate" ]; then
+    session_file="$candidate"
     break
   fi
   parent=$(ps -o ppid= -p "$pid" 2>/dev/null | tr -d ' ')
@@ -40,7 +42,15 @@ while [ "$pid" != "1" ] && [ "$pid" != "0" ] && [ "$steps" -lt 20 ]; do
   steps=$((steps + 1))
 done
 
-[ -n "$sid" ] || fail "could not find Claude Code JSONL in ancestor processes"
+[ -n "$session_file" ] || fail "no claude session registry found in PPID chain"
+
+# 2. Extract sessionId (prefer jq, fall back to a plain regex).
+if command -v jq >/dev/null 2>&1; then
+  sid=$(jq -r '.sessionId // empty' "$session_file")
+else
+  sid=$(grep -oE '"sessionId":"[^"]+"' "$session_file" | head -1 | cut -d'"' -f4)
+fi
+[ -n "$sid" ] || fail "no sessionId in $session_file"
 
 url="promptctl://open?provider=claude&sessionId=$sid"
 if curl -fsS --max-time 2 \

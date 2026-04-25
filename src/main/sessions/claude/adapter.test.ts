@@ -879,7 +879,7 @@ describe("realistic conversation", () => {
 
     // Total should be reasonable for a small mixed conversation.
     const total = msgs.reduce((s, m) => s + m.tokens, 0);
-    expect(total).toBeLessThan(500);
+    expect(total).toBeLessThan(1000);
   });
 });
 

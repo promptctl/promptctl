@@ -6,8 +6,7 @@
   "main": ".vite/build/main.js",
   "private": true,
   "scripts": {
-    "start": "tsx scripts/dev.ts",
-    "start:forge": "electron-forge start",
+    "start": "electron-forge start",
     "package": "electron-forge package",
     "make": "electron-forge make",
     "publish": "electron-forge publish",
@@ -20,9 +19,7 @@
     "typecheck": "tsc --noEmit",
     "schema:extract": "tsx scripts/schema/run.ts all",
     "schema:check": "tsx scripts/schema/run.ts all --check",
-    "tokens:validate": "tsx scripts/validate-tokens.ts",
-    "tokens:calibrate": "tsx scripts/calibrate-tokens.ts",
-    "tokens:analyze": "tsx scripts/analyze-calibration.ts"
+    "tokens:validate": "tsx scripts/validate-tokens.ts"
   },
   "keywords": [],
   "author": {
