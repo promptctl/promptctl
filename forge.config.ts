@@ -7,37 +7,24 @@ import { VitePlugin } from "@electron-forge/plugin-vite";
 import { FusesPlugin } from "@electron-forge/plugin-fuses";
 import { FuseV1Options, FuseVersion } from "@electron/fuses";
 import { AutoUnpackNativesPlugin } from "@electron-forge/plugin-auto-unpack-natives";
-import path from "node:path";
-import { startHotRestart } from "./scripts/dev/hot-restart";
+import { assertDevWrapperEnv } from "./scripts/dev/wrapper-guard";
 
 const config: ForgeConfig = {
-  // [LAW:single-enforcer] preStart hooks the main-process hot-restart watcher
-  // into Forge's own start lifecycle. Vite already rebuilds .vite/build/main.js
-  // on source changes; this watcher sees the rebuild and triggers Forge's
-  // existing `rs` restart path via process.stdin (same EventEmitter Forge's
-  // own keystroke handler listens on — see node_modules/@electron-forge/core/
-  // dist/api/start.js).
+  // Hot-restart of the Electron main process is wired into scripts/dev.ts
+  // (the wrapper that `npm start` runs). It spawns electron-forge as a child,
+  // bridges stdin both ways, and runs a Vite watcher on main/preload sources
+  // — when the watcher's writeBundle fires, it sends `rs\n` to Forge's stdin.
   //
-  // Because the watcher is part of the config, every `electron-forge start`
-  // invocation gets it — there is no path to launch dev without hot-restart.
+  // We tried doing this inside a Forge plugin (preStart/postStart hooks).
+  // Forge's listr2 task pipeline blocks subprocess execution from preStart,
+  // postStart hooks are silently dropped entirely, and setTimeout from init
+  // never fires. The wrapper sidesteps all of that.
   hooks: {
     preStart: async () => {
-      startHotRestart({
-        buildDir: path.join(__dirname, ".vite", "build"),
-        restartFiles: new Set(["main.js", "preload.js"]),
-        debounceMs: 150,
-        triggerRestart: () => {
-          process.stdin.emit("data", Buffer.from("rs\n"));
-        },
-        log: (msg) => {
-          process.stderr.write(`\n\x1b[36m[hot-restart]\x1b[0m ${msg}\n`);
-        },
-      });
+      assertDevWrapperEnv(process.env);
     },
   },
-  packagerConfig: {
-    asar: true,
-  },
+  packagerConfig: { asar: true },
   rebuildConfig: {},
   makers: [
     new MakerSquirrel({}),
