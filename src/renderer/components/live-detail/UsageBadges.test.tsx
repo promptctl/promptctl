@@ -119,14 +119,14 @@ describe("UsageBadges", () => {
     );
 
     expect(screen.getByTestId("usage-badges")).toHaveClass("items-center");
-    expect(screen.getByTestId("usage-pill-input")).toHaveClass("w-[2.4rem]");
+    expect(screen.getByTestId("usage-badges")).toHaveClass("overflow-visible");
+    expect(screen.getByTestId("usage-cache-bar")).toHaveClass("absolute");
+    expect(screen.getByTestId("usage-pill-input")).toHaveClass("w-[4rem]");
     expect(screen.getByTestId("usage-pill-cache-creation")).toHaveClass(
-      "w-[3.4rem]",
+      "w-[5rem]",
     );
-    expect(screen.getByTestId("usage-pill-cache-read")).toHaveClass(
-      "w-[3.4rem]",
-    );
-    expect(screen.getByTestId("usage-pill-output")).toHaveClass("w-[2.6rem]");
+    expect(screen.getByTestId("usage-pill-cache-read")).toHaveClass("w-[5rem]");
+    expect(screen.getByTestId("usage-pill-output")).toHaveClass("w-[4rem]");
   });
 
   it("rounds bar percentages to two decimal places", () => {

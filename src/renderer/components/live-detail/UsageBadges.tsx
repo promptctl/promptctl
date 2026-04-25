@@ -30,13 +30,13 @@ export function UsageBadges({
           shares.cacheCreation,
         )} · cache· ${percent(shares.cacheRead)}`;
   const compact = size === "compact";
-  const barWidth = compact ? "w-10" : "w-40";
+  const barWidth = compact ? "" : "w-40";
 
   return (
     <div
-      className={`inline-flex min-w-0 ${
+      className={`relative inline-flex min-w-0 ${
         compact
-          ? "items-center justify-end gap-1 overflow-hidden justify-self-end"
+          ? "items-center justify-end overflow-visible justify-self-end pb-1"
           : "items-center gap-3"
       }`}
       data-testid="usage-badges"
@@ -51,7 +51,9 @@ export function UsageBadges({
         ))}
       </span>
       <span
-        className={`flex h-2 ${barWidth} shrink-0 overflow-hidden rounded-sm border border-neutral-700 bg-neutral-950`}
+        className={`flex h-2 ${barWidth} shrink-0 overflow-hidden rounded-sm border border-neutral-700 bg-neutral-950 ${
+          compact ? "absolute bottom-0 left-0 right-0 h-1 w-full" : ""
+        }`}
         title={barTitle}
         data-testid="usage-cache-bar"
       >
@@ -118,7 +120,7 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.input_tokens,
       className: "bg-neutral-900 text-neutral-300",
       title: "input tokens",
-      widthClass: "w-[2.4rem]",
+      widthClass: "w-[4rem]",
     },
     {
       key: "cache-creation",
@@ -126,7 +128,7 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.cache_creation_input_tokens,
       className: "bg-amber-950 text-amber-400",
       title: "cache creation input tokens",
-      widthClass: "w-[3.4rem]",
+      widthClass: "w-[5rem]",
     },
     {
       key: "cache-read",
@@ -134,7 +136,7 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.cache_read_input_tokens,
       className: "bg-green-950 text-green-400",
       title: "cache read input tokens",
-      widthClass: "w-[3.4rem]",
+      widthClass: "w-[5rem]",
     },
     {
       key: "output",
@@ -142,7 +144,7 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.output_tokens,
       className: "bg-neutral-900 text-neutral-300",
       title: "output tokens",
-      widthClass: "w-[2.6rem]",
+      widthClass: "w-[4rem]",
     },
   ];
 }

@@ -90,7 +90,10 @@ export function Live() {
         </div>
       )}
       <div className="flex min-h-0 flex-1 bg-neutral-950 font-mono text-xs">
-        <div className="flex min-h-0 w-[38rem] shrink-0 flex-col">
+        <div
+          className="flex min-h-0 w-[50rem] shrink-0 flex-col"
+          data-testid="live-request-list-pane"
+        >
           <UsageAggregate records={requests} />
           <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto">
             {requests.length === 0 ? (
@@ -259,7 +262,7 @@ function RequestRow({
     <div className="border-b border-neutral-900">
       <button
         onClick={onToggle}
-        className={`grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_minmax(0,1fr)_14rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
+        className={`grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_minmax(8rem,1fr)_19rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
           selected
             ? "border-l-cyan-400 bg-neutral-800 hover:bg-neutral-800"
             : "border-l-transparent"
