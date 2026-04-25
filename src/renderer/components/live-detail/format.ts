@@ -52,7 +52,5 @@ export function formatRelativeNs(
   startedNs: number,
 ): string {
   if (valueNs === null) return "--";
-  return `${new Date(Math.floor(valueNs / 1_000_000)).toISOString()} (${formatDurationNs(
-    valueNs - startedNs,
-  )})`;
+  return `+${formatDurationNs(valueNs - startedNs)}`;
 }

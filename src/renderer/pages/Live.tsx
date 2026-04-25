@@ -19,7 +19,19 @@ export function Live() {
   const [follow, setFollow] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
-  const requests = useMemo(() => visibleRequests(state), [state]);
+  const requests = useMemo(
+    () => visibleRequests(state),
+    [state.requests, state.selectedClientId],
+  );
+  const eventCount = useMemo(
+    () =>
+      [...state.requests.values()].reduce((sum, r) => sum + r.events.length, 0),
+    [state.requests],
+  );
+  const activeClientIds = useMemo(
+    () => new Set([...state.requests.values()].map((r) => r.clientId)),
+    [state.requests],
+  );
   const selectedRecord =
     state.selectedRequestId === null
       ? null
@@ -57,10 +69,7 @@ export function Live() {
         status={state.status}
         proxyUrl={proxyUrl}
         requestCount={requestCount}
-        eventCount={[...state.requests.values()].reduce(
-          (sum, r) => sum + r.events.length,
-          0,
-        )}
+        eventCount={eventCount}
         follow={follow}
         onToggleFollow={() => setFollow((f) => !f)}
         onClear={clearEvents}
@@ -69,9 +78,7 @@ export function Live() {
       <ClientTabs
         clients={[...state.clients.values()]}
         selectedClientId={state.selectedClientId}
-        activeClientIds={
-          new Set([...state.requests.values()].map((r) => r.clientId))
-        }
+        activeClientIds={activeClientIds}
         onSelect={selectClient}
         onClearInactive={clearInactiveClients}
       />
@@ -250,8 +257,10 @@ function RequestRow({
     <div className="border-b border-neutral-900">
       <button
         onClick={onToggle}
-        className={`grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_1fr_8rem] gap-2 px-3 py-2 text-left hover:bg-neutral-900 ${
-          selected ? "bg-neutral-900" : ""
+        className={`grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_1fr_8rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
+          selected
+            ? "border-l-cyan-400 bg-neutral-800 hover:bg-neutral-800"
+            : "border-l-transparent"
         }`}
       >
         <span className="text-neutral-600" title={String(record.startedNs)}>

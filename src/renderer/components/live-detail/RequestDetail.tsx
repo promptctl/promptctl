@@ -26,6 +26,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
         <div className="mb-3 min-w-0 truncate font-mono text-sm text-neutral-200">
           {record.method || "?"} {record.url || "(unknown url)"}
         </div>
+        <ErrorBanner error={record.error} />
         <div className="flex flex-wrap items-center gap-2 text-xs">
           {TABS.map((tab) => (
             <button
@@ -39,7 +40,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
         </div>
       </div>
       <div className="min-h-0 flex-1 overflow-auto">
-        {/* [LAW:dataflow-not-control-flow] Every detail tab is always selectable; missing fields render empty values inside the selected projection. */}
+        {/* [LAW:dataflow-not-control-flow] The tab strip is fixed; selected projection content varies by activeTab data. */}
         {activeTab === "overview" && <OverviewTab record={record} />}
         {activeTab === "request" && (
           <RequestTab requestBody={record.requestBody} />
@@ -49,5 +50,25 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
         {activeTab === "raw" && <RawTab record={record} />}
       </div>
     </section>
+  );
+}
+
+function ErrorBanner({ error }: { error: string | null }) {
+  const hasError = error !== null;
+  return (
+    // [LAW:dataflow-not-control-flow] The error surface always exists; record.error controls visibility and content.
+    <div
+      aria-hidden={!hasError}
+      className={`mb-3 rounded border px-3 py-2 text-xs ${
+        hasError
+          ? "border-red-800 bg-red-950 text-red-200"
+          : "hidden border-transparent"
+      }`}
+    >
+      <div className="mb-1 font-sans text-[11px] font-semibold uppercase tracking-wide text-red-300">
+        Request failed
+      </div>
+      <div className="break-words font-mono">{error ?? "--"}</div>
+    </div>
   );
 }

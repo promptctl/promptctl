@@ -26,6 +26,9 @@ describe("RequestDetail", () => {
       screen.getByText(/in=10 out=20 cache_read=3 cache_creation=4/),
     ).toBeInTheDocument();
     expect(screen.getByText("end_turn")).toBeInTheDocument();
+    expect(screen.getByText("+0.0ms")).toBeInTheDocument();
+    expect(screen.getByText("+15.0ms")).toBeInTheDocument();
+    expect(screen.getByText("+30.0ms")).toBeInTheDocument();
     expect(screen.getByText("15.0ms")).toBeInTheDocument();
     expect(screen.getByText("30.0ms")).toBeInTheDocument();
 
@@ -53,6 +56,21 @@ describe("RequestDetail", () => {
     expect(electron.writeClipboard).toHaveBeenCalledWith(
       JSON.stringify(record.requestBody, null, 2),
     );
+  });
+
+  it("surfaces request errors above the tab strip", () => {
+    const record = {
+      ...requestRecord(),
+      error: "upstream connection reset",
+      state: "errored" as const,
+    };
+
+    render(<RequestDetail record={record} />);
+
+    expect(screen.getByText("Request failed")).toBeInTheDocument();
+    expect(
+      screen.getAllByText("upstream connection reset").length,
+    ).toBeGreaterThan(0);
   });
 });
 
