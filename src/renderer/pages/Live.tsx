@@ -9,6 +9,7 @@ import {
   stateClass,
   tabClass,
 } from "../components/live-detail/format";
+import { computeLineage, type LineageInfo } from "../components/live-detail/lineage";
 import { useProxyStore, visibleRequests } from "../store/proxy";
 import type { ClientInfo, RequestRecord } from "../../shared/proxy-events";
 
@@ -25,6 +26,7 @@ export function Live() {
     () => visibleRequests(state),
     [state.requests, state.selectedClientId],
   );
+  const lineage = useMemo(() => computeLineage(requests), [requests]);
   const eventCount = useMemo(
     () =>
       [...state.requests.values()].reduce((sum, r) => sum + r.events.length, 0),
@@ -106,6 +108,7 @@ export function Live() {
                 <RequestRow
                   key={record.requestId}
                   record={record}
+                  lineage={lineage.get(record.requestId) ?? null}
                   selected={state.selectedRequestId === record.requestId}
                   onToggle={() => toggleRequest(record.requestId)}
                 />
@@ -117,7 +120,10 @@ export function Live() {
           <DetailHint />
         ) : (
           // [LAW:one-source-of-truth] RequestRecord remains the only detail source; the pane is a pure projection of the selected row.
-          <RequestDetail record={selectedRecord} />
+          <RequestDetail
+            record={selectedRecord}
+            lineage={lineage.get(selectedRecord.requestId) ?? null}
+          />
         )}
       </div>
     </div>
@@ -251,17 +257,23 @@ function ClientTabs({
 
 function RequestRow({
   record,
+  lineage,
   selected,
   onToggle,
 }: {
   record: RequestRecord;
+  lineage: LineageInfo | null;
   selected: boolean;
   onToggle: () => void;
 }) {
+  const depth = lineage?.depth ?? 0;
+  const isContinuation = (lineage?.parentId ?? null) !== null;
   return (
-    <div className="border-b border-neutral-900">
+    <div className="border-b border-neutral-900" data-testid="live-request-row">
       <button
         onClick={onToggle}
+        data-depth={depth}
+        data-lineage={isContinuation ? "continuation" : "root"}
         className={`grid w-full grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_20rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
           selected
             ? "border-l-cyan-400 bg-neutral-800 hover:bg-neutral-800"
@@ -281,13 +293,36 @@ function RequestRow({
         <span className={stateClass(record.state)}>
           {record.status ?? record.state}
         </span>
-        <span className="truncate text-neutral-300">
-          {requestSummary(record)}
+        {/* [LAW:dataflow-not-control-flow] Indent is data-driven; root rows render with zero-width connectors so layout stays stable. */}
+        <span className="flex min-w-0 items-center">
+          <ThreadConnector depth={depth} continuation={isContinuation} />
+          <span className="truncate text-neutral-300">
+            {requestSummary(record)}
+          </span>
         </span>
         {/* [LAW:one-source-of-truth] Row usage is read from assembledResponse only; streaming rows pass null through the same renderer. */}
         <UsageBadges usage={record.assembledResponse?.usage ?? null} />
       </button>
     </div>
+  );
+}
+
+function ThreadConnector({
+  depth,
+  continuation,
+}: {
+  depth: number;
+  continuation: boolean;
+}) {
+  return (
+    <span
+      data-testid="thread-connector"
+      data-depth={depth}
+      style={{ width: `${depth * 0.75}rem` }}
+      className="mr-1 inline-flex shrink-0 items-center justify-end text-neutral-700"
+    >
+      {continuation ? "↳" : ""}
+    </span>
   );
 }
 

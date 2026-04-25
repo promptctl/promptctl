@@ -93,7 +93,88 @@ describe("Live", () => {
       screen.getByText("Select a request to inspect details."),
     ).toBeTruthy();
   });
+
+  it("groups a 3-request lineage chain under one root with continuation markers and a Diff tab", async () => {
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    for (const event of chainEvents()) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+
+    const rows = screen.getAllByTestId("live-request-row");
+    expect(rows).toHaveLength(3);
+    const buttons = rows.map((row) => row.querySelector("button"));
+    expect(buttons[0]).toHaveAttribute("data-lineage", "root");
+    expect(buttons[0]).toHaveAttribute("data-depth", "0");
+    expect(buttons[1]).toHaveAttribute("data-lineage", "continuation");
+    expect(buttons[1]).toHaveAttribute("data-depth", "1");
+    expect(buttons[2]).toHaveAttribute("data-lineage", "continuation");
+    expect(buttons[2]).toHaveAttribute("data-depth", "2");
+
+    const user = userEvent.setup();
+    await user.click(screen.getAllByText(/chain-2/)[0]);
+    await user.click(screen.getByRole("button", { name: "Diff" }));
+    expect(screen.getByTestId("diff-lineage-label")).toHaveTextContent(
+      "Continuation of chain-",
+    );
+    expect(screen.getByText("turn 2 user")).toBeInTheDocument();
+    expect(screen.queryByText("turn 1 user")).toBeNull();
+  });
 });
+
+function chainEvents(): ProxyEvent[] {
+  const events: ProxyEvent[] = [];
+  const messages: unknown[] = [];
+  let seq = 1;
+  const t = (n: number): number => n;
+  for (let i = 1; i <= 3; i++) {
+    const requestId = `chain-${i}`;
+    if (i === 1) {
+      messages.push({ role: "user", content: "turn 1 user" });
+    } else {
+      messages.push({ role: "assistant", content: `turn ${i - 1} assistant` });
+      messages.push({ role: "user", content: `turn ${i} user` });
+    }
+    events.push({
+      requestId,
+      clientId: "client-a",
+      globalSeq: seq++,
+      recvNs: t(i * 10),
+      kind: "request_headers",
+      method: "POST",
+      url: `https://api.example.test/${requestId}`,
+      headers: {},
+    });
+    events.push({
+      requestId,
+      clientId: "client-a",
+      globalSeq: seq++,
+      recvNs: t(i * 10 + 1),
+      kind: "request_body",
+      body: { model: "claude-test", messages: [...messages] },
+    });
+    events.push({
+      requestId,
+      clientId: "client-a",
+      globalSeq: seq++,
+      recvNs: t(i * 10 + 2),
+      kind: "response_complete",
+      body: {
+        id: `msg_${requestId}`,
+        type: "message",
+        role: "assistant",
+        model: "claude-test",
+        content: [],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 5, output_tokens: 5 },
+      },
+    });
+  }
+  return events;
+}
 
 function client(clientId: string, displayName: string): ClientInfo {
   return {

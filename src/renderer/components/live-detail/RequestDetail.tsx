@@ -1,23 +1,32 @@
 import { useState } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";
+import { DiffTab } from "./DiffTab";
 import { tabClass } from "./format";
+import type { LineageInfo } from "./lineage";
 import { OverviewTab } from "./OverviewTab";
 import { RawTab } from "./RawTab";
 import { RequestTab } from "./RequestTab";
 import { ResponseTab } from "./ResponseTab";
 import { SseTimelineTab } from "./SseTimelineTab";
 
-type TabId = "overview" | "request" | "response" | "timeline" | "raw";
+type TabId = "overview" | "request" | "diff" | "response" | "timeline" | "raw";
 
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "request", label: "Request" },
+  { id: "diff", label: "Diff" },
   { id: "response", label: "Response" },
   { id: "timeline", label: "SSE Timeline" },
   { id: "raw", label: "Raw" },
 ];
 
-export function RequestDetail({ record }: { record: RequestRecord }) {
+export function RequestDetail({
+  record,
+  lineage = null,
+}: {
+  record: RequestRecord;
+  lineage?: LineageInfo | null;
+}) {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
 
   return (
@@ -45,6 +54,7 @@ export function RequestDetail({ record }: { record: RequestRecord }) {
         {activeTab === "request" && (
           <RequestTab requestBody={record.requestBody} />
         )}
+        {activeTab === "diff" && <DiffTab record={record} lineage={lineage} />}
         {activeTab === "response" && <ResponseTab record={record} />}
         {activeTab === "timeline" && <SseTimelineTab record={record} />}
         {activeTab === "raw" && <RawTab record={record} />}
