@@ -2,6 +2,8 @@
 // projections from the store; live capture and replay share the same path.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RequestDetail } from "../components/live-detail";
+import { UsageAggregate } from "../components/live-detail/UsageAggregate";
+import { UsageBadges } from "../components/live-detail/UsageBadges";
 import {
   formatNs,
   stateClass,
@@ -88,25 +90,25 @@ export function Live() {
         </div>
       )}
       <div className="flex min-h-0 flex-1 bg-neutral-950 font-mono text-xs">
-        <div
-          ref={logRef}
-          className="min-h-0 w-[28rem] shrink-0 overflow-y-auto"
-        >
-          {requestCount === 0 ? (
-            <EmptyHint
-              proxyUrl={proxyUrl}
-              target={state.status.upstreamTarget}
-            />
-          ) : (
-            requests.map((record) => (
-              <RequestRow
-                key={record.requestId}
-                record={record}
-                selected={state.selectedRequestId === record.requestId}
-                onToggle={() => toggleRequest(record.requestId)}
+        <div className="flex min-h-0 w-[40rem] shrink-0 flex-col">
+          <UsageAggregate records={requests} />
+          <div ref={logRef} className="min-h-0 flex-1 overflow-y-auto">
+            {requests.length === 0 ? (
+              <EmptyHint
+                proxyUrl={proxyUrl}
+                target={state.status.upstreamTarget}
               />
-            ))
-          )}
+            ) : (
+              requests.map((record) => (
+                <RequestRow
+                  key={record.requestId}
+                  record={record}
+                  selected={state.selectedRequestId === record.requestId}
+                  onToggle={() => toggleRequest(record.requestId)}
+                />
+              ))
+            )}
+          </div>
         </div>
         {selectedRecord === null ? (
           <DetailHint />
@@ -257,7 +259,7 @@ function RequestRow({
     <div className="border-b border-neutral-900">
       <button
         onClick={onToggle}
-        className={`grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_1fr_8rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
+        className={`grid w-full grid-cols-[6rem_3.5rem_5rem_5rem_minmax(0,1fr)_11rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
           selected
             ? "border-l-cyan-400 bg-neutral-800 hover:bg-neutral-800"
             : "border-l-transparent"
@@ -279,9 +281,8 @@ function RequestRow({
         <span className="truncate text-neutral-300">
           {requestSummary(record)}
         </span>
-        <span className="text-right text-neutral-500">
-          {record.events.length} events
-        </span>
+        {/* [LAW:one-source-of-truth] Row usage is read from assembledResponse only; streaming rows pass null through the same renderer. */}
+        <UsageBadges usage={record.assembledResponse?.usage ?? null} />
       </button>
     </div>
   );

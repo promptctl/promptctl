@@ -1,6 +1,7 @@
 import type { ReactNode } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";
 import { formatDurationNs, formatRelativeNs, stateClass } from "./format";
+import { UsageBadges } from "./UsageBadges";
 
 export function OverviewTab({ record }: { record: RequestRecord }) {
   const response = record.assembledResponse;
@@ -47,10 +48,8 @@ export function OverviewTab({ record }: { record: RequestRecord }) {
 
       <Label>Usage</Label>
       <Value>
-        in={usage?.input_tokens ?? "--"} out={usage?.output_tokens ?? "--"}{" "}
-        cache_read=
-        {usage?.cache_read_input_tokens ?? "--"} cache_creation=
-        {usage?.cache_creation_input_tokens ?? "--"}
+        {/* [LAW:single-enforcer] Overview uses the same token renderer as Live rows and totals. */}
+        <UsageBadges usage={usage ?? null} size="full" />
       </Value>
 
       <Label>Stop reason</Label>

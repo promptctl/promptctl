@@ -22,9 +22,14 @@ describe("RequestDetail", () => {
     render(<RequestDetail record={record} />);
 
     expect(screen.getByText("complete")).toBeInTheDocument();
-    expect(
-      screen.getByText(/in=10 out=20 cache_read=3 cache_creation=4/),
-    ).toBeInTheDocument();
+    expect(screen.getByTestId("usage-pill-input")).toHaveTextContent("in10");
+    expect(screen.getByTestId("usage-pill-output")).toHaveTextContent("out20");
+    expect(screen.getByTestId("usage-pill-cache-read")).toHaveTextContent(
+      "cache·3",
+    );
+    expect(screen.getByTestId("usage-pill-cache-creation")).toHaveTextContent(
+      "cache+4",
+    );
     expect(screen.getByText("end_turn")).toBeInTheDocument();
     expect(screen.getByText("+0.0ms")).toBeInTheDocument();
     expect(screen.getByText("+15.0ms")).toBeInTheDocument();

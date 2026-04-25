@@ -1,5 +1,5 @@
 import { beforeEach, describe, expect, it } from "vitest";
-import { cleanup, render, screen } from "@testing-library/react";
+import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { Live } from "./Live";
 import { useProxyStore } from "../store/proxy";
@@ -42,11 +42,30 @@ describe("Live", () => {
     expect(screen.getByText("Codex @ app")).toBeTruthy();
     expect(screen.getAllByText(/req-a/).length).toBeGreaterThan(0);
     expect(screen.getAllByText(/req-b/).length).toBeGreaterThan(0);
+    const allTotals = screen.getByText("Totals · 2 requests").parentElement;
+    expect(allTotals).not.toBeNull();
+    expect(
+      within(allTotals as HTMLElement).getByTestId("usage-pill-input"),
+    ).toHaveTextContent("in30");
+    expect(
+      within(allTotals as HTMLElement).getByTestId("usage-pill-cache-creation"),
+    ).toHaveTextContent("cache+5");
+    expect(
+      within(allTotals as HTMLElement).getByTestId("usage-pill-cache-read"),
+    ).toHaveTextContent("cache·7");
+    expect(
+      within(allTotals as HTMLElement).getByTestId("usage-pill-output"),
+    ).toHaveTextContent("out7");
 
     const user = userEvent.setup();
     await user.click(screen.getByText("Claude @ app"));
     expect(screen.getAllByText(/req-a/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/req-b/)).toBeNull();
+    const clientTotals = screen.getByText("Totals · 1 requests").parentElement;
+    expect(clientTotals).not.toBeNull();
+    expect(
+      within(clientTotals as HTMLElement).getByTestId("usage-pill-input"),
+    ).toHaveTextContent("in10");
 
     await user.click(screen.getByText("All"));
     await user.click(screen.getAllByText(/req-a/)[0]);
@@ -117,7 +136,15 @@ function events(requestId: string, clientId: string): ProxyEvent[] {
         content: [],
         stop_reason: "end_turn",
         stop_sequence: null,
-        usage: { input_tokens: 1, output_tokens: 1 },
+        usage:
+          requestId === "req-a"
+            ? {
+                input_tokens: 10,
+                output_tokens: 2,
+                cache_read_input_tokens: 7,
+                cache_creation_input_tokens: 5,
+              }
+            : { input_tokens: 20, output_tokens: 5 },
       },
     },
   ];
