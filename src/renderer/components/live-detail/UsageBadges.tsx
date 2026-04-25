@@ -1,5 +1,5 @@
 import type { AnthropicUsage } from "../../../shared/proxy-events";
-import { formatToken, usageShares } from "./usage";
+import { cacheRatio, formatToken, usageShares } from "./usage";
 
 type UsageBadgeSize = "compact" | "full";
 interface UsageField {
@@ -8,6 +8,7 @@ interface UsageField {
   value: number | null | undefined;
   className: string;
   title: string;
+  widthClass: string;
 }
 
 export function UsageBadges({
@@ -19,34 +20,43 @@ export function UsageBadges({
 }) {
   const fields = usageFields(usage);
   const shares = usageShares(usage);
+  const ratio = cacheRatio(usage);
   const barTitle =
     usage === null
       ? "No usage yet"
-      : `fresh ${percent(shares.freshInput)} · cache+ ${percent(
+      : `cache hit ${ratio === null ? "n/a" : percent(ratio)} · fresh ${percent(
+          shares.freshInput,
+        )} · cache+ ${percent(
           shares.cacheCreation,
         )} · cache· ${percent(shares.cacheRead)}`;
-  const barWidth = size === "full" ? "w-40" : "w-24";
+  const compact = size === "compact";
+  const barWidth = compact ? "w-10" : "w-40";
 
   return (
     <div
       className={`inline-flex min-w-0 ${
-        size === "full"
-          ? "items-center gap-3"
-          : "flex-col items-stretch gap-1 justify-self-end"
+        compact
+          ? "items-center justify-end gap-1 overflow-hidden justify-self-end"
+          : "items-center gap-3"
       }`}
       data-testid="usage-badges"
     >
-      <span className="inline-flex flex-wrap items-center justify-end gap-1">
+      <span
+        className={`inline-flex min-w-0 items-center justify-end gap-1 ${
+          compact ? "flex-nowrap overflow-hidden" : "flex-wrap"
+        }`}
+      >
         {fields.map((field) => (
-          <UsagePill key={field.key} field={field} />
+          <UsagePill key={field.key} field={field} compact={compact} />
         ))}
       </span>
       <span
-        className={`flex h-2 ${barWidth} overflow-hidden rounded-sm border border-neutral-700 bg-neutral-950`}
+        className={`flex h-2 ${barWidth} shrink-0 overflow-hidden rounded-sm border border-neutral-700 bg-neutral-950`}
         title={barTitle}
         data-testid="usage-cache-bar"
       >
         {/* [LAW:dataflow-not-control-flow] Segments are always present; missing usage is represented as zero-width data. */}
+        {/* [LAW:single-enforcer] Brighter bar fills intentionally reuse the shared cache/share mapping while preserving contrast on the dark track. */}
         <span
           className="h-full bg-green-500"
           style={{ width: percent(shares.cacheRead) }}
@@ -70,7 +80,13 @@ export function UsageBadges({
   );
 }
 
-function UsagePill({ field }: { field: UsageField }) {
+function UsagePill({
+  field,
+  compact,
+}: {
+  field: UsageField;
+  compact: boolean;
+}) {
   const formatted = formatToken(field.value);
   const title =
     field.value === null || field.value === undefined
@@ -79,12 +95,16 @@ function UsagePill({ field }: { field: UsageField }) {
 
   return (
     <span
-      className={`inline-flex h-5 items-center gap-1 rounded px-1.5 text-[0.65rem] leading-none ${field.className}`}
+      className={`inline-flex h-5 shrink-0 items-center gap-1 rounded px-1.5 text-[0.65rem] leading-none ${
+        compact ? field.widthClass : ""
+      } ${field.className}`}
       title={title}
       data-testid={`usage-pill-${field.key}`}
     >
-      <span className="text-neutral-500">{field.label}</span>
-      <span className="font-mono tabular-nums">{formatted}</span>
+      <span className="shrink-0 text-neutral-500">{field.label}</span>
+      <span className="min-w-0 truncate text-right font-mono tabular-nums">
+        {formatted}
+      </span>
     </span>
   );
 }
@@ -98,6 +118,7 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.input_tokens,
       className: "bg-neutral-900 text-neutral-300",
       title: "input tokens",
+      widthClass: "w-[2.4rem]",
     },
     {
       key: "cache-creation",
@@ -105,6 +126,7 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.cache_creation_input_tokens,
       className: "bg-amber-950 text-amber-400",
       title: "cache creation input tokens",
+      widthClass: "w-[3.4rem]",
     },
     {
       key: "cache-read",
@@ -112,6 +134,7 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.cache_read_input_tokens,
       className: "bg-green-950 text-green-400",
       title: "cache read input tokens",
+      widthClass: "w-[3.4rem]",
     },
     {
       key: "output",
@@ -119,10 +142,12 @@ function usageFields(usage: AnthropicUsage | null): UsageField[] {
       value: usage?.output_tokens,
       className: "bg-neutral-900 text-neutral-300",
       title: "output tokens",
+      widthClass: "w-[2.6rem]",
     },
   ];
 }
 
 function percent(value: number): string {
-  return `${Number.isFinite(value) ? value * 100 : 0}%`;
+  const pct = Number.isFinite(value) ? value * 100 : 0;
+  return `${Number(pct.toFixed(2))}%`;
 }

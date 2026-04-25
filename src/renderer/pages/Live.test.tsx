@@ -56,12 +56,15 @@ describe("Live", () => {
     expect(
       within(allTotals as HTMLElement).getByTestId("usage-pill-output"),
     ).toHaveTextContent("out7");
+    expect(
+      within(allTotals as HTMLElement).getByTestId("usage-segment-cache-read"),
+    ).toHaveAttribute("data-share", String(7 / 42));
 
     const user = userEvent.setup();
     await user.click(screen.getByText("Claude @ app"));
     expect(screen.getAllByText(/req-a/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/req-b/)).toBeNull();
-    const clientTotals = screen.getByText("Totals · 1 requests").parentElement;
+    const clientTotals = screen.getByText("Totals · 1 request").parentElement;
     expect(clientTotals).not.toBeNull();
     expect(
       within(clientTotals as HTMLElement).getByTestId("usage-pill-input"),

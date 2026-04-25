@@ -100,5 +100,49 @@ describe("UsageBadges", () => {
       "data-share",
       "0.8",
     );
+    expect(screen.getByTestId("usage-cache-bar")).toHaveAttribute(
+      "title",
+      "cache hit 80% · fresh 10% · cache+ 10% · cache· 80%",
+    );
+  });
+
+  it("keeps compact badges in a single row with stable pill widths", () => {
+    render(
+      <UsageBadges
+        usage={{
+          input_tokens: 999_999,
+          output_tokens: 999_499,
+          cache_creation_input_tokens: 1234,
+          cache_read_input_tokens: 5678,
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("usage-badges")).toHaveClass("items-center");
+    expect(screen.getByTestId("usage-pill-input")).toHaveClass("w-[2.4rem]");
+    expect(screen.getByTestId("usage-pill-cache-creation")).toHaveClass(
+      "w-[3.4rem]",
+    );
+    expect(screen.getByTestId("usage-pill-cache-read")).toHaveClass(
+      "w-[3.4rem]",
+    );
+    expect(screen.getByTestId("usage-pill-output")).toHaveClass("w-[2.6rem]");
+  });
+
+  it("rounds bar percentages to two decimal places", () => {
+    render(
+      <UsageBadges
+        usage={{
+          input_tokens: 2,
+          output_tokens: 1,
+          cache_creation_input_tokens: 2,
+          cache_read_input_tokens: 3,
+        }}
+      />,
+    );
+
+    expect(screen.getByTestId("usage-segment-cache-read")).toHaveStyle({
+      width: "42.86%",
+    });
   });
 });

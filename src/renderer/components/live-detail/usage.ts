@@ -44,10 +44,13 @@ export function sumUsage(records: RequestRecord[]): AnthropicUsage | null {
 }
 
 export function cacheRatio(usage: AnthropicUsage | null): number | null {
-  const shares = usageShares(usage);
-  const total = shares.cacheRead + shares.cacheCreation + shares.freshInput;
+  const freshInput = usage?.input_tokens ?? 0;
+  const cacheCreation = usage?.cache_creation_input_tokens ?? 0;
+  const cacheRead = usage?.cache_read_input_tokens ?? 0;
+  const total = freshInput + cacheCreation + cacheRead;
+
   if (usage === null || total === 0) return null;
-  return shares.cacheRead / total;
+  return cacheRead / total;
 }
 
 export function usageShares(usage: AnthropicUsage | null): UsageShares {
@@ -68,7 +71,7 @@ export function usageShares(usage: AnthropicUsage | null): UsageShares {
 
 export function formatToken(n: number | null | undefined): string {
   if (n === null || n === undefined) return "…";
-  if (Math.abs(n) >= 1_000_000) return compact(n, 1_000_000, "m");
+  if (Math.abs(n) >= 999_500) return compact(n, 1_000_000, "m");
   if (Math.abs(n) >= 1_000) return compact(n, 1_000, "k");
   return String(n);
 }

@@ -42,6 +42,7 @@ describe("usage helpers", () => {
         cache_read_input_tokens: 80,
       }),
     ).toBe(0.8);
+    expect(cacheRatio({ input_tokens: 10, output_tokens: 1 })).toBe(0);
     expect(cacheRatio(null)).toBeNull();
     expect(cacheRatio({ input_tokens: 0, output_tokens: 0 })).toBeNull();
   });
@@ -59,6 +60,11 @@ describe("usage helpers", () => {
       cacheCreation: 0.1,
       cacheRead: 0.8,
     });
+    expect(usageShares(null)).toEqual({
+      freshInput: 0,
+      cacheCreation: 0,
+      cacheRead: 0,
+    });
   });
 
   it("formats tokens compactly", () => {
@@ -67,6 +73,8 @@ describe("usage helpers", () => {
     expect(formatToken(0)).toBe("0");
     expect(formatToken(567)).toBe("567");
     expect(formatToken(1234)).toBe("1.2k");
+    expect(formatToken(999_499)).toBe("999.5k");
+    expect(formatToken(999_999)).toBe("1m");
     expect(formatToken(1_200_000)).toBe("1.2m");
   });
 });
