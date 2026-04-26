@@ -8,17 +8,46 @@ import { readFile, readlink, readdir } from "node:fs/promises";
 
 import type { ClientInfo } from "../../shared/proxy-events";
 
-const CLIENT_BINS = new Set(["claude", "codex", "gemini", "copilot-cli"]);
-const RESOLVE_TIMEOUT_MS = 1000;
-const MAX_PARENT_DEPTH = 10;
+// [LAW:one-source-of-truth] Identity is derived from kernel state (peer pid)
+// and a deterministic walk to a stable ancestor — same logical process always
+// produces the same clientId, regardless of which socket we resolved through.
+//
+// Stop the walk before crossing into shell/terminal/init: those are shared
+// across unrelated programs, so coalescing on them would merge two claudes
+// in two tmux panes into one tab. The "topmost non-shell ancestor" is "the
+// program the user launched", which is the granularity we want.
+const SHELL_OR_LAUNCHER_COMMS = new Set([
+  "sh", "bash", "zsh", "fish", "dash", "ksh",
+  "tmux", "tmux-server", "screen",
+  "login", "sshd", "init", "launchd", "systemd",
+  "Terminal", "iTerm2", "WindowServer",
+]);
+const RESOLVE_DEADLINE_MS = 3000;
+const PEER_LOOKUP_RETRIES = 6;
+const PEER_LOOKUP_BACKOFF_MS = 80;
+const MAX_PARENT_DEPTH = 16;
+const PER_EXEC_TIMEOUT_MS = 600;
 
-interface ProcessRow {
+interface CacheEntry {
+  readonly info: ClientInfo;
+  readonly peerComm: string | null;
+}
+
+// [LAW:single-enforcer] Module-singleton cache keyed by peer pid. Two sockets
+// from the same peer pid skip the walk; two peers under the same root walk
+// independently but converge on the same clientId, so they tab together.
+//
+// Cache hits revalidate against the live peer pid's comm (one ps exec) so a
+// pid reused by a different program doesn't serve stale identity.
+const peerCache = new Map<number, CacheEntry>();
+
+export interface ProcessRow {
   pid: number;
   ppid: number;
   comm: string;
 }
 
-function exec(cmd: string, args: string[], timeout = RESOLVE_TIMEOUT_MS): Promise<string> {
+function exec(cmd: string, args: string[], timeout = PER_EXEC_TIMEOUT_MS): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { timeout }, (error, stdout) => {
       if (error) {
@@ -31,22 +60,29 @@ function exec(cmd: string, args: string[], timeout = RESOLVE_TIMEOUT_MS): Promis
 }
 
 export async function resolveClientId(socket: net.Socket): Promise<ClientInfo> {
+  // [LAW:dataflow-not-control-flow] Always attempt resolution; only fall back
+  // when the deadline genuinely expires. The previous code raced a 1s timer
+  // against the resolver and returned "unknown" on every slow lsof, which
+  // produced ghost clients for the same real process.
   const fallback = fallbackClient(socket);
-  const resolved = await Promise.race([
+  return Promise.race([
     resolveClientInfo(socket).catch(() => fallback),
-    new Promise<ClientInfo>((resolve) => setTimeout(() => resolve(fallback), RESOLVE_TIMEOUT_MS)),
+    new Promise<ClientInfo>((resolve) =>
+      setTimeout(() => resolve(fallback), RESOLVE_DEADLINE_MS),
+    ),
   ]);
-  return resolved;
 }
 
 async function resolveClientInfo(socket: net.Socket): Promise<ClientInfo> {
-  const pid = await findSocketPid(socket);
+  const pid = await findSocketPidWithRetry(socket);
+  const cached = await consumeCacheHit(pid);
+  if (cached) return cached;
   const root = await findClientRoot(pid);
   const command = await readCommand(root.pid);
   const cwd = await readCwd(root.pid);
   const shortCwd = cwd ? basename(cwd) || cwd : "unknown cwd";
   const binary = basename(root.comm || command?.split(/\s+/)[0] || `pid ${root.pid}`);
-  return {
+  const info: ClientInfo = {
     clientId: String(root.pid),
     pid,
     rootPid: root.pid,
@@ -55,6 +91,45 @@ async function resolveClientInfo(socket: net.Socket): Promise<ClientInfo> {
     cwd,
     lastSeenNs: nowNs(),
   };
+  peerCache.set(pid, { info, peerComm: await readComm(pid) });
+  return info;
+}
+
+// Validate the cache entry against the live process before serving it: if the
+// peer pid was reused by a different program (different comm), the cached
+// clientId is stale and would mis-attribute traffic. Cheap fast-path on hit
+// (one ps exec) vs a full walk on miss (three+).
+async function consumeCacheHit(pid: number): Promise<ClientInfo | null> {
+  const cached = peerCache.get(pid);
+  if (!cached) return null;
+  const liveComm = await readComm(pid);
+  if (liveComm === null || liveComm !== cached.peerComm) {
+    peerCache.delete(pid);
+    return null;
+  }
+  return { ...cached.info, lastSeenNs: nowNs() };
+}
+
+async function readComm(pid: number): Promise<string | null> {
+  try {
+    const stdout = await exec("ps", ["-o", "comm=", "-p", String(pid)]);
+    return stdout.trim() || null;
+  } catch {
+    return null;
+  }
+}
+
+async function findSocketPidWithRetry(socket: net.Socket): Promise<number> {
+  let lastErr: unknown = null;
+  for (let attempt = 0; attempt < PEER_LOOKUP_RETRIES; attempt += 1) {
+    try {
+      return await findSocketPid(socket);
+    } catch (err) {
+      lastErr = err;
+      await new Promise((r) => setTimeout(r, PEER_LOOKUP_BACKOFF_MS));
+    }
+  }
+  throw lastErr instanceof Error ? lastErr : new Error("findSocketPid: unknown failure");
 }
 
 async function findSocketPid(socket: net.Socket): Promise<number> {
@@ -166,14 +241,43 @@ export function parseLsofEntries(stdout: string): { pid: number; name: string }[
 }
 
 async function findClientRoot(pid: number): Promise<ProcessRow> {
-  let current = await readProcess(pid);
-  let selected = current;
+  return walkToClientRoot(pid, readProcess);
+}
+
+// Exported for unit testing. The walk algorithm is pulled out of any I/O so
+// tests can drive it with a deterministic process table.
+//
+// [LAW:dataflow-not-control-flow] Walk to a deterministic root. Stop *before*
+// crossing into a shell/launcher: that's where unrelated programs converge,
+// so coalescing past it would merge two CLIs in two tmux panes into one tab.
+// The previous heuristic looked for a known CLI name (claude/codex/gemini) and
+// fell through to the peer pid when no match was found — meaning the same
+// logical process produced different roots per socket depending on whether
+// the walk happened to hit a name match. This walk produces the same answer
+// for every descendant of one launched program.
+export async function walkToClientRoot(
+  pid: number,
+  readProcessRow: (pid: number) => Promise<ProcessRow>,
+): Promise<ProcessRow> {
+  let current = await readProcessRow(pid);
   for (let depth = 0; depth < MAX_PARENT_DEPTH; depth += 1) {
-    if (CLIENT_BINS.has(basename(current.comm))) selected = current;
     if (current.ppid <= 1) break;
-    current = await readProcess(current.ppid);
+    let parent: ProcessRow;
+    try {
+      parent = await readProcessRow(current.ppid);
+    } catch {
+      break;
+    }
+    if (SHELL_OR_LAUNCHER_COMMS.has(basename(parent.comm))) break;
+    current = parent;
   }
-  return selected;
+  return current;
+}
+
+// Test-only escape hatch. Cache state is process-scoped; tests need a clean
+// slate between cases.
+export function __resetPeerCacheForTesting(): void {
+  peerCache.clear();
 }
 
 async function readProcess(pid: number): Promise<ProcessRow> {
