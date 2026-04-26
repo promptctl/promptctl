@@ -109,6 +109,15 @@ Adapters must NOT write to disk themselves except through `saveSession()` — th
 - **Tests are real.** `*.integration.test.ts` hits real temp directories end-to-end; `*.test.ts` for units. Renderer component tests use `src/test/electron-mock.ts` — `installElectronMock()` + `setInvokeHandlers({channel: handler})` per test, and `api.emit("task:event", …)` to simulate main→renderer broadcasts.
 - **Settings shape is duplicated** between `src/main/settings/store.ts` (`AppSettings`) and `src/renderer/env.d.ts` (`AppSettingsShape`). The renderer can't import main-process modules, so the mirror is intentional — keep the two in sync when adding keys.
 
+## Dev port group
+
+`scripts/dev.ts` reserves a contiguous range for the running dev app:
+- **53991** — proxy HTTP listener
+- **53992** — proxy TLS listener
+- **53993** — V8 Inspector on the Electron main process (`--inspect=53993`, attach with `mcp__electric-cherry__v8_connect port=53993`)
+
+Renderer CDP is auto-allocated by Electron (look it up via `lsof` on the renderer PID, then `mcp__electric-cherry__chrome connect`). Keep new dev-only listeners in this block.
+
 ## What lives where (at a glance)
 
 - `src/main/` — Electron main process (tmux, command engine, sessions, IPC handlers, LLM client, task runner, settings store).
