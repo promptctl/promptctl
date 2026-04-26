@@ -4,6 +4,7 @@ import os from "node:os";
 import path from "node:path";
 import { TmuxStateManager } from "./tmux/state";
 import { PaneOutputManager } from "./tmux/output";
+import { TmuxControlConnection } from "./tmux/control";
 import { CommandEngine } from "./command/engine";
 import { loadCommands } from "./command/persistence";
 import { registerTmuxHandlers } from "./ipc/tmux-handlers";
@@ -56,6 +57,14 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 const tmuxState = new TmuxStateManager();
 const outputManager = new PaneOutputManager();
 const commandEngine = new CommandEngine(tmuxState);
+// [LAW:one-source-of-truth] Foundation for the event-driven tmux path; runs
+// alongside the legacy polling stack until 77e.1.3/.4 retire state.ts/output.ts.
+const tmuxControl = TmuxControlConnection.start();
+tmuxControl.onConnectionState((ev) => {
+  console.log(
+    `[tmux-control] ${ev.status}${ev.reason ? `: ${ev.reason}` : ""}`,
+  );
+});
 let deepLinkServer: Server | null = null;
 
 // [LAW:one-source-of-truth] The URL IS the selection; cold-start bakes the hash
