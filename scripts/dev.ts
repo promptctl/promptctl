@@ -13,6 +13,7 @@
 
 import { spawn, type ChildProcess } from "node:child_process";
 import { existsSync } from "node:fs";
+import { builtinModules } from "node:module";
 import path from "node:path";
 import { build } from "vite";
 import {
@@ -37,11 +38,19 @@ if (!existsSync(FORGE_BIN)) {
   process.exit(1);
 }
 
-const forge: ChildProcess = spawn(FORGE_BIN, ["start"], {
-  cwd: PROJECT_ROOT,
-  stdio: ["pipe", "inherit", "inherit"],
-  env: { ...process.env, [DEV_WRAPPER_ENV_VAR]: DEV_WRAPPER_SENTINEL },
-});
+// Port grouping for promptctl dev: proxy=53991, proxy-tls=53992, v8-main=53993.
+// Forwarded to Electron via Forge's `--` passthrough so the main process's
+// Node exposes ws://127.0.0.1:53993 for V8 Inspector (electric-cherry v8_connect).
+const V8_INSPECT_PORT = 53993;
+const forge: ChildProcess = spawn(
+  FORGE_BIN,
+  ["start", "--", `--inspect=${V8_INSPECT_PORT}`],
+  {
+    cwd: PROJECT_ROOT,
+    stdio: ["pipe", "inherit", "inherit"],
+    env: { ...process.env, [DEV_WRAPPER_ENV_VAR]: DEV_WRAPPER_SENTINEL },
+  },
+);
 
 if (!forge.stdin) {
   console.error("[dev] failed to attach stdin pipe to electron-forge");
@@ -88,7 +97,20 @@ async function startWatcher(entry: string, outFile: string): Promise<void> {
       lib: { entry, formats: ["cjs"], fileName: () => outFile },
       sourcemap: "inline",
       watch: {},
-      rollupOptions: { external: ["electron", /^electron\//, /^node:/] },
+      // Externalize every node builtin in both bare ("path") and prefixed
+      // ("node:path") form. Vite's default browser-mode shim turns un-externalized
+      // builtins into empty proxies whose property access throws at runtime
+      // (e.g. `path.sep` → "Module 'path' has been externalized for browser
+      // compatibility"). Forge's own main bundle handles this; our hot-restart
+      // watcher is a parallel Vite build that doesn't, so it must be explicit.
+      rollupOptions: {
+        external: [
+          "electron",
+          /^electron\//,
+          ...builtinModules,
+          ...builtinModules.map((m) => `node:${m}`),
+        ],
+      },
     },
     plugins: [
       {
