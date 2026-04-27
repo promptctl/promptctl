@@ -25,6 +25,10 @@ export type ConnectionStatus = "connecting" | "ready" | "closed";
 export interface ConnectionStateEvent {
   readonly status: ConnectionStatus;
   readonly reason?: string;
+  // [LAW:dataflow-not-control-flow] Counter is data on every event so the
+  // debug panel renders the same way for every transition — no branch on
+  // "is this a reconnect."
+  readonly reconnectAttempts: number;
 }
 
 export interface TmuxControlConnectionOptions {
@@ -68,9 +72,20 @@ export class TmuxControlConnection {
   private readyResolve: () => void = () => undefined;
   private readonly _ready: Promise<void>;
 
+  private reconnectAttempts = 0;
+
   private constructor(options?: TmuxControlConnectionOptions) {
-    this.transportFactory = options?.transportFactory ?? (() => spawnTmux([]));
-    this.serverProbe = options?.serverProbe ?? defaultServerProbe;
+    // [LAW:dataflow-not-control-flow] PROMPTCTL_TMUX_SOCKET is read once into a
+    // value; the same factory and probe paths run regardless of whether it is
+    // set — only the data (socketPath / -L args) varies.
+    const envSocket = process.env.PROMPTCTL_TMUX_SOCKET ?? null;
+    this.transportFactory =
+      options?.transportFactory ??
+      (() =>
+        envSocket === null
+          ? spawnTmux([])
+          : spawnTmux([], { socketPath: envSocket }));
+    this.serverProbe = options?.serverProbe ?? makeDefaultServerProbe(envSocket);
     this.reconnectDelayMs = options?.reconnectDelayMs ?? 2000;
     this._ready = new Promise<void>((resolve) => {
       this.readyResolve = resolve;
@@ -106,12 +121,16 @@ export class TmuxControlConnection {
   }
 
   getState(): ConnectionStateEvent {
-    return { status: this.status, reason: this.statusReason };
+    return {
+      status: this.status,
+      reason: this.statusReason,
+      reconnectAttempts: this.reconnectAttempts,
+    };
   }
 
   onConnectionState(listener: StateListener): () => void {
     this.stateListeners.add(listener);
-    listener({ status: this.status, reason: this.statusReason });
+    listener(this.getState());
     return () => this.stateListeners.delete(listener);
   }
 
@@ -229,6 +248,7 @@ export class TmuxControlConnection {
 
   private scheduleReconnect(): void {
     if (this.reconnectTimer !== null || this.closed) return;
+    this.reconnectAttempts += 1;
     this.reconnectTimer = setTimeout(() => {
       this.reconnectTimer = null;
       void this.connect();
@@ -238,20 +258,27 @@ export class TmuxControlConnection {
   private setStatus(status: ConnectionStatus, reason?: string): void {
     this.status = status;
     this.statusReason = reason;
-    const event: ConnectionStateEvent = { status, reason };
+    const event = this.getState();
     for (const listener of this.stateListeners) {
       listener(event);
     }
   }
 }
 
-async function defaultServerProbe(): Promise<boolean> {
-  try {
-    await tmuxExec(["has-session"]);
-    return true;
-  } catch {
-    return false;
-  }
+function makeDefaultServerProbe(socketPath: string | null): () => Promise<boolean> {
+  // [LAW:dataflow-not-control-flow] socketPath is data on the args list; the
+  // same execution path runs for the env-var-set and unset cases.
+  const args = socketPath === null
+    ? ["has-session"]
+    : ["-L", socketPath, "has-session"];
+  return async () => {
+    try {
+      await tmuxExec(args);
+      return true;
+    } catch {
+      return false;
+    }
+  };
 }
 
 function errorMessage(err: unknown): string {

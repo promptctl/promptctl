@@ -54,12 +54,18 @@ const config: ForgeConfig = {
         },
       ],
     }),
+    // EnableNodeCliInspectArguments is intentionally TRUE: Playwright's
+    // electron.launch() injects --inspect=0 and reads the inspector port
+    // from stderr to drive e2e tests. The fuse is a hardening flag for
+    // shipping signed binaries; promptctl is not yet shipping a signed
+    // product, and the e2e suite is a load-bearing verification surface.
+    // Flip back to false at the point where signing + distribution lands.
     new FusesPlugin({
       version: FuseVersion.V1,
       [FuseV1Options.RunAsNode]: false,
       [FuseV1Options.EnableCookieEncryption]: true,
       [FuseV1Options.EnableNodeOptionsEnvironmentVariable]: false,
-      [FuseV1Options.EnableNodeCliInspectArguments]: false,
+      [FuseV1Options.EnableNodeCliInspectArguments]: true,
       [FuseV1Options.EnableEmbeddedAsarIntegrityValidation]: true,
       [FuseV1Options.OnlyLoadAppFromAsar]: true,
     }),

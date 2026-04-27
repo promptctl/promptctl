@@ -182,6 +182,7 @@ export interface ElectronAPI {
   invoke(channel: "proxy:list-clients"): Promise<ClientInfo[]>;
   invoke(channel: "proxy:load-har", filePath: string): Promise<ProxyStatus>;
   invoke(channel: "proxy:pick-har"): Promise<string | null>;
+  invoke(channel: "tmux:control-state:get"): Promise<TmuxControlState>;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   writeClipboard(text: string): void;
 
@@ -222,6 +223,10 @@ export interface ElectronAPI {
     listener: (event: TaskEvent) => void,
   ): () => void;
   on(
+    channel: "tmux:control-state",
+    listener: (event: TmuxControlState) => void,
+  ): () => void;
+  on(
     channel: "session:search-batch",
     listener: (payload: {
       taskId: string;
@@ -234,9 +239,31 @@ export interface ElectronAPI {
   ): () => void;
 }
 
+// Mirrors src/main/tmux/control.ts ConnectionStateEvent. Duplicated here so
+// the renderer doesn't import main-process modules.
+export interface TmuxControlState {
+  status: "connecting" | "ready" | "closed";
+  reason?: string;
+  reconnectAttempts: number;
+}
+
+// Structural shape the library's renderer bridge expects. Exposed by the
+// preload as `window.tmuxIpc`. Matches IpcRendererLike from
+// tmux-control-mode-js/electron/renderer.
+export interface TmuxIpc {
+  invoke(channel: string, ...args: unknown[]): Promise<unknown>;
+  send(channel: string, ...args: unknown[]): void;
+  on(
+    channel: string,
+    listener: (event: { sender?: unknown }, ...args: unknown[]) => void,
+  ): void;
+  removeListener(channel: string, listener: (...args: unknown[]) => void): void;
+}
+
 declare global {
   interface Window {
     electronAPI: ElectronAPI;
+    tmuxIpc: TmuxIpc;
   }
 }
 

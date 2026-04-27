@@ -14,6 +14,7 @@ import { CommandsPage } from "./pages/Commands";
 import { SessionsPage } from "./pages/Sessions";
 import { PromptsPage } from "./pages/Prompts";
 import { Live } from "./pages/Live";
+import { TmuxControlDebug } from "./pages/TmuxControlDebug";
 import { TmuxTree } from "./components/TmuxTree";
 import { CommandBar } from "./components/CommandBar";
 import { LaunchToolDialog } from "./components/LaunchToolDialog";
@@ -219,6 +220,14 @@ export function App() {
               element={
                 <main className="flex-1 overflow-auto p-6">
                   <Settings />
+                </main>
+              }
+            />
+            <Route
+              path="/debug/tmux-control"
+              element={
+                <main className="flex flex-1 flex-col overflow-auto">
+                  <TmuxControlDebug />
                 </main>
               }
             />

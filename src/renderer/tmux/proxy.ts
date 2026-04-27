@@ -1,0 +1,56 @@
+// [LAW:one-source-of-truth] All renderer-side tmux access flows through the
+// singleton TmuxClientProxy returned here. The proxy mirrors the public shape
+// of the library's TmuxClient over IPC; nothing else in the renderer should
+// hand-roll tmux:invoke calls.
+//
+// [LAW:single-enforcer] One construction site per renderer. The library bridge
+// in main installs `tmux:invoke` once per process — and a renderer that creates
+// two TmuxClientProxy instances would double-register `tmux:event` listeners
+// on the same ipcRenderer. getTmuxProxy() guards that.
+
+import { useEffect, useState } from "react";
+import {
+  createRendererBridge,
+  type TmuxClientProxy,
+} from "tmux-control-mode-js/electron/renderer";
+import type { TmuxControlState } from "../env";
+
+let proxyInstance: TmuxClientProxy | null = null;
+
+export function getTmuxProxy(): TmuxClientProxy {
+  if (proxyInstance === null) {
+    proxyInstance = createRendererBridge(window.tmuxIpc);
+  }
+  return proxyInstance;
+}
+
+const INITIAL_CONTROL_STATE: TmuxControlState = {
+  status: "connecting",
+  reconnectAttempts: 0,
+};
+
+// [LAW:dataflow-not-control-flow] Hook returns a single state value seeded by
+// `tmux:control-state:get` and updated by `tmux:control-state` broadcasts.
+// Components render the same way for connecting/ready/closed — only the data
+// varies.
+export function useControlState(): TmuxControlState {
+  const [state, setState] = useState<TmuxControlState>(INITIAL_CONTROL_STATE);
+
+  useEffect(() => {
+    let alive = true;
+    const off = window.electronAPI.on("tmux:control-state", (event) => {
+      if (alive) setState(event);
+    });
+    void window.electronAPI
+      .invoke("tmux:control-state:get")
+      .then((current) => {
+        if (alive) setState(current);
+      });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  return state;
+}

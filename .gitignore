@@ -91,6 +91,10 @@ typings/
 # Electron-Forge
 out/
 
+# Playwright artifacts
+test-results/
+playwright-report/
+
 # MCP config (local paths)
 .mcp.json
 

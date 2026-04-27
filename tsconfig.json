@@ -21,6 +21,6 @@
       "@main/*": ["src/main/*"]
     }
   },
-  "include": ["src/**/*", "scripts/**/*", "*.config.ts"],
+  "include": ["src/**/*", "scripts/**/*", "tests/**/*", "*.config.ts"],
   "exclude": ["node_modules", ".vite"]
 }

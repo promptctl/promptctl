@@ -1,13 +1,15 @@
-import { app, BrowserWindow } from "electron";
+import { app, BrowserWindow, ipcMain } from "electron";
 import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
+import { createMainBridge } from "tmux-control-mode-js/electron/main";
 import { TmuxStateManager } from "./tmux/state";
 import { PaneOutputManager } from "./tmux/output";
 import { TmuxControlConnection } from "./tmux/control";
 import { CommandEngine } from "./command/engine";
 import { loadCommands } from "./command/persistence";
 import { registerTmuxHandlers } from "./ipc/tmux-handlers";
+import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
 import { registerCommandHandlers } from "./ipc/command-handlers";
 import { registerSessionHandlers } from "./ipc/session-handlers";
 import { registerPromptHandlers } from "./ipc/prompt-handlers";
@@ -64,6 +66,29 @@ tmuxControl.onConnectionState((ev) => {
   console.log(
     `[tmux-control] ${ev.status}${ev.reason ? `: ${ev.reason}` : ""}`,
   );
+});
+
+// [LAW:dataflow-not-control-flow] Bridge presence is a pure projection of the
+// connection's status: while `ready`, a bridge wraps the current TmuxClient;
+// otherwise the slot is free. The same state machine drives every transition,
+// so reconnects swap the underlying client without leaking handlers.
+//
+// The bridge holds a direct TmuxClient reference and forbids double-registration
+// on ipcMain (WeakSet guard inside the library), so we install/dispose in lock-
+// step with the connection's client lifecycle.
+let tmuxBridge: { dispose(): void } | null = null;
+tmuxControl.onConnectionState((ev) => {
+  if (ev.status === "ready" && tmuxBridge === null) {
+    const client = tmuxControl.client;
+    if (client !== null) {
+      tmuxBridge = createMainBridge(client, ipcMain);
+    }
+    return;
+  }
+  if (ev.status !== "ready" && tmuxBridge !== null) {
+    tmuxBridge.dispose();
+    tmuxBridge = null;
+  }
 });
 let deepLinkServer: Server | null = null;
 
@@ -187,6 +212,7 @@ app.whenReady().then(async () => {
   registerProvider(geminiAdapter);
   registerProvider(claudeAdapter);
   registerTmuxHandlers(tmuxState, outputManager);
+  registerTmuxControlHandlers(tmuxControl);
   registerCommandHandlers(commandEngine);
   registerSessionHandlers();
   registerPromptHandlers();
@@ -241,6 +267,11 @@ app.on("window-all-closed", () => {
 app.on("before-quit", async () => {
   tmuxState.stop();
   commandEngine.stop();
+  if (tmuxBridge !== null) {
+    tmuxBridge.dispose();
+    tmuxBridge = null;
+  }
+  tmuxControl.close();
   await outputManager.unwatchAll();
   await shutdownProxy();
   if (deepLinkServer) {
