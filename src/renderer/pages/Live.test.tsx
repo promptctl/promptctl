@@ -59,9 +59,9 @@ describe("Live", () => {
     expect(
       within(allTotals as HTMLElement).getByTestId("usage-segment-cache-read"),
     ).toHaveAttribute("data-share", String(7 / 42));
-    expect(screen.getByTestId("live-request-list-pane")).toHaveClass(
-      "w-[50rem]",
-    );
+    // The list pane lives inside a ResizableSplit; its outer container carries the
+    // explicit pixel width so users can drag it.
+    expect(screen.getByTestId("live-split-first")).toHaveStyle({ width: "800px" });
     expect(screen.getAllByText(/req-a/)[0].closest("button")).toHaveClass(
       "grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_20rem]",
     );

@@ -564,17 +564,8 @@ describe("Full-text session search", () => {
 
     render(<SessionEditor />);
 
-    // The sidebar stays at w-80; the search input lives in it.
-    const input = screen.getByLabelText("Search session content");
-    let sidebarSearch: HTMLElement | null = input;
-    while (
-      sidebarSearch &&
-      !sidebarSearch.className.includes("w-80")
-    ) {
-      sidebarSearch = sidebarSearch.parentElement;
-    }
-    if (!sidebarSearch) throw new Error("sidebar not found");
-    const sidebar: HTMLElement = sidebarSearch;
+    // The sidebar lives inside the resizable split; locate it via testid.
+    const sidebar = screen.getByTestId("session-editor-sidebar");
 
     // The tree is still present in the sidebar.
     expect(sidebar.textContent).toContain("tree-project");

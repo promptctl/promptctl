@@ -14,6 +14,7 @@ import type {
   SessionSearchResult,
   SessionSearchMatch,
 } from "../../shared/types";
+import { ResizableSplit } from "./ResizableSplit";
 import { ValidationViolationsDialog } from "./ValidationViolationsDialog";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { DiffViewer } from "./DiffViewer";
@@ -1652,9 +1653,21 @@ export function SessionEditor() {
   // editor (or empty state) otherwise. The tree stays visible so users can keep
   // browsing while results are shown.
   return (
-    <div className="flex h-full gap-4">
-      {/* Left sidebar: search input + tree. Always fixed width. */}
-      <div className="flex w-80 shrink-0 flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/50 p-3">
+    <div className="flex h-full">
+      <ResizableSplit
+        orientation="horizontal"
+        side="before"
+        defaultSize={320}
+        minSize={240}
+        maxSize={500}
+        className="h-full flex-1"
+        testId="session-editor-sidebar-split"
+      >
+        {/* Left sidebar: search input + tree. */}
+        <div
+          data-testid="session-editor-sidebar"
+          className="flex h-full flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/50 p-3"
+        >
         <SessionSearchInput
           value={searchQuery}
           onChange={onSearchInputChange}
@@ -1684,6 +1697,7 @@ export function SessionEditor() {
         </div>
       </div>
 
+      <div className="flex h-full min-w-0 flex-1 gap-4 pl-4">
       {/* Main panel: search results when active, otherwise editor / empty state.
           When peek is open, the main panel splits into results + preview so
           the user can read a session without discarding the search. */}
@@ -2280,6 +2294,8 @@ export function SessionEditor() {
           onRestore={handleRestoreVersion}
         />
       )}
+      </div>
+      </ResizableSplit>
 
       {/* Diff viewer modal */}
       {diffState && (

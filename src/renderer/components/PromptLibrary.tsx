@@ -2,6 +2,7 @@ import { useEffect, useState, useRef } from "react";
 import CodeEditor from "@uiw/react-textarea-code-editor";
 import { usePromptStore } from "../store/prompt";
 import type { Prompt, PromptId } from "../../shared/types";
+import { ResizableSplit } from "./ResizableSplit";
 
 function slugify(text: string): string {
   return text
@@ -79,9 +80,17 @@ export function PromptLibrary() {
   }
 
   return (
-    <div className="flex h-full gap-4">
+    <ResizableSplit
+      orientation="horizontal"
+      side="before"
+      defaultSize={224}
+      minSize={160}
+      maxSize={500}
+      className="h-full"
+      testId="prompt-library-split"
+    >
       {/* Sidebar list */}
-      <div className="flex w-56 flex-col gap-2">
+      <div className="flex h-full flex-col gap-2 pr-3">
         <div className="flex items-center justify-between">
           <h3 className="text-sm font-semibold text-neutral-300">
             Prompts ({prompts.length})
@@ -127,7 +136,7 @@ export function PromptLibrary() {
       </div>
 
       {/* Editor */}
-      <div className="flex flex-1 flex-col gap-3">
+      <div className="flex h-full flex-col gap-3 pl-3">
         {/* Title */}
         <input
           type="text"
@@ -191,6 +200,6 @@ export function PromptLibrary() {
           )}
         </div>
       </div>
-    </div>
+    </ResizableSplit>
   );
 }

@@ -10,6 +10,7 @@ import {
   tabClass,
 } from "../components/live-detail/format";
 import { computeLineage, type LineageInfo } from "../components/live-detail/lineage";
+import { ResizableSplit } from "../components/ResizableSplit";
 import { useProxyStore, visibleRequests } from "../store/proxy";
 import type { ClientInfo, RequestRecord } from "../../shared/proxy-events";
 
@@ -91,9 +92,17 @@ export function Live() {
           Failed to load HAR: {loadError}
         </div>
       )}
-      <div className="flex min-h-0 flex-1 bg-neutral-950 font-mono text-xs">
+      <ResizableSplit
+        orientation="horizontal"
+        side="before"
+        defaultSize={800}
+        minSize={400}
+        maxSize={1400}
+        className="flex-1 bg-neutral-950 font-mono text-xs"
+        testId="live-split"
+      >
         <div
-          className="flex min-h-0 w-[50rem] shrink-0 flex-col"
+          className="flex h-full min-h-0 flex-col"
           data-testid="live-request-list-pane"
         >
           <UsageAggregate records={requests} />
@@ -125,7 +134,7 @@ export function Live() {
             lineage={lineage.get(selectedRecord.requestId) ?? null}
           />
         )}
-      </div>
+      </ResizableSplit>
     </div>
   );
 }
