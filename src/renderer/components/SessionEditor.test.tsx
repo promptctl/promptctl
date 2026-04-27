@@ -278,6 +278,27 @@ describe("History button", () => {
     expect((screen.getByTestId("history-button") as HTMLButtonElement).disabled).toBe(false);
     cleanup();
   });
+
+  it("opens the history pane inside a resizable split next to the main panel", async () => {
+    setStoreLoaded({ versions: makeVersions(2), versionHead: 2 });
+    setInvokeHandlers(api, {
+      "session:list-versions": () => ({
+        sessionPath: "",
+        provider: "claude",
+        head: 2,
+        versions: makeVersions(2),
+      }),
+    });
+    render(<SessionEditor />);
+    const user = userEvent.setup();
+    await user.click(screen.getByTestId("history-button"));
+    expect(screen.getByTestId("session-editor-history-split")).toBeTruthy();
+    expect(screen.getByTestId("version-history-panel")).toBeTruthy();
+    expect(
+      screen.getByTestId("session-editor-history-split-second"),
+    ).toHaveStyle({ width: "320px" });
+    cleanup();
+  });
 });
 
 describe("Backup confirmation dialog removed", () => {

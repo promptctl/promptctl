@@ -22,6 +22,41 @@ import { TaskToast } from "./TaskToast";
 import { JsonlLineView } from "./jsonl-view";
 import { newTaskId, useTaskSubscription } from "../store/tasks";
 
+// -- Layout helpers --
+
+// [LAW:single-enforcer] One place decides whether the main panel and the
+// version-history pane are siblings or a resizable split. The structural
+// choice is data-driven (showHistory + the panel) — no callsite branches.
+function MainArea({
+  showHistory,
+  historyPanel,
+  children,
+}: {
+  showHistory: boolean;
+  historyPanel: ReactNode;
+  children: ReactNode;
+}) {
+  if (showHistory) {
+    return (
+      <ResizableSplit
+        orientation="horizontal"
+        side="after"
+        defaultSize={320}
+        minSize={240}
+        maxSize={500}
+        className="h-full flex-1 pl-4"
+        testId="session-editor-history-split"
+      >
+        <div className="flex h-full min-w-0 flex-col">{children}</div>
+        {historyPanel}
+      </ResizableSplit>
+    );
+  }
+  return (
+    <div className="flex h-full min-w-0 flex-1 flex-col pl-4">{children}</div>
+  );
+}
+
 // -- Formatting helpers --
 
 function formatBytes(bytes: number): string {
@@ -1697,7 +1732,18 @@ export function SessionEditor() {
         </div>
       </div>
 
-      <div className="flex h-full min-w-0 flex-1 gap-4 pl-4">
+      <MainArea
+        showHistory={showHistory && selectedSession !== null}
+        historyPanel={
+          <VersionHistoryPanel
+            versions={versions}
+            head={versionHead}
+            onClose={() => setShowHistory(false)}
+            onViewDiff={handleViewDiff}
+            onRestore={handleRestoreVersion}
+          />
+        }
+      >
       {/* Main panel: search results when active, otherwise editor / empty state.
           When peek is open, the main panel splits into results + preview so
           the user can read a session without discarding the search. */}
@@ -2284,17 +2330,7 @@ export function SessionEditor() {
       </div>
       )}
 
-      {/* Version history side panel */}
-      {showHistory && selectedSession && (
-        <VersionHistoryPanel
-          versions={versions}
-          head={versionHead}
-          onClose={() => setShowHistory(false)}
-          onViewDiff={handleViewDiff}
-          onRestore={handleRestoreVersion}
-        />
-      )}
-      </div>
+      </MainArea>
       </ResizableSplit>
 
       {/* Diff viewer modal */}
