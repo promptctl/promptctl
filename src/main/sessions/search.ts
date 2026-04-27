@@ -245,8 +245,11 @@ function buildMatch(
 }
 
 // Spawns rg with --json, line-parses stdout, calls onMatch for every match event.
-// Cancellation: child is spawned with { signal } so abort kills it; we also listen
-// explicitly as belt-and-suspenders for environments that strip the option.
+// Cancellation: a manual signal listener owns child.kill(). We deliberately do
+// NOT pass `{ signal }` to spawn — Node's built-in integration emits an
+// internal AbortError through abort_controller paths that escape vitest's
+// reject-detection window even when we have a child.on('error') handler. The
+// manual listener is the [LAW:single-enforcer] for cancellation here.
 function streamRipgrep(
   query: string,
   roots: string[],
@@ -278,7 +281,7 @@ function streamRipgrep(
       ...roots,
     ];
 
-    const child = spawn(getRgPath(), args, signal ? { signal } : {});
+    const child = spawn(getRgPath(), args);
 
     let aborted = false;
     const onAbort = (): void => {

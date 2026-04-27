@@ -1,4 +1,5 @@
 import { describe, it, expect } from "vitest";
+import { encoding_for_model } from "tiktoken";
 import { countTokens, truncateMiddle } from "./tokenizer";
 
 describe("countTokens", () => {
@@ -47,14 +48,19 @@ describe("truncateMiddle", () => {
 
   it("includes dropped token count in ellipsis", () => {
     const text = "x ".repeat(1000);
-    const result = truncateMiddle(text, 50);
+    const keep = 50;
+    const result = truncateMiddle(text, keep);
     const match = result.match(/(\d+) tokens omitted/);
     if (!match) throw new Error("expected match for 'N tokens omitted'");
     const dropped = parseInt(match[1], 10);
     expect(dropped).toBeGreaterThan(0);
-    // dropped + 2*keep should approximate the original token count
-    const originalTokens = countTokens(text);
-    expect(dropped + 100).toBeCloseTo(originalTokens, -1);
+    // truncateMiddle uses tiktoken internally; dropped is in tiktoken tokens,
+    // not the char-based estimator that countTokens returns. Compare against
+    // tiktoken's own count so the units match.
+    const enc = encoding_for_model("gpt-4o");
+    const originalTokens = enc.encode(text).length;
+    enc.free();
+    expect(dropped).toBe(originalTokens - keep * 2);
   });
 
   it("respects custom keep parameter", () => {
