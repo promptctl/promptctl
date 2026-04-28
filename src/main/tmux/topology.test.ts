@@ -63,7 +63,7 @@ function paneLine(fields: {
 }): string {
   return [
     fields.id ?? "%1",
-    fields.sessionName ?? "main",
+    fields.sessionName ?? "promptctl-test",
     fields.sessionId ?? "$0",
     fields.windowName ?? "shell",
     fields.windowId ?? "@0",
@@ -136,6 +136,9 @@ function makeHarness(): Harness {
     getClient() {
       return client;
     },
+    ownedSessionName() {
+      return "promptctl-test";
+    },
   });
 
   const snapshots: ReturnType<TmuxTopologyTracker["snapshot"]>[] = [];
@@ -189,10 +192,10 @@ describe("TmuxTopologyTracker", () => {
   it("seeds the snapshot from list-panes output on ready", async () => {
     const h = makeHarness();
     h.setListPanesResponse([
-      paneLine({ id: "%1", sessionName: "alpha", windowName: "main" }),
+      paneLine({ id: "%1", sessionName: "promptctl-test", windowName: "main" }),
       paneLine({
         id: "%2",
-        sessionName: "alpha",
+        sessionName: "promptctl-test",
         windowName: "main",
         currentCommand: "vim",
       }),
@@ -360,6 +363,21 @@ describe("TmuxTopologyTracker", () => {
     await flush();
 
     expect(h.tracker.snapshot().panes.map((p) => p.id)).toEqual(["%1"]);
+  });
+
+  it("filters out panes that don't belong to the owned session", async () => {
+    const h = makeHarness();
+    h.setListPanesResponse([
+      paneLine({ id: "%1", sessionName: "promptctl-test" }),
+      paneLine({ id: "%2", sessionName: "work" }), // user's own session
+      paneLine({ id: "%3", sessionName: "promptctl-test" }),
+      paneLine({ id: "%4", sessionName: "scratch" }),
+    ]);
+    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    await flush();
+
+    const ids = h.tracker.snapshot().panes.map((p) => p.id);
+    expect(ids).toEqual(["%1", "%3"]);
   });
 
   it("dispose() removes all listeners and clears state", async () => {

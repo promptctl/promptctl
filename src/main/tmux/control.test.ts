@@ -60,7 +60,8 @@ describe("TmuxControlConnection", () => {
 
     const conn = TmuxControlConnection.start({
       transportFactory: () => transport,
-      serverProbe: async () => true,
+      sessionName: "promptctl-test",
+      bootstrap: async () => undefined,
       reconnectDelayMs: 50,
     });
     conn.onConnectionState((ev) => states.push(ev));
@@ -86,7 +87,8 @@ describe("TmuxControlConnection", () => {
         if (!next) throw new Error("test exhausted transport pool");
         return next;
       },
-      serverProbe: async () => true,
+      sessionName: "promptctl-test",
+      bootstrap: async () => undefined,
       reconnectDelayMs: 10,
     });
 
@@ -110,19 +112,20 @@ describe("TmuxControlConnection", () => {
     expect(events).toEqual([42, 99]);
   });
 
-  it("schedules reconnect when server probe says no server", async () => {
-    let probes = 0;
+  it("schedules reconnect when bootstrap fails on the first attempt", async () => {
+    let bootstraps = 0;
     const transport = new FakeTransport();
     const conn = TmuxControlConnection.start({
+      sessionName: "promptctl-test",
       transportFactory: () => transport,
-      serverProbe: async () => {
-        probes += 1;
-        return probes >= 2;
+      bootstrap: async () => {
+        bootstraps += 1;
+        if (bootstraps < 2) throw new Error("no tmux");
       },
       reconnectDelayMs: 30,
     });
 
-    await waitFor(() => probes >= 2, 1000);
+    await waitFor(() => bootstraps >= 2, 1000);
     await waitFor(() => transport.sent.length > 0, 1000);
     expect(conn.getState().status).toBe("connecting");
 
@@ -138,7 +141,8 @@ describe("TmuxControlConnection", () => {
         factoryCalls += 1;
         return new FakeTransport();
       },
-      serverProbe: async () => false,
+      sessionName: "promptctl-test",
+      bootstrap: async () => { throw new Error("no tmux"); },
       reconnectDelayMs: 10,
     });
 
@@ -160,7 +164,8 @@ describe("TmuxControlConnection", () => {
         if (!next) throw new Error("test exhausted transport pool");
         return next;
       },
-      serverProbe: async () => true,
+      sessionName: "promptctl-test",
+      bootstrap: async () => undefined,
       reconnectDelayMs: 10,
     });
 

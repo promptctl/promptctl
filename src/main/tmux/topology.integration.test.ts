@@ -6,11 +6,14 @@
 // `promptctl-tmux-topology-` so this suite can run alongside the others).
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { execFile, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { spawnTmux } from "tmux-control-mode-js";
 import { TmuxControlConnection } from "./control";
+import { ensureSession } from "./session";
 import { TmuxTopologyTracker } from "./topology";
 import type { TmuxSnapshot } from "../../shared/types";
+
+const OWNED = "promptctl-test-topo";
 
 const RUN_INTEGRATION = process.env.TMUX_INTEGRATION === "1";
 
@@ -32,17 +35,6 @@ function killServer(socket: string): void {
     // boundary, not us. Re-running kill-server on a dead server is the only
     // documented "this is fine" case for failure here.
   }
-}
-
-function probeServer(socket: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile(
-      "tmux",
-      ["-L", socket, "has-session"],
-      { timeout: 1000 },
-      (err) => resolve(err === null),
-    );
-  });
 }
 
 function delay(ms: number): Promise<void> {
@@ -72,7 +64,7 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxTopologyTracker (real tmux)", () => {
 
   beforeEach(() => {
     socket = uniqueSocket();
-    execSync(tmuxCmd(socket, "new-session -d -s topo"), { stdio: "ignore" });
+    // No initial session needed — bootstrap creates the owned one.
   });
 
   afterEach(() => {
@@ -81,14 +73,16 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxTopologyTracker (real tmux)", () => {
 
   it("seeds the snapshot from list-panes when the connection becomes ready", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux([], { socketPath: socket }),
-      serverProbe: () => probeServer(socket),
+      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      sessionName: OWNED,
+      bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
     });
     const tracker = new TmuxTopologyTracker({
       onEvent: (event, handler) => conn.on(event, handler),
       onConnectionState: (listener) => conn.onConnectionState(listener),
       getClient: () => conn.client,
+      ownedSessionName: () => conn.ownedSessionName,
     });
 
     const seen: TmuxSnapshot[] = [];
@@ -105,8 +99,9 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxTopologyTracker (real tmux)", () => {
 
     const snapshot = seen[seen.length - 1];
     expect(snapshot.panes.length).toBeGreaterThanOrEqual(1);
-    // The bootstrap session "topo" must be in the snapshot.
-    expect(snapshot.panes.some((p) => p.sessionName === "topo")).toBe(true);
+    // Every pane in the snapshot must belong to the owned session — the
+    // tracker filters out anything else.
+    expect(snapshot.panes.every((p) => p.sessionName === OWNED)).toBe(true);
 
     tracker.dispose();
     conn.close();
@@ -114,14 +109,16 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxTopologyTracker (real tmux)", () => {
 
   it("reflects a new pane within one event tick of tmux split-window", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux([], { socketPath: socket }),
-      serverProbe: () => probeServer(socket),
+      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      sessionName: OWNED,
+      bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
     });
     const tracker = new TmuxTopologyTracker({
       onEvent: (event, handler) => conn.on(event, handler),
       onConnectionState: (listener) => conn.onConnectionState(listener),
       getClient: () => conn.client,
+      ownedSessionName: () => conn.ownedSessionName,
     });
 
     await conn.ready;
@@ -132,7 +129,7 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxTopologyTracker (real tmux)", () => {
     );
     const before = tracker.snapshot().panes.length;
 
-    execSync(tmuxCmd(socket, "split-window -t topo"), { stdio: "ignore" });
+    execSync(tmuxCmd(socket, `split-window -t ${OWNED}`), { stdio: "ignore" });
 
     await waitFor(
       () => tracker.snapshot().panes.length === before + 1,
@@ -146,22 +143,64 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxTopologyTracker (real tmux)", () => {
     conn.close();
   });
 
-  it("removes a pane within one event tick of tmux kill-window", async () => {
+  it("ignores panes that belong to other sessions on the same server", async () => {
+    // Pre-create a "user" session on the same server. This stands in for
+    // the user's existing tmux work; promptctl must not surface its panes.
+    execSync(tmuxCmd(socket, "new-session -d -s user-work"), {
+      stdio: "ignore",
+    });
+    execSync(tmuxCmd(socket, "split-window -t user-work"), {
+      stdio: "ignore",
+    });
+
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux([], { socketPath: socket }),
-      serverProbe: () => probeServer(socket),
+      transportFactory: () =>
+        spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      sessionName: OWNED,
+      bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
     });
     const tracker = new TmuxTopologyTracker({
       onEvent: (event, handler) => conn.on(event, handler),
       onConnectionState: (listener) => conn.onConnectionState(listener),
       getClient: () => conn.client,
+      ownedSessionName: () => conn.ownedSessionName,
+    });
+
+    await conn.ready;
+    await waitFor(
+      () => tracker.snapshot().panes.length >= 1,
+      5000,
+      "owned session pane appears",
+    );
+
+    // Snapshot must contain ONLY owned-session panes — never user-work's.
+    const snap = tracker.snapshot();
+    expect(snap.panes.every((p) => p.sessionName === OWNED)).toBe(true);
+    expect(snap.panes.some((p) => p.sessionName === "user-work")).toBe(false);
+
+    tracker.dispose();
+    conn.close();
+  });
+
+  it("removes a pane within one event tick of tmux kill-window", async () => {
+    const conn = TmuxControlConnection.start({
+      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      sessionName: OWNED,
+      bootstrap: () => ensureSession(OWNED, socket),
+      reconnectDelayMs: 100,
+    });
+    const tracker = new TmuxTopologyTracker({
+      onEvent: (event, handler) => conn.on(event, handler),
+      onConnectionState: (listener) => conn.onConnectionState(listener),
+      getClient: () => conn.client,
+      ownedSessionName: () => conn.ownedSessionName,
     });
 
     await conn.ready;
     // Add a second window so we can kill it without taking the whole server
     // down.
-    execSync(tmuxCmd(socket, "new-window -t topo"), { stdio: "ignore" });
+    execSync(tmuxCmd(socket, `new-window -t ${OWNED}`), { stdio: "ignore" });
     await waitFor(
       () => tracker.snapshot().panes.length >= 2,
       5000,
@@ -169,7 +208,7 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxTopologyTracker (real tmux)", () => {
     );
     const before = tracker.snapshot().panes.length;
 
-    execSync(tmuxCmd(socket, "kill-window -t topo:1"), { stdio: "ignore" });
+    execSync(tmuxCmd(socket, `kill-window -t ${OWNED}:1`), { stdio: "ignore" });
 
     await waitFor(
       () => tracker.snapshot().panes.length === before - 1,

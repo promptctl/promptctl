@@ -11,9 +11,12 @@
 // and neither touches the developer's default tmux server.
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { execFile, execSync } from "node:child_process";
+import { execSync } from "node:child_process";
 import { spawnTmux } from "tmux-control-mode-js";
 import { TmuxControlConnection } from "./control";
+import { ensureSession } from "./session";
+
+const OWNED = "promptctl-test";
 
 const RUN_INTEGRATION = process.env.TMUX_INTEGRATION === "1";
 
@@ -31,17 +34,6 @@ function killServer(socket: string): void {
   } catch {
     // Server may already be gone.
   }
-}
-
-function probeServer(socket: string): Promise<boolean> {
-  return new Promise((resolve) => {
-    execFile(
-      "tmux",
-      ["-L", socket, "has-session"],
-      { timeout: 1000 },
-      (err) => resolve(err === null),
-    );
-  });
 }
 
 function delay(ms: number): Promise<void> {
@@ -80,8 +72,9 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxControlConnection (real tmux)", () => {
 
   it("connects to a real tmux server and reaches ready", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux([], { socketPath: socket }),
-      serverProbe: () => probeServer(socket),
+      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      sessionName: OWNED,
+      bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
     });
 
@@ -99,8 +92,9 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxControlConnection (real tmux)", () => {
 
   it("survives a kill-server / restart cycle and returns to ready", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux([], { socketPath: socket }),
-      serverProbe: () => probeServer(socket),
+      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      sessionName: OWNED,
+      bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
     });
 
@@ -137,8 +131,9 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxControlConnection (real tmux)", () => {
     // held a reference to the connection (not the raw client) keeps working
     // across reconnects without re-fetching.
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux([], { socketPath: socket }),
-      serverProbe: () => probeServer(socket),
+      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      sessionName: OWNED,
+      bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
     });
 

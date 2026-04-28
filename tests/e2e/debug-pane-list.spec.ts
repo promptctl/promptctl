@@ -24,6 +24,11 @@ import {
 const READY_TIMEOUT_MS = 10_000;
 const TOPOLOGY_TIMEOUT_MS = 3_000;
 
+// Pin the promptctl-owned session name so the test can target it directly.
+// In production this is derived from the install path; the env var override
+// exists for exactly this reason.
+const OWNED_SESSION = "promptctl-e2e-topo";
+
 test.describe("/debug/tmux-control reflects live topology", () => {
   let server: TmuxServerHandle;
   let appHandle: ElectronAppHandle;
@@ -33,6 +38,7 @@ test.describe("/debug/tmux-control reflects live topology", () => {
     appHandle = await launchElectronApp({
       socket: server.socket,
       initialRoute: "/debug/tmux-control",
+      env: { PROMPTCTL_TMUX_SESSION: OWNED_SESSION },
     });
   });
 
@@ -66,11 +72,11 @@ test.describe("/debug/tmux-control reflects live topology", () => {
         ),
     );
 
-    execSync(`tmux -L ${server.socket} split-window -t bootstrap`, {
+    execSync(`tmux -L ${server.socket} split-window -t ${OWNED_SESSION}`, {
       stdio: "ignore",
     });
 
-    // Global pane count goes up by exactly 1 — the new pane in bootstrap.
+    // Global pane count goes up by exactly 1 — the new pane in our session.
     await expect(countLocator).toHaveText(String(beforeCount + 1), {
       timeout: TOPOLOGY_TIMEOUT_MS,
     });
@@ -94,6 +100,36 @@ test.describe("/debug/tmux-control reflects live topology", () => {
     expect(cmdText.length).toBeGreaterThan(0);
   });
 
+  test("ignores panes in sessions outside the promptctl-owned one", async () => {
+    const { window } = appHandle;
+
+    await expect(window.locator("[data-testid=control-status]")).toHaveText(
+      "ready",
+      { timeout: READY_TIMEOUT_MS },
+    );
+
+    const countLocator = window.locator("[data-testid=topology-pane-count]");
+    await window.waitForTimeout(150);
+    const before = Number(await countLocator.textContent());
+
+    // Pre-existing fixture session "bootstrap" + add another window in it.
+    // None of these panes belong to the owned session, so the count must
+    // not change.
+    execSync(`tmux -L ${server.socket} split-window -t bootstrap`, {
+      stdio: "ignore",
+    });
+    execSync(`tmux -L ${server.socket} new-window -t bootstrap`, {
+      stdio: "ignore",
+    });
+
+    // Give the tracker a beat — if the filter were broken, the count would
+    // jump by 2 within ~50ms. We poll for that for 800ms; if it never
+    // happens, the filter is working.
+    await window.waitForTimeout(800);
+    const after = Number(await countLocator.textContent());
+    expect(after).toBe(before);
+  });
+
   test("removes a pane row within one event tick of kill-window", async () => {
     const { window } = appHandle;
 
@@ -109,17 +145,17 @@ test.describe("/debug/tmux-control reflects live topology", () => {
     await window.waitForTimeout(150);
     const before = Number(await countLocator.textContent());
 
-    // Add a second window in bootstrap, then kill it. We use new-window
-    // (not new-session) so the pane lives under the bootstrap session and
-    // surviving session/pane cleanup is automatic.
-    execSync(`tmux -L ${server.socket} new-window -t bootstrap`, {
+    // Add a second window in the owned session, then kill it. Using
+    // new-window (not new-session) keeps the new pane under the owned
+    // session so the topology filter sees it.
+    execSync(`tmux -L ${server.socket} new-window -t ${OWNED_SESSION}`, {
       stdio: "ignore",
     });
     await expect(countLocator).toHaveText(String(before + 1), {
       timeout: TOPOLOGY_TIMEOUT_MS,
     });
 
-    execSync(`tmux -L ${server.socket} kill-window -t bootstrap:1`, {
+    execSync(`tmux -L ${server.socket} kill-window -t ${OWNED_SESSION}:1`, {
       stdio: "ignore",
     });
     await expect(countLocator).toHaveText(String(before), {

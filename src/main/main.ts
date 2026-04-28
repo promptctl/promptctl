@@ -6,6 +6,7 @@ import { createMainBridge } from "tmux-control-mode-js/electron/main";
 import { TmuxStateManager } from "./tmux/state";
 import { PaneOutputManager } from "./tmux/output";
 import { TmuxControlConnection } from "./tmux/control";
+import { ownedSessionName } from "./tmux/session";
 import { TmuxTopologyTracker } from "./tmux/topology";
 import { CommandEngine } from "./command/engine";
 import { loadCommands } from "./command/persistence";
@@ -63,7 +64,16 @@ const outputManager = new PaneOutputManager();
 const commandEngine = new CommandEngine(tmuxState);
 // [LAW:one-source-of-truth] Foundation for the event-driven tmux path; runs
 // alongside the legacy polling stack until 77e.1.3/.4 retire state.ts/output.ts.
-const tmuxControl = TmuxControlConnection.start();
+// The session name is derived deterministically from the install path, so two
+// instances of the same install co-attach to the same session and different
+// installs (dev + prod) get different names without collision.
+// PROMPTCTL_TMUX_SESSION overrides the derived name — used by e2e tests to
+// pin a known target, and available to power users who want a custom name.
+const TMUX_SESSION_NAME =
+  process.env.PROMPTCTL_TMUX_SESSION ?? ownedSessionName(app.getAppPath());
+const tmuxControl = TmuxControlConnection.start({
+  sessionName: TMUX_SESSION_NAME,
+});
 tmuxControl.onConnectionState((ev) => {
   console.log(
     `[tmux-control] ${ev.status}${ev.reason ? `: ${ev.reason}` : ""}`,
@@ -100,6 +110,7 @@ const tmuxTopology = new TmuxTopologyTracker({
   onEvent: (event, handler) => tmuxControl.on(event, handler),
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   getClient: () => tmuxControl.client,
+  ownedSessionName: () => tmuxControl.ownedSessionName,
 });
 let deepLinkServer: Server | null = null;
 

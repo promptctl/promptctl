@@ -90,6 +90,12 @@ export interface TopologyDeps {
   // otherwise. The tracker only invokes commands inside the ready handler,
   // so the null branch is the safety net for racing disconnects.
   getClient(): TopologyClient | null;
+  // The promptctl-owned session name. All observation is scoped to this
+  // session — panes belonging to the user's other sessions on the same
+  // tmux server are invisible to promptctl. The tracker resolves the name
+  // to a SessionId at refresh time (via list-panes output) so kill+recreate
+  // of the session by an external client transparently re-binds.
+  ownedSessionName(): string;
 }
 
 export type TopologyListener = (snapshot: TmuxSnapshot) => void;
@@ -195,8 +201,13 @@ export class TmuxTopologyTracker {
     if (resp === null || !resp.success) return;
     if (generation !== this.refreshGeneration) return;
     const stdout = resp.output.join("\n");
-    const list = parsePaneList(stdout);
-    this.panes = new Map(list.map((p) => [p.id, p] as const));
+    const allPanes = parsePaneList(stdout);
+    // [LAW:dataflow-not-control-flow] Filter is a predicate over data, not a
+    // branch that skips work. Same code path runs whether one pane matches
+    // or all of them do; non-matching panes are simply not in the result.
+    const ownedName = this.deps.ownedSessionName();
+    const ownedPanes = allPanes.filter((p) => p.sessionName === ownedName);
+    this.panes = new Map(ownedPanes.map((p) => [p.id, p] as const));
     this.broadcast();
   }
 

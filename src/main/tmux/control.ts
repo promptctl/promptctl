@@ -18,7 +18,7 @@ import {
   type TmuxEventMap,
   type TmuxTransport,
 } from "tmux-control-mode-js";
-import { tmuxExec } from "./exec";
+import { ensureSession } from "./session";
 
 export type ConnectionStatus = "connecting" | "ready" | "closed";
 
@@ -32,13 +32,18 @@ export interface ConnectionStateEvent {
 }
 
 export interface TmuxControlConnectionOptions {
-  // Transport factory — overridable for tests. Default attaches via the library.
+  // Promptctl-owned session name. The connection bootstraps this session
+  // (creates if missing, attaches if it exists) before the control client
+  // attaches. Required — every connection is scoped to a named session.
+  readonly sessionName: string;
+  // Transport factory — overridable for tests. Default spawns the control
+  // client with `attach-session -t <sessionName>` baked in so tmux never
+  // has the chance to create an anonymous session.
   readonly transportFactory?: () => TmuxTransport;
-  // Predicate to decide whether a tmux server is currently running. Default
-  // shells `tmux has-session` once before each connect attempt. The control
-  // ticket is explicit: do NOT auto-spawn a server. Without this check
-  // `tmux -C` would create one.
-  readonly serverProbe?: () => Promise<boolean>;
+  // Bootstrap step: ensure the session exists. Default shells
+  // `tmux new-session -A -s <name> -d` (idempotent). Overridable for tests
+  // so unit suites don't need a real tmux binary on PATH.
+  readonly bootstrap?: () => Promise<void>;
   // Backoff between reconnect attempts.
   readonly reconnectDelayMs?: number;
 }
@@ -57,8 +62,9 @@ interface PendingClientListener {
 export class TmuxControlConnection {
   private static instance: TmuxControlConnection | null = null;
 
+  private readonly sessionName: string;
   private readonly transportFactory: () => TmuxTransport;
-  private readonly serverProbe: () => Promise<boolean>;
+  private readonly bootstrap: () => Promise<void>;
   private readonly reconnectDelayMs: number;
   private readonly stateListeners = new Set<StateListener>();
   private readonly clientListeners: PendingClientListener[] = [];
@@ -74,26 +80,34 @@ export class TmuxControlConnection {
 
   private reconnectAttempts = 0;
 
-  private constructor(options?: TmuxControlConnectionOptions) {
+  private constructor(options: TmuxControlConnectionOptions) {
     // [LAW:dataflow-not-control-flow] PROMPTCTL_TMUX_SOCKET is read once into a
-    // value; the same factory and probe paths run regardless of whether it is
-    // set — only the data (socketPath / -L args) varies.
+    // value; the same factory and bootstrap paths run regardless of whether
+    // it is set — only the data (socketPath / -L args) varies.
     const envSocket = process.env.PROMPTCTL_TMUX_SOCKET ?? null;
+    const sessionName = options.sessionName;
+    this.sessionName = sessionName;
     this.transportFactory =
-      options?.transportFactory ??
-      (() =>
-        envSocket === null
-          ? spawnTmux([])
-          : spawnTmux([], { socketPath: envSocket }));
-    this.serverProbe = options?.serverProbe ?? makeDefaultServerProbe(envSocket);
-    this.reconnectDelayMs = options?.reconnectDelayMs ?? 2000;
+      options.transportFactory ??
+      (() => {
+        // [LAW:single-enforcer] All transport spawns route through here so
+        // the `attach-session -t <name>` argv is never bypassed — that's
+        // what prevents tmux from inventing an anonymous session.
+        const args = ["attach-session", "-t", sessionName];
+        return envSocket === null
+          ? spawnTmux(args)
+          : spawnTmux(args, { socketPath: envSocket });
+      });
+    this.bootstrap =
+      options.bootstrap ?? (() => ensureSession(sessionName, envSocket));
+    this.reconnectDelayMs = options.reconnectDelayMs ?? 2000;
     this._ready = new Promise<void>((resolve) => {
       this.readyResolve = resolve;
     });
   }
 
   static start(
-    options?: TmuxControlConnectionOptions,
+    options: TmuxControlConnectionOptions,
   ): TmuxControlConnection {
     if (TmuxControlConnection.instance !== null) {
       return TmuxControlConnection.instance;
@@ -114,6 +128,13 @@ export class TmuxControlConnection {
 
   get ready(): Promise<void> {
     return this._ready;
+  }
+
+  // The promptctl-owned session this connection is attached to. Stable for
+  // the lifetime of the singleton; downstream consumers (topology tracker,
+  // launch registry) read this to scope their observations.
+  get ownedSessionName(): string {
+    return this.sessionName;
   }
 
   get client(): TmuxClient | null {
@@ -170,10 +191,10 @@ export class TmuxControlConnection {
     if (this.closed) return;
     this.setStatus("connecting");
 
-    const serverRunning = await this.probeServer();
+    const bootstrapped = await this.runBootstrap();
     if (this.closed) return;
-    if (!serverRunning) {
-      this.setStatus("closed", "no tmux server");
+    if (!bootstrapped) {
+      // bootstrap already set the failure reason on the status.
       this.scheduleReconnect();
       return;
     }
@@ -205,13 +226,16 @@ export class TmuxControlConnection {
     this.readyResolve();
   }
 
-  private async probeServer(): Promise<boolean> {
+  private async runBootstrap(): Promise<boolean> {
     try {
-      return await this.serverProbe();
+      await this.bootstrap();
+      return true;
     } catch (err) {
-      // Probe blew up (e.g. tmux binary missing). Treat as no server and
-      // back off — the next attempt will retry the probe.
-      this.statusReason = errorMessage(err);
+      // Bootstrap blew up — most commonly because the tmux binary is
+      // missing on PATH. Treat as not-ready and back off; the next attempt
+      // will retry. The reason carries the underlying tmux/exec message
+      // so the debug surface shows a real diagnostic.
+      this.setStatus("closed", errorMessage(err));
       return false;
     }
   }
@@ -263,22 +287,6 @@ export class TmuxControlConnection {
       listener(event);
     }
   }
-}
-
-function makeDefaultServerProbe(socketPath: string | null): () => Promise<boolean> {
-  // [LAW:dataflow-not-control-flow] socketPath is data on the args list; the
-  // same execution path runs for the env-var-set and unset cases.
-  const args = socketPath === null
-    ? ["has-session"]
-    : ["-L", socketPath, "has-session"];
-  return async () => {
-    try {
-      await tmuxExec(args);
-      return true;
-    } catch {
-      return false;
-    }
-  };
 }
 
 function errorMessage(err: unknown): string {
