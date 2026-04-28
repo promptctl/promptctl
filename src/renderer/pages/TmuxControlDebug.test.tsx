@@ -1,8 +1,11 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { installElectronMock, setInvokeHandlers } from "../../test/electron-mock";
+import type { TmuxSnapshot } from "../../shared/types";
 import type { TmuxControlState } from "../env";
 import { TmuxControlDebug } from "./TmuxControlDebug";
+
+const EMPTY_TOPOLOGY: TmuxSnapshot = { timestamp: 0, panes: [] };
 
 beforeEach(() => {
   const api = installElectronMock();
@@ -14,6 +17,7 @@ beforeEach(() => {
       reason: "no tmux server",
       reconnectAttempts: 0,
     }),
+    "tmux:topology:get": (): TmuxSnapshot => EMPTY_TOPOLOGY,
   });
 });
 
@@ -43,6 +47,7 @@ describe("TmuxControlDebug", () => {
         status: "connecting",
         reconnectAttempts: 0,
       }),
+      "tmux:topology:get": (): TmuxSnapshot => EMPTY_TOPOLOGY,
     });
 
     render(<TmuxControlDebug />);
@@ -87,6 +92,7 @@ describe("TmuxControlDebug", () => {
         status: "ready",
         reconnectAttempts: 0,
       }),
+      "tmux:topology:get": (): TmuxSnapshot => EMPTY_TOPOLOGY,
     });
 
     render(<TmuxControlDebug />);

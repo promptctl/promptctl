@@ -1,13 +1,15 @@
 // [LAW:dataflow-not-control-flow] The page is a pure projection of the
-// connection-state hook. The same JSX renders for every status; only the
-// values inside the testid spans change. No `if (status === "ready")` branches
-// gate elements off the tree — assertions can read them deterministically
-// across every transition.
+// connection-state and topology hooks. The same JSX renders for every status
+// and pane count; only the values inside the testid spans/rows change. No
+// `if (status === "ready")` branches gate elements off the tree —
+// assertions can read them deterministically across every transition.
 
-import { useControlState } from "../tmux/proxy";
+import type { TmuxPane } from "../../shared/types";
+import { useControlState, useTopology } from "../tmux/proxy";
 
 export function TmuxControlDebug() {
   const state = useControlState();
+  const topology = useTopology();
 
   return (
     <div className="flex h-full flex-col gap-4 bg-neutral-950 p-6 text-sm text-neutral-200">
@@ -44,7 +46,85 @@ export function TmuxControlDebug() {
           {state.reconnectAttempts}
         </span>
       </section>
+
+      <section className="flex w-full flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
+        <div className="flex items-baseline justify-between">
+          <h2 className="font-mono text-xs uppercase tracking-wide text-neutral-400">
+            panes
+          </h2>
+          <span
+            data-testid="topology-pane-count"
+            className="font-mono text-xs text-neutral-500"
+          >
+            {topology.panes.length}
+          </span>
+        </div>
+        <PaneTable panes={topology.panes} />
+      </section>
     </div>
+  );
+}
+
+function PaneTable({ panes }: { panes: readonly TmuxPane[] }) {
+  return (
+    <div
+      data-testid="topology-pane-table"
+      className="grid grid-cols-[8rem_8rem_8rem_4rem_1fr_6rem] gap-x-3 gap-y-1 font-mono text-xs"
+    >
+      <HeaderCell>pane</HeaderCell>
+      <HeaderCell>session</HeaderCell>
+      <HeaderCell>window</HeaderCell>
+      <HeaderCell>pid</HeaderCell>
+      <HeaderCell>cmd · cwd</HeaderCell>
+      <HeaderCell>size</HeaderCell>
+      {panes.map((pane) => (
+        <PaneRow key={pane.id} pane={pane} />
+      ))}
+    </div>
+  );
+}
+
+function HeaderCell({ children }: { children: React.ReactNode }) {
+  return <span className="text-neutral-500">{children}</span>;
+}
+
+function PaneRow({ pane }: { pane: TmuxPane }) {
+  // Identity cell uses data-pane-row (a distinct attribute) so e2e tests
+  // count rows with `[data-pane-row]` without colliding with the per-cell
+  // testids below. The testid still embeds the raw pane id (e.g. `%17`)
+  // for direct selection.
+  const idTestId = `pane-row-${pane.id}`;
+  return (
+    <>
+      <span
+        data-pane-row={pane.id}
+        data-testid={idTestId}
+        className="text-cyan-300"
+      >
+        {pane.id}
+        {pane.active ? " *" : ""}
+      </span>
+      <span data-testid={`${idTestId}-session`} className="text-neutral-300">
+        {pane.sessionName}
+      </span>
+      <span data-testid={`${idTestId}-window`} className="text-neutral-300">
+        {pane.windowName}
+      </span>
+      <span data-testid={`${idTestId}-pid`} className="text-neutral-400">
+        {pane.pid}
+      </span>
+      <span
+        data-testid={`${idTestId}-cmd`}
+        className="truncate text-neutral-200"
+        title={pane.currentPath}
+      >
+        <span className="text-amber-300">{pane.currentCommand || "—"}</span>
+        <span className="text-neutral-500"> · {pane.currentPath || "—"}</span>
+      </span>
+      <span data-testid={`${idTestId}-size`} className="text-neutral-500">
+        {pane.width}×{pane.height}
+      </span>
+    </>
   );
 }
 

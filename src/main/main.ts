@@ -6,10 +6,12 @@ import { createMainBridge } from "tmux-control-mode-js/electron/main";
 import { TmuxStateManager } from "./tmux/state";
 import { PaneOutputManager } from "./tmux/output";
 import { TmuxControlConnection } from "./tmux/control";
+import { TmuxTopologyTracker } from "./tmux/topology";
 import { CommandEngine } from "./command/engine";
 import { loadCommands } from "./command/persistence";
 import { registerTmuxHandlers } from "./ipc/tmux-handlers";
 import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
+import { registerTmuxTopologyHandlers } from "./ipc/tmux-topology-handlers";
 import { registerCommandHandlers } from "./ipc/command-handlers";
 import { registerSessionHandlers } from "./ipc/session-handlers";
 import { registerPromptHandlers } from "./ipc/prompt-handlers";
@@ -89,6 +91,15 @@ tmuxControl.onConnectionState((ev) => {
     tmuxBridge.dispose();
     tmuxBridge = null;
   }
+});
+
+// [LAW:one-source-of-truth] Single tracker per process; the IPC handler
+// fans its snapshots out to every renderer. Topology runs alongside the
+// legacy TmuxStateManager polling until the cutover slice retires it.
+const tmuxTopology = new TmuxTopologyTracker({
+  onEvent: (event, handler) => tmuxControl.on(event, handler),
+  onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
+  getClient: () => tmuxControl.client,
 });
 let deepLinkServer: Server | null = null;
 
@@ -213,6 +224,7 @@ app.whenReady().then(async () => {
   registerProvider(claudeAdapter);
   registerTmuxHandlers(tmuxState, outputManager);
   registerTmuxControlHandlers(tmuxControl);
+  registerTmuxTopologyHandlers(tmuxTopology);
   registerCommandHandlers(commandEngine);
   registerSessionHandlers();
   registerPromptHandlers();
@@ -271,6 +283,7 @@ app.on("before-quit", async () => {
     tmuxBridge.dispose();
     tmuxBridge = null;
   }
+  tmuxTopology.dispose();
   tmuxControl.close();
   await outputManager.unwatchAll();
   await shutdownProxy();

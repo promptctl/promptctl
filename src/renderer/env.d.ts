@@ -54,7 +54,9 @@ export interface ElectronAPI {
   send(channel: "tmux:watch-pane" | "tmux:unwatch-pane", paneId: string): void;
   send(channel: string, ...args: unknown[]): void;
 
-  invoke(channel: "tmux:snapshot"): Promise<TmuxSnapshot>;
+  invoke(
+    channel: "tmux:snapshot" | "tmux:topology:get",
+  ): Promise<TmuxSnapshot>;
   invoke(
     channel: "tmux:send-keys",
     paneId: string,
@@ -187,7 +189,7 @@ export interface ElectronAPI {
   writeClipboard(text: string): void;
 
   on(
-    channel: "tmux:snapshot",
+    channel: "tmux:snapshot" | "tmux:topology",
     listener: (snapshot: TmuxSnapshot) => void,
   ): () => void;
   on(

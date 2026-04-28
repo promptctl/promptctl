@@ -7,7 +7,11 @@ import type {
 } from "../../shared/types";
 import { tmuxExec } from "./exec";
 
-const PANE_FORMAT = [
+// [LAW:one-source-of-truth] One format string for the entire app's pane
+// queries. Both the legacy polling stack (discoverPanes) and the new
+// event-driven TmuxTopologyTracker parse panes from this exact field order
+// via parsePaneList — keep them aligned and a future cutover stays trivial.
+export const PANE_FORMAT = [
   "#{pane_id}",
   "#{session_name}",
   "#{session_id}",

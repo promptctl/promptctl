@@ -14,6 +14,7 @@ import {
   type TmuxClientProxy,
 } from "tmux-control-mode-js/electron/renderer";
 import type { TmuxControlState } from "../env";
+import type { TmuxSnapshot } from "../../shared/types";
 
 let proxyInstance: TmuxClientProxy | null = null;
 
@@ -53,4 +54,29 @@ export function useControlState(): TmuxControlState {
   }, []);
 
   return state;
+}
+
+const INITIAL_TOPOLOGY: TmuxSnapshot = { timestamp: 0, panes: [] };
+
+// [LAW:dataflow-not-control-flow] Same shape as useControlState — seed via
+// the get-channel, update via broadcasts. The render path doesn't branch on
+// "is the topology populated"; an empty panes array renders an empty list.
+export function useTopology(): TmuxSnapshot {
+  const [snapshot, setSnapshot] = useState<TmuxSnapshot>(INITIAL_TOPOLOGY);
+
+  useEffect(() => {
+    let alive = true;
+    const off = window.electronAPI.on("tmux:topology", (next) => {
+      if (alive) setSnapshot(next);
+    });
+    void window.electronAPI.invoke("tmux:topology:get").then((current) => {
+      if (alive) setSnapshot(current);
+    });
+    return () => {
+      alive = false;
+      off();
+    };
+  }, []);
+
+  return snapshot;
 }
