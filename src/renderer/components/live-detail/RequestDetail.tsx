@@ -8,6 +8,8 @@ import { RawTab } from "./RawTab";
 import { RequestTab } from "./RequestTab";
 import { ResponseTab } from "./ResponseTab";
 import { SseTimelineTab } from "./SseTimelineTab";
+import { ChainSparkline } from "./ChainSparkline";
+import { useLiveTickNs } from "./latency";
 import {
   ChainStopReasonStrip,
   StopReasonChip,
@@ -36,6 +38,7 @@ export function RequestDetail({
   onSelectRequest?: (requestId: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const nowNs = useLiveTickNs();
   const stopReason =
     record.assembledResponse?.stop_reason ??
     (record.state === "complete" ? "end_turn" : null);
@@ -61,11 +64,19 @@ export function RequestDetail({
           }
         >
           {chain !== null && chain.length > 1 && onSelectRequest ? (
-            <ChainStopReasonStrip
-              chain={chain}
-              selectedRequestId={record.requestId}
-              onSelectRequest={onSelectRequest}
-            />
+            <div className="flex items-center gap-3">
+              <ChainStopReasonStrip
+                chain={chain}
+                selectedRequestId={record.requestId}
+                onSelectRequest={onSelectRequest}
+              />
+              <ChainSparkline
+                chain={chain}
+                selectedRequestId={record.requestId}
+                onSelectRequest={onSelectRequest}
+                nowNs={nowNs}
+              />
+            </div>
           ) : null}
         </div>
         <ErrorBanner error={record.error} />

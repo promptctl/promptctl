@@ -63,7 +63,7 @@ describe("Live", () => {
     // explicit pixel width so users can drag it.
     expect(screen.getByTestId("live-split-first")).toHaveStyle({ width: "800px" });
     expect(screen.getAllByText(/req-a/)[0].closest("button")).toHaveClass(
-      "grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_20rem]",
+      "grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_28rem]",
     );
 
     const user = userEvent.setup();

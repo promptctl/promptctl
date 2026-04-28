@@ -2,6 +2,7 @@
 // projections from the store; live capture and replay share the same path.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RequestDetail } from "../components/live-detail";
+import { LatencyBadges } from "../components/live-detail/LatencyBadges";
 import { UsageAggregate } from "../components/live-detail/UsageAggregate";
 import { UsageBadges } from "../components/live-detail/UsageBadges";
 import {
@@ -298,7 +299,7 @@ function RequestRow({
         onClick={onToggle}
         data-depth={depth}
         data-lineage={isContinuation ? "continuation" : "root"}
-        className={`grid w-full grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_20rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
+        className={`grid w-full grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_28rem] gap-2 border-l-2 px-3 py-2 text-left hover:bg-neutral-900 ${
           selected
             ? "border-l-cyan-400 bg-neutral-800 hover:bg-neutral-800"
             : "border-l-transparent"
@@ -325,7 +326,10 @@ function RequestRow({
           </span>
         </span>
         {/* [LAW:one-source-of-truth] Row usage is read from assembledResponse only; streaming rows pass null through the same renderer. */}
-        <UsageBadges usage={record.assembledResponse?.usage ?? null} />
+        <span className="flex items-center gap-3">
+          <UsageBadges usage={record.assembledResponse?.usage ?? null} />
+          <LatencyBadges record={record} />
+        </span>
       </button>
     </div>
   );
