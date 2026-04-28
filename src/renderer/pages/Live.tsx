@@ -10,6 +10,7 @@ import {
   tabClass,
 } from "../components/live-detail/format";
 import { computeLineage, type LineageInfo } from "../components/live-detail/lineage";
+import { buildChain } from "../components/live-detail/stop-reason";
 import { ResizableSplit } from "../components/ResizableSplit";
 import { useProxyStore, visibleRequests } from "../store/proxy";
 import type { ClientInfo, RequestRecord } from "../../shared/proxy-events";
@@ -43,6 +44,18 @@ export function Live() {
       : (requests.find(
           (record) => record.requestId === state.selectedRequestId,
         ) ?? null);
+  const recordsById = useMemo(() => {
+    const map = new Map<string, RequestRecord>();
+    for (const r of requests) map.set(r.requestId, r);
+    return map;
+  }, [requests]);
+  const chain = useMemo(
+    () =>
+      selectedRecord === null
+        ? null
+        : buildChain(selectedRecord, lineage, recordsById),
+    [selectedRecord, lineage, recordsById],
+  );
   const requestCount = state.requests.size;
 
   useEffect(() => {
@@ -132,6 +145,8 @@ export function Live() {
           <RequestDetail
             record={selectedRecord}
             lineage={lineage.get(selectedRecord.requestId) ?? null}
+            chain={chain}
+            onSelectRequest={toggleRequest}
           />
         )}
       </ResizableSplit>

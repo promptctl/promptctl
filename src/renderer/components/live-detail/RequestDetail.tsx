@@ -8,6 +8,10 @@ import { RawTab } from "./RawTab";
 import { RequestTab } from "./RequestTab";
 import { ResponseTab } from "./ResponseTab";
 import { SseTimelineTab } from "./SseTimelineTab";
+import {
+  ChainStopReasonStrip,
+  StopReasonChip,
+} from "./stop-reason";
 
 type TabId = "overview" | "request" | "diff" | "response" | "timeline" | "raw";
 
@@ -23,17 +27,46 @@ const TABS: { id: TabId; label: string }[] = [
 export function RequestDetail({
   record,
   lineage = null,
+  chain = null,
+  onSelectRequest,
 }: {
   record: RequestRecord;
   lineage?: LineageInfo | null;
+  chain?: RequestRecord[] | null;
+  onSelectRequest?: (requestId: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
+  const stopReason =
+    record.assembledResponse?.stop_reason ??
+    (record.state === "complete" ? "end_turn" : null);
 
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col border-l border-neutral-800 bg-neutral-950">
       <div className="border-b border-neutral-800 px-4 py-3">
-        <div className="mb-3 min-w-0 truncate font-mono text-sm text-neutral-200">
-          {record.method || "?"} {record.url || "(unknown url)"}
+        <div className="mb-2 flex min-w-0 items-center gap-2">
+          <div className="min-w-0 flex-1 truncate font-mono text-sm text-neutral-200">
+            {record.method || "?"} {record.url || "(unknown url)"}
+          </div>
+          {/* [LAW:single-enforcer] stop_reason styling lives in stop-reason.tsx; this is one of two callsites. */}
+          <StopReasonChip
+            stopReason={stopReason}
+            testId="request-stop-reason-chip"
+          />
+        </div>
+        {/* [LAW:dataflow-not-control-flow] chain strip always renders; an empty/single-entry chain is a stable rendered state. */}
+        <div
+          aria-hidden={chain === null || chain.length <= 1}
+          className={
+            chain === null || chain.length <= 1 ? "hidden" : "mb-3"
+          }
+        >
+          {chain !== null && chain.length > 1 && onSelectRequest ? (
+            <ChainStopReasonStrip
+              chain={chain}
+              selectedRequestId={record.requestId}
+              onSelectRequest={onSelectRequest}
+            />
+          ) : null}
         </div>
         <ErrorBanner error={record.error} />
         <div className="flex flex-wrap items-center gap-2 text-xs">

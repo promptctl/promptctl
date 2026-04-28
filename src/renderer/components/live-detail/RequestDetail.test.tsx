@@ -30,7 +30,10 @@ describe("RequestDetail", () => {
     expect(screen.getByTestId("usage-pill-cache-creation")).toHaveTextContent(
       "cache+4",
     );
-    expect(screen.getByText("end_turn")).toBeInTheDocument();
+    expect(screen.getAllByText("end_turn").length).toBeGreaterThan(0);
+    expect(screen.getByTestId("request-stop-reason-chip")).toHaveTextContent(
+      "end_turn",
+    );
     expect(screen.getByText("+0.0ms")).toBeInTheDocument();
     expect(screen.getByText("+15.0ms")).toBeInTheDocument();
     expect(screen.getByText("+30.0ms")).toBeInTheDocument();
