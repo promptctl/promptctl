@@ -1,6 +1,8 @@
 // [LAW:single-enforcer] Single message renderer for the Request tab and the
-// Diff tab — shape, color, and expand behavior are defined once.
+// Diff tab. Per-block rendering dispatches through `renderBlock` (blocks.tsx)
+// — this file owns the message envelope (role chip, label, expand state).
 import { JsonlLineView } from "../jsonl-view/JsonlLineView";
+import { blockKey, renderBlock } from "./blocks";
 
 export function MessageView({
   message,
@@ -30,7 +32,9 @@ export function MessageView({
         {Array.isArray(content) ? (
           <div className="space-y-2 p-3">
             {content.map((block, blockIndex) => (
-              <JsonCard key={jsonKey(block, blockIndex)} value={block} />
+              <div key={blockKey(block, blockIndex)}>
+                {renderBlock(block, { index: blockIndex })}
+              </div>
             ))}
           </div>
         ) : (
@@ -46,21 +50,8 @@ export function messageKey(message: unknown, index: number): string {
   return typeof body?.id === "string" ? body.id : `message-${index}`;
 }
 
-function JsonCard({ value }: { value: unknown }) {
-  return (
-    <div className="rounded border border-neutral-800 bg-neutral-900/50">
-      <JsonlLineView raw={value} />
-    </div>
-  );
-}
-
 function asRecord(value: unknown): Record<string, unknown> | null {
   return typeof value === "object" && value !== null && !Array.isArray(value)
     ? (value as Record<string, unknown>)
     : null;
-}
-
-function jsonKey(value: unknown, index: number): string {
-  const body = asRecord(value);
-  return typeof body?.id === "string" ? body.id : `json-${index}`;
 }
