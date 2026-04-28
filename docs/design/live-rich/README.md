@@ -19,18 +19,17 @@ cc-dump is a TUI bound by terminal layout — single-column scrolling buffer, no
 
 Designs in this doc exploit these and do not port cc-dump's compromises forward.
 
-## 1. The cornerstone insight
+## 1. What's actually the foundation
 
-Anthropic's Messages API resends the entire conversation on every request. In an N-turn chain, message #1 appears in N requests. The Request tab today renders message #1 N times and renders the same `tool_use` block N times whenever Claude Code re-sends it. This is unreadable past 3 turns.
+**Wire-level visibility is the cornerstone.** Users need to see exactly what's going down the wire — raw request body, raw response, SSE event stream, headers — without interpretation getting in the way. The existing Request / Response / SSE Timeline / Raw tabs already do this and stay the load-bearing surface. Every rich visualization in this epic is a *projection* layered on top of those raw tabs, never a replacement for them.
 
-The deduped conversation view is the central UX move. Once the Live tab projects a chain into a single timeline of *unique* messages, several of the proposed sub-features collapse from independent panels into annotations on that timeline:
+The block renderer registry (§3.2) is the most important piece of new foundation, because it gives us structured rendering of `tool_use`, `tool_result`, and `thinking` blocks **inside the existing per-request Request tab**. That alone is the single biggest readability jump and doesn't require any cross-request projection.
 
-- `tool_use` and its paired `tool_result` are adjacent timeline blocks (the result is a `user` message that appears in the next request).
-- Stop-reason becomes a labeled marker between turns in the timeline.
-- "Prompt diff across chain" becomes a highlight on the first turn whose system/tools differ from the previous turn.
-- Search highlights blocks within the timeline rather than within a per-request soup.
+### 1.1 The dedupe insight (planned, not first)
 
-Latency, content-addressed prompts, filter chips, and search remain orthogonal — they're list-level or cross-chain concerns, not within-chain.
+Anthropic's Messages API resends the entire conversation on every request. In an N-turn chain, message #1 appears in N requests. The Request tab today re-renders the full message list every time. A deduped conversation timeline is the right end-state for understanding a chain, and several other features (stop-reason flow, prompt-diff highlights, intra-chain search) read more naturally as annotations on it than as separate panels.
+
+But it's not a prerequisite. Stop-reason flow can render as a per-request strip + a chain-level chip row in the request list. Search can highlight content within the existing Request tab. Latency, prompt hashing, and filter chips are list-level concerns. We plan and design for the timeline now (§2, §3) so the dedupe-friendly data shape is decided up front, but impl tickets are independently shippable.
 
 ## 2. Shared data model
 
@@ -85,9 +84,16 @@ Caveat: streaming requests' assistant content updates as deltas arrive. The chai
 
 Lit ticket: `ac1.6.2` <a id="conversation"></a>
 
-### 3.1 Layout
+### 3.0 Two-stage scope
 
-Replace the current Request tab with a `ConversationTimeline` component. The Diff tab stays for now (covered by chain-diff section below); it remains useful as a "just the new bits" view.
+This ticket has two distinct deliverables. **Stage A is required; Stage B can ship later or as a follow-up ticket.** Splitting them lets the high-value block registry land without being gated on the dedupe projection.
+
+- **Stage A — Block renderer registry (§3.2, §3.3).** Plug into the existing Request, Diff, and Response tabs. Replaces raw JSON cards for `tool_use`, `tool_result`, `thinking`, and `text` with structured cards. Wire-level Raw / SSE Timeline tabs are untouched. **This is the single biggest readability jump.**
+- **Stage B — `ConversationTimeline` view (§3.1).** A new tab on RequestDetail that renders the deduped chain projection. Sits next to the existing Request tab, not in place of it.
+
+### 3.1 Layout (Stage B)
+
+Add a new tab `Conversation` on RequestDetail, between `Request` and `Diff`. The existing Request tab stays — wire visibility is non-negotiable. The Diff tab also stays as the "just the new bits" view.
 
 ```
 ┌───────────────────────────────────────────┐
@@ -162,11 +168,12 @@ export function renderBlock(block: AnthropicContentBlock, ctx: BlockCtx): ReactN
 
 Lit ticket: `ac1.6.3` <a id="stop-reason"></a>
 
-Subsumed by the timeline projection. `request_boundary` entries already carry `stopReason`. This ticket's scope is the styling and interactions:
+This ticket does not depend on the dedupe timeline. Two surfaces, both built directly on `RequestRecord` and the existing lineage:
 
-- Color-coded by stop_reason: `tool_use` → cyan, `end_turn` → neutral, `max_tokens` → amber, `stop_sequence` → violet, `null` (in-flight) → animated pulse.
-- Click expands an inline panel showing the full `message_delta` envelope.
-- Above the timeline (sticky), a horizontal mini-flow shows the sequence of stop_reasons across the entire chain as colored chips: `[tool_use] → [tool_use] → [end_turn]`. Clicking a chip scrolls to that boundary.
+- **Per-request strip** in `RequestDetail`'s header (next to the URL line): a colored chip showing this request's stop_reason. Color-coded — `tool_use` → cyan, `end_turn` → neutral, `max_tokens` → amber, `stop_sequence` → violet, `null` (in-flight) → animated pulse. Click expands an inline panel showing the full `message_delta` envelope.
+- **Chain mini-flow** above the request list (or in the existing `RequestRow` lineage region): for the selected chain, a horizontal sequence of stop_reason chips `[tool_use] → [tool_use] → [end_turn]`. Clicking a chip selects that request.
+
+When the dedupe timeline (Stage B of `ac1.6.2`) ships, the chain mini-flow becomes a sticky header above the timeline — same data, same chips, just relocated. The per-request strip stays in the header regardless.
 
 **Acceptance:**
 - One snapshot per stop_reason kind.
@@ -300,7 +307,8 @@ Default scope: selected client. Toggle button `[Global]` switches to all clients
 ### 8.3 Highlights
 
 - Request list: matching rows get a yellow dot in the leftmost column. Non-matching rows dim to 50% opacity (still clickable, so the user can see structure).
-- Within the conversation timeline of a selected matching request: matching block content is wrapped in `<mark>` and the first match is auto-scrolled into view.
+- Within the selected request's existing detail tabs (Request, Response, Raw): matching text wrapped in `<mark>`; first match auto-scrolled into view. The block renderer registry from `ac1.6.2` Stage A passes a `highlightSubstring` prop through to each block renderer; the wire-level Raw tab does its own substring marking on the raw text.
+- When the dedupe timeline (Stage B of `ac1.6.2`) ships, the same `<mark>` wrapping applies inside its block renderers automatically — no search rewrite needed.
 
 ### 8.4 Live updates
 
