@@ -13,6 +13,8 @@ import { loadCommands } from "./command/persistence";
 import { registerTmuxHandlers } from "./ipc/tmux-handlers";
 import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
 import { registerTmuxTopologyHandlers } from "./ipc/tmux-topology-handlers";
+import { TmuxOutputRouter } from "./tmux/output-router";
+import { registerTmuxOutputHandlers } from "./ipc/tmux-output-handlers";
 import { registerCommandHandlers } from "./ipc/command-handlers";
 import { registerSessionHandlers } from "./ipc/session-handlers";
 import { registerPromptHandlers } from "./ipc/prompt-handlers";
@@ -111,6 +113,11 @@ const tmuxTopology = new TmuxTopologyTracker({
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   getClient: () => tmuxControl.client,
   ownedSessionName: () => tmuxControl.ownedSessionName,
+});
+const tmuxOutputRouter = new TmuxOutputRouter({
+  onEvent: (event, handler) => tmuxControl.on(event, handler),
+  onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
+  getClient: () => tmuxControl.client,
 });
 let deepLinkServer: Server | null = null;
 
@@ -236,6 +243,7 @@ app.whenReady().then(async () => {
   registerTmuxHandlers(tmuxState, outputManager);
   registerTmuxControlHandlers(tmuxControl);
   registerTmuxTopologyHandlers(tmuxTopology);
+  registerTmuxOutputHandlers(tmuxOutputRouter);
   registerCommandHandlers(commandEngine);
   registerSessionHandlers();
   registerPromptHandlers();
@@ -295,6 +303,7 @@ app.on("before-quit", async () => {
     tmuxBridge = null;
   }
   tmuxTopology.dispose();
+  tmuxOutputRouter.dispose();
   tmuxControl.close();
   await outputManager.unwatchAll();
   await shutdownProxy();

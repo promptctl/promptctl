@@ -60,6 +60,21 @@ export interface PaneOutputChunk {
   timestamp: number;
 }
 
+// Output router types — per-pane byte stream from tmux control mode.
+// [LAW:one-type-per-behavior] These carry decoded UTF-8 text for the debug
+// surface; PaneOutputChunk (above) carries the legacy pipe-pane path.
+export interface TmuxOutputChunk {
+  readonly paneId: PaneId;
+  readonly data: string;
+}
+
+export type TmuxOutputState = "streaming" | "paused" | "disconnected";
+
+export interface TmuxOutputStateEvent {
+  readonly paneId: PaneId;
+  readonly state: TmuxOutputState;
+}
+
 // Process info for pane detail view
 export interface ProcessInfo {
   pid: number;

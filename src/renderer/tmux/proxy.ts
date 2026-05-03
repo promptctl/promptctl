@@ -14,7 +14,13 @@ import {
   type TmuxClientProxy,
 } from "tmux-control-mode-js/electron/renderer";
 import type { TmuxControlState } from "../env";
-import type { TmuxSnapshot } from "../../shared/types";
+import type {
+  TmuxOutputState,
+  TmuxOutputChunk,
+  TmuxOutputStateEvent,
+  TmuxSnapshot,
+  PaneId,
+} from "../../shared/types";
 
 let proxyInstance: TmuxClientProxy | null = null;
 
@@ -79,4 +85,74 @@ export function useTopology(): TmuxSnapshot {
   }, []);
 
   return snapshot;
+}
+
+const MAX_OUTPUT_BUFFER = 100_000;
+
+export interface OutputStreamState {
+  text: string;
+  state: TmuxOutputState;
+}
+
+const IDLE_OUTPUT: OutputStreamState = { text: "", state: "disconnected" };
+
+// [LAW:dataflow-not-control-flow] The hook runs the same sequence regardless
+// of state: subscribe → accumulate chunks → unsubscribe. The state marker
+// (streaming/paused/disconnected) is data the component renders, not a branch
+// that gates work. An unselected pane (null) returns the idle constant.
+export function useOutputStream(paneId: PaneId | null): OutputStreamState {
+  const [output, setOutput] = useState<OutputStreamState>(IDLE_OUTPUT);
+
+  useEffect(() => {
+    if (paneId === null) {
+      setOutput(IDLE_OUTPUT);
+      return;
+    }
+
+    let alive = true;
+    // Seed with fresh state on each pane change.
+    setOutput({ text: "", state: "streaming" });
+
+    const offChunk = window.electronAPI.on(
+      "tmux:output:chunk",
+      (chunk: TmuxOutputChunk) => {
+        if (!alive) return;
+        setOutput((prev) => {
+          const next = prev.text + chunk.data;
+          return {
+            text: next.length > MAX_OUTPUT_BUFFER
+              ? next.slice(-MAX_OUTPUT_BUFFER)
+              : next,
+            state: prev.state,
+          };
+        });
+      },
+    );
+
+    const offState = window.electronAPI.on(
+      "tmux:output:state",
+      (event: TmuxOutputStateEvent) => {
+        if (!alive) return;
+        if (event.paneId !== paneId) return;
+        setOutput((prev) => ({ ...prev, state: event.state }));
+      },
+    );
+
+    void window.electronAPI
+      .invoke("tmux:output:subscribe", paneId)
+      .then(() => {
+        if (!alive) {
+          void window.electronAPI.invoke("tmux:output:unsubscribe", paneId);
+        }
+      });
+
+    return () => {
+      alive = false;
+      offChunk();
+      offState();
+      void window.electronAPI.invoke("tmux:output:unsubscribe", paneId);
+    };
+  }, [paneId]);
+
+  return output;
 }

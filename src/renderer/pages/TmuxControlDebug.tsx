@@ -1,15 +1,23 @@
 // [LAW:dataflow-not-control-flow] The page is a pure projection of the
-// connection-state and topology hooks. The same JSX renders for every status
-// and pane count; only the values inside the testid spans/rows change. No
-// `if (status === "ready")` branches gate elements off the tree —
+// connection-state, topology, and output-stream hooks. The same JSX renders
+// for every status and pane count; only the values inside the testid spans/rows
+// change. No `if (status === "ready")` branches gate elements off the tree —
 // assertions can read them deterministically across every transition.
 
-import type { TmuxPane } from "../../shared/types";
-import { useControlState, useTopology } from "../tmux/proxy";
+import { useState } from "react";
+import type { PaneId, TmuxPane } from "../../shared/types";
+import { useControlState, useTopology, useOutputStream } from "../tmux/proxy";
 
 export function TmuxControlDebug() {
   const state = useControlState();
   const topology = useTopology();
+  const [selectedPane, setSelectedPane] = useState<PaneId | null>(null);
+  const output = useOutputStream(selectedPane);
+
+  // Clear selection when the selected pane disappears from topology.
+  const paneExists =
+    selectedPane !== null &&
+    topology.panes.some((p) => p.id === selectedPane);
 
   return (
     <div className="flex h-full flex-col gap-4 bg-neutral-950 p-6 text-sm text-neutral-200">
@@ -18,9 +26,10 @@ export function TmuxControlDebug() {
           tmux control connection — debug
         </h1>
         <p className="mt-1 text-xs text-neutral-500">
-          Live state of the singleton <code>TmuxControlConnection</code> in main.
-          This panel is the verification surface for every tmux-integration
-          slice — values update on every state transition without a refresh.
+          Live state of the singleton <code>TmuxControlConnection</code> in
+          main. This panel is the verification surface for every
+          tmux-integration slice — values update on every state transition
+          without a refresh.
         </p>
       </header>
 
@@ -59,17 +68,51 @@ export function TmuxControlDebug() {
             {topology.panes.length}
           </span>
         </div>
-        <PaneTable panes={topology.panes} />
+        <PaneTable
+          panes={topology.panes}
+          selectedPane={paneExists ? selectedPane : null}
+          onSelect={setSelectedPane}
+        />
       </section>
+
+      {(paneExists ? selectedPane : null) !== null && (
+        <section className="flex w-full flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
+          <div className="flex items-baseline justify-between">
+            <h2 className="font-mono text-xs uppercase tracking-wide text-neutral-400">
+              output — {selectedPane}
+            </h2>
+            <span
+              data-testid="output-state"
+              className={outputStateClass(output.state)}
+            >
+              {output.state}
+            </span>
+          </div>
+          <pre
+            data-testid="byte-stream"
+            className="h-64 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-neutral-950 p-2 font-mono text-xs text-green-300"
+          >
+            {output.text}
+          </pre>
+        </section>
+      )}
     </div>
   );
 }
 
-function PaneTable({ panes }: { panes: readonly TmuxPane[] }) {
+function PaneTable({
+  panes,
+  selectedPane,
+  onSelect,
+}: {
+  panes: readonly TmuxPane[];
+  selectedPane: PaneId | null;
+  onSelect: (id: PaneId | null) => void;
+}) {
   return (
     <div
       data-testid="topology-pane-table"
-      className="grid grid-cols-[8rem_8rem_8rem_4rem_1fr_6rem] gap-x-3 gap-y-1 font-mono text-xs"
+      className="grid grid-cols-[8rem_8rem_8rem_4rem_1fr_6rem_4rem] gap-x-3 gap-y-1 font-mono text-xs"
     >
       <HeaderCell>pane</HeaderCell>
       <HeaderCell>session</HeaderCell>
@@ -77,8 +120,14 @@ function PaneTable({ panes }: { panes: readonly TmuxPane[] }) {
       <HeaderCell>pid</HeaderCell>
       <HeaderCell>cmd · cwd</HeaderCell>
       <HeaderCell>size</HeaderCell>
+      <HeaderCell>watch</HeaderCell>
       {panes.map((pane) => (
-        <PaneRow key={pane.id} pane={pane} />
+        <PaneRow
+          key={pane.id}
+          pane={pane}
+          isSelected={pane.id === selectedPane}
+          onSelect={onSelect}
+        />
       ))}
     </div>
   );
@@ -88,11 +137,15 @@ function HeaderCell({ children }: { children: React.ReactNode }) {
   return <span className="text-neutral-500">{children}</span>;
 }
 
-function PaneRow({ pane }: { pane: TmuxPane }) {
-  // Identity cell uses data-pane-row (a distinct attribute) so e2e tests
-  // count rows with `[data-pane-row]` without colliding with the per-cell
-  // testids below. The testid still embeds the raw pane id (e.g. `%17`)
-  // for direct selection.
+function PaneRow({
+  pane,
+  isSelected,
+  onSelect,
+}: {
+  pane: TmuxPane;
+  isSelected: boolean;
+  onSelect: (id: PaneId | null) => void;
+}) {
   const idTestId = `pane-row-${pane.id}`;
   return (
     <>
@@ -119,18 +172,32 @@ function PaneRow({ pane }: { pane: TmuxPane }) {
         title={pane.currentPath}
       >
         <span className="text-amber-300">{pane.currentCommand || "—"}</span>
-        <span className="text-neutral-500"> · {pane.currentPath || "—"}</span>
+        <span className="text-neutral-500">
+          {" "}
+          · {pane.currentPath || "—"}
+        </span>
       </span>
       <span data-testid={`${idTestId}-size`} className="text-neutral-500">
         {pane.width}×{pane.height}
+      </span>
+      <span>
+        <button
+          data-testid={`watch-${pane.id}`}
+          className={`rounded px-1.5 py-0.5 text-xs ${
+            isSelected
+              ? "bg-cyan-600 text-white"
+              : "bg-neutral-700 text-neutral-300 hover:bg-neutral-600"
+          }`}
+          onClick={() => onSelect(isSelected ? null : pane.id)}
+        >
+          {isSelected ? "stop" : "watch"}
+        </button>
       </span>
     </>
   );
 }
 
 function statusClass(status: "connecting" | "ready" | "closed"): string {
-  // [LAW:single-enforcer] Status → color mapping is a static table; no inline
-  // branches scattered across the component.
   return STATUS_CLASSES[status];
 }
 
@@ -138,4 +205,19 @@ const STATUS_CLASSES: Record<"connecting" | "ready" | "closed", string> = {
   connecting: "text-amber-400",
   ready: "text-green-400",
   closed: "text-red-400",
+};
+
+function outputStateClass(
+  state: "streaming" | "paused" | "disconnected",
+): string {
+  return OUTPUT_STATE_CLASSES[state];
+}
+
+const OUTPUT_STATE_CLASSES: Record<
+  "streaming" | "paused" | "disconnected",
+  string
+> = {
+  streaming: "font-mono text-xs text-green-400",
+  paused: "font-mono text-xs text-amber-400",
+  disconnected: "font-mono text-xs text-red-400",
 };
