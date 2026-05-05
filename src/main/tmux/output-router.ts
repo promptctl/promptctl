@@ -126,14 +126,12 @@ export class TmuxOutputRouter {
     // pause-after=2 requires a continue command to resume output.
     const client = this.deps.getClient();
     if (client !== null) {
-      void client
-        .setPaneAction(msg.paneId, PaneAction.Continue)
-        .catch(
-          // [LAW:no-defensive-null-guards] Swallow is intentional: if the
-          // pane is gone or the client is closing, there's nothing to do.
-          // eslint-disable-next-line @typescript-eslint/no-empty-function
-          () => {},
+      void client.setPaneAction(msg.paneId, PaneAction.Continue).catch((err) => {
+        console.error(
+          `[output-router] auto-resume failed for pane %${msg.paneId}:`,
+          err,
         );
+      });
     }
   };
 
