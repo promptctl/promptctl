@@ -117,6 +117,10 @@ export function useOutputStream(paneId: PaneId | null): OutputStreamState {
       "tmux:output:chunk",
       (chunk: TmuxOutputChunk) => {
         if (!alive) return;
+        // Mirror the paneId filter on the state listener: on pane switch,
+        // in-flight chunks for the previous pane are still on the renderer
+        // event queue and must not land in the new pane's buffer.
+        if (chunk.paneId !== paneId) return;
         setOutput((prev) => {
           const next = prev.text + chunk.data;
           return {
