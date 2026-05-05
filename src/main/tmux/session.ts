@@ -65,11 +65,16 @@ async function sessionExists(args: string[]): Promise<boolean> {
     await tmuxExec(args);
     return true;
   } catch (err) {
-    // tmux returns exit 1 with stderr "can't find session: <name>" when
-    // the session is missing. Any other failure (binary missing, server
-    // unreachable, permission error) propagates so the bootstrap reports
-    // a real diagnostic instead of silently trying to create.
-    if (err instanceof TmuxError && /can't find session/.test(err.stderr)) {
+    // Two flavors of "not present yet" — both mean "go ahead and create":
+    //   1. Server is running, session is missing  -> "can't find session"
+    //   2. Server isn't running yet (fresh socket) -> "error connecting to ..."
+    //      or "no server running on ..."
+    // Anything else (binary missing, permission error, etc.) propagates so
+    // the bootstrap surfaces a real diagnostic instead of silently retrying.
+    if (
+      err instanceof TmuxError &&
+      /can't find session|no server running|error connecting to/.test(err.stderr)
+    ) {
       return false;
     }
     throw err;

@@ -5,7 +5,7 @@
 // control.integration.test.ts (unique `-L <socket>` per test, prefix
 // `promptctl-tmux-topology-` so this suite can run alongside the others).
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
 import { spawnTmux } from "tmux-control-mode-js";
 import { TmuxControlConnection } from "./control";
@@ -65,6 +65,11 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxTopologyTracker (real tmux)", () => {
   beforeEach(() => {
     socket = uniqueSocket();
     // No initial session needed — bootstrap creates the owned one.
+
+    // Outer test timeout sits above the largest inner waitFor budget so a
+    // failure surfaces the descriptive "waitFor(<label>) timed out" error
+    // instead of vitest's generic "Test timed out in 5000ms".
+    vi.setConfig({ testTimeout: 10000 });
   });
 
   afterEach(() => {

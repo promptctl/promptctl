@@ -4,7 +4,7 @@
 // Gated behind TMUX_INTEGRATION=1; mirrors the isolation pattern from
 // topology.integration.test.ts (unique `-L <socket>` per test).
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
 import { spawnTmux } from "tmux-control-mode-js";
 import { TmuxControlConnection } from "./control";
@@ -62,6 +62,11 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxOutputRouter (real tmux)", () => {
 
   beforeEach(() => {
     socket = uniqueSocket();
+
+    // Outer test timeout sits above the largest inner waitFor budget so a
+    // failure surfaces the descriptive "waitFor(<label>) timed out" error
+    // instead of vitest's generic "Test timed out in 5000ms".
+    vi.setConfig({ testTimeout: 10000 });
   });
 
   afterEach(() => {
