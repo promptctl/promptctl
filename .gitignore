@@ -101,9 +101,6 @@ playwright-report/
 # Claude Code local state (permissions, worktrees)
 .claude/
 
-# lit prompt artifacts (local agent workflow state)
-prompts/
-
 # Tokenizer calibration data — may contain session content length metadata.
 # The learned constants (src/main/sessions/tokenizer-corrections.json) are
 # committed; the raw calibration records are not.
