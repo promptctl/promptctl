@@ -1,23 +1,25 @@
 // [LAW:dataflow-not-control-flow] The page is a pure projection of the
-// connection-state, topology, and output-stream hooks. The same JSX renders
-// for every status and pane count; only the values inside the testid spans/rows
-// change. No `if (status === "ready")` branches gate elements off the tree —
-// assertions can read them deterministically across every transition.
+// connection-state and topology hooks plus a PaneTerminal child for the
+// selected pane. The same JSX renders for every status and pane count;
+// only the values inside the testid spans/rows change. No `if (status ===
+// "ready")` branches gate elements off the tree — assertions can read them
+// deterministically across every transition.
 
 import { useState } from "react";
 import type { PaneId, TmuxPane } from "../../shared/types";
-import { useControlState, useTopology, useOutputStream } from "../tmux/proxy";
+import { useControlState, useTopology } from "../tmux/proxy";
+import { PaneTerminal } from "../tmux/PaneTerminal";
 
 export function TmuxControlDebug() {
   const state = useControlState();
   const topology = useTopology();
   const [selectedPane, setSelectedPane] = useState<PaneId | null>(null);
-  const output = useOutputStream(selectedPane);
 
   // Clear selection when the selected pane disappears from topology.
   const paneExists =
     selectedPane !== null &&
     topology.panes.some((p) => p.id === selectedPane);
+  const activePane = paneExists ? selectedPane : null;
 
   return (
     <div className="flex h-full flex-col gap-4 bg-neutral-950 p-6 text-sm text-neutral-200">
@@ -75,25 +77,14 @@ export function TmuxControlDebug() {
         />
       </section>
 
-      {(paneExists ? selectedPane : null) !== null && (
+      {activePane !== null && (
         <section className="flex w-full flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
           <div className="flex items-baseline justify-between">
             <h2 className="font-mono text-xs uppercase tracking-wide text-neutral-400">
-              output — {selectedPane}
+              output — {activePane}
             </h2>
-            <span
-              data-testid="output-state"
-              className={outputStateClass(output.state)}
-            >
-              {output.state}
-            </span>
           </div>
-          <pre
-            data-testid="byte-stream"
-            className="h-64 max-h-96 overflow-auto whitespace-pre-wrap break-all rounded bg-neutral-950 p-2 font-mono text-xs text-green-300"
-          >
-            {output.text}
-          </pre>
+          <PaneTerminal paneId={activePane} />
         </section>
       )}
     </div>
@@ -207,17 +198,3 @@ const STATUS_CLASSES: Record<"connecting" | "ready" | "closed", string> = {
   closed: "text-red-400",
 };
 
-function outputStateClass(
-  state: "streaming" | "paused" | "disconnected",
-): string {
-  return OUTPUT_STATE_CLASSES[state];
-}
-
-const OUTPUT_STATE_CLASSES: Record<
-  "streaming" | "paused" | "disconnected",
-  string
-> = {
-  streaming: "font-mono text-xs text-green-400",
-  paused: "font-mono text-xs text-amber-400",
-  disconnected: "font-mono text-xs text-red-400",
-};
