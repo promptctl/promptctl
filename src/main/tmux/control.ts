@@ -40,9 +40,10 @@ export interface TmuxControlConnectionOptions {
   // client with `attach-session -t <sessionName>` baked in so tmux never
   // has the chance to create an anonymous session.
   readonly transportFactory?: () => TmuxTransport;
-  // Bootstrap step: ensure the session exists. Default shells
-  // `tmux new-session -A -s <name> -d` (idempotent). Overridable for tests
-  // so unit suites don't need a real tmux binary on PATH.
+  // Bootstrap step: ensure the session exists. Default probes with
+  // `tmux has-session -t =<name>` and creates with `tmux new-session -d
+  // -s <name>` only if missing. Overridable for tests so unit suites
+  // don't need a real tmux binary on PATH.
   readonly bootstrap?: () => Promise<void>;
   // Backoff between reconnect attempts.
   readonly reconnectDelayMs?: number;

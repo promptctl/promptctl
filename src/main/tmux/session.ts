@@ -8,14 +8,9 @@
 // [LAW:single-enforcer] Every consumer (TmuxControlConnection bootstrap,
 // topology tracker filter, future launch registry) reads ownedSessionName()
 // rather than recomputing the hash.
-//
-// [LAW:dataflow-not-control-flow] The bootstrap command (`new-session -A
-// -s <name> -d`) is idempotent by design. The same execution path runs
-// regardless of whether the session already exists — tmux's -A flag does
-// the dispatch, not our code.
 
 import { createHash } from "node:crypto";
-import { tmuxExec } from "./exec";
+import { TmuxError, tmuxExec } from "./exec";
 
 const SESSION_PREFIX = "promptctl-";
 
@@ -39,6 +34,14 @@ export function isOwnedSessionName(name: string): boolean {
 // Also boots the tmux server as a side effect of the first call. The `-d`
 // flag prevents an actual attach — we just want the session to exist.
 //
+// We do NOT use `tmux new-session -A` for idempotency. Despite its docs,
+// `-A` falls back to attach-session behavior when the target session
+// exists, and attach-session unconditionally opens /dev/tty for terminal
+// capabilities — even with `-d`. Electron's main process has no
+// controlling terminal, so the second-and-subsequent calls fail with
+// "open terminal failed: not a terminal" and the reconnect loop spins.
+// `has-session` + `new-session -d` both work without a TTY.
+//
 // Throws if the tmux binary is missing or any other error occurs. Callers
 // surface that as a "closed" connection state rather than retrying blindly.
 export async function ensureSession(
@@ -48,5 +51,27 @@ export async function ensureSession(
   // [LAW:dataflow-not-control-flow] socketPath is data on the args list;
   // the same exec path runs whether the env var is set or not.
   const socketArgs = socketPath === null ? [] : ["-L", socketPath];
-  await tmuxExec([...socketArgs, "new-session", "-A", "-s", name, "-d"]);
+  // `=name` is an exact-match target (no prefix/glob match), so a session
+  // called `promptctl-aea76698` doesn't accidentally satisfy a probe for
+  // `promptctl-a` etc.
+  if (await sessionExists([...socketArgs, "has-session", "-t", `=${name}`])) {
+    return;
+  }
+  await tmuxExec([...socketArgs, "new-session", "-d", "-s", name]);
+}
+
+async function sessionExists(args: string[]): Promise<boolean> {
+  try {
+    await tmuxExec(args);
+    return true;
+  } catch (err) {
+    // tmux returns exit 1 with stderr "can't find session: <name>" when
+    // the session is missing. Any other failure (binary missing, server
+    // unreachable, permission error) propagates so the bootstrap reports
+    // a real diagnostic instead of silently trying to create.
+    if (err instanceof TmuxError && /can't find session/.test(err.stderr)) {
+      return false;
+    }
+    throw err;
+  }
 }

@@ -70,6 +70,24 @@ describe.skipIf(!RUN_INTEGRATION)("TmuxControlConnection (real tmux)", () => {
     killServer(socket);
   });
 
+  it("ensureSession is idempotent without a controlling terminal", async () => {
+    // Regression: `tmux new-session -A -s NAME -d` falls back to attach-session
+    // when the session exists, which tries to open /dev/tty and fails under
+    // Electron with "open terminal failed: not a terminal". The reconnect loop
+    // calls bootstrap() on every retry, so the second-and-onward calls must
+    // succeed without a TTY. We force the no-TTY path by detaching stdio.
+    await ensureSession(OWNED, socket); // first call: creates the session
+    await ensureSession(OWNED, socket); // second call: must NOT try to attach
+
+    const list = execSync(tmuxCmd(socket, "list-sessions -F '#{session_name}'"), {
+      stdio: ["ignore", "pipe", "ignore"],
+    })
+      .toString()
+      .trim()
+      .split("\n");
+    expect(list).toContain(OWNED);
+  });
+
   it("connects to a real tmux server and reaches ready", async () => {
     const conn = TmuxControlConnection.start({
       transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
