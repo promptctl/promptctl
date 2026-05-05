@@ -31,7 +31,7 @@ The tab bar is declared in `src/renderer/App.tsx` (`TopTabBar`). The tabs share 
 **Subsections (left sidebar):**
 - **Panes** (`Home` → `PaneViewer`) — pick a tmux pane, see live output, type into it, view its process tree.
 - **Commands** (`CommandsPage` → `CommandPanel`) — create declarative "do X when Y" rules. Triggers: manual / schedule (interval, idle, cron) / output-pattern matcher. Actions: send-keys, send-command, notify (native notification), capture-output, kill-pane, log. Persisted to `~/.promptctl/commands.json`.
-- **Prompts** (`PromptsPage` → `PromptLibrary`) — small markdown prompt files in `~/.promptctl/prompts/` that can be copied or injected into panes.
+- **Prompts** (`PromptsPage` → `PromptLibrary`) — small markdown prompt files in the repo's `prompts/` directory (loaded via `app.getAppPath()`, checked into git) that can be copied or injected into panes.
 
 **Key constraint:** tmux is the API. `isIdle`, `launchTool`, and `toolKind` detection in `src/main/tmux/controllable.ts` all assume `bash/zsh/fish/sh/dash` as shells and `claude/codex/gemini` as tools. No tmux → not supported.
 
@@ -125,4 +125,5 @@ Renderer CDP is auto-allocated by Electron (look it up via `lsof` on the rendere
 - `src/shared/types.ts` — canonical data shapes shared across the process boundary.
 - `src/test/` — shared test helpers (`electron-mock.ts`, `setup.ts`).
 - `docs/anthropic-api/` — reference material for Anthropic features (context editing, prompt caching, memory tool, context windows).
-- `~/.promptctl/` (user's home, not in-repo) — runtime state: `settings.json`, `commands.json`, `prompts/`, `versions/`.
+- `~/.promptctl/` (user's home, not in-repo) — runtime state: `settings.json`, `commands.json`, `versions/`.
+- `prompts/` (in-repo) — prompt library files, edited via the in-app `PromptLibrary` UI and checked into git so prompts travel with the repo.
