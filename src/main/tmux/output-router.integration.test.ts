@@ -1,8 +1,11 @@
 // @vitest-environment node
 //
 // Integration tests for TmuxOutputRouter against a real tmux binary.
-// Gated behind TMUX_INTEGRATION=1; mirrors the isolation pattern from
-// topology.integration.test.ts (unique `-L <socket>` per test).
+// Run unconditionally with the default `npm test` — tmux is a hard project
+// requirement (README boundaries) and integration regressions must surface
+// in the same loop as unit regressions, not behind an opt-in env var.
+// Mirrors the isolation pattern from topology.integration.test.ts (unique
+// `-L <socket>` per test).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
@@ -14,8 +17,6 @@ import type { PaneId, TmuxOutputChunk, TmuxOutputStateEvent } from "../../shared
 import type { WebContentsLike } from "./output-router";
 
 const OWNED = "promptctl-test-output";
-
-const RUN_INTEGRATION = process.env.TMUX_INTEGRATION === "1";
 
 function uniqueSocket(): string {
   return `promptctl-tmux-output-${Date.now()}-${Math.random()
@@ -57,7 +58,7 @@ afterEach(() => {
   TmuxControlConnection.__resetForTesting();
 });
 
-describe.skipIf(!RUN_INTEGRATION)("TmuxOutputRouter (real tmux)", () => {
+describe("TmuxOutputRouter (real tmux)", () => {
   let socket: string;
 
   beforeEach(() => {

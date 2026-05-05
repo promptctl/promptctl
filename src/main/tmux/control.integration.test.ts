@@ -1,9 +1,9 @@
 // @vitest-environment node
 //
 // Integration tests for TmuxControlConnection against a real tmux binary.
-// Gated behind TMUX_INTEGRATION=1 so the default `npm test` run stays green
-// on machines without tmux. Mirrors the gating + isolation pattern from
-// ../tmux-control-mode-js/tests/integration/client.test.ts.
+// Run unconditionally with the default `npm test` — tmux is a hard project
+// requirement (README boundaries) and integration regressions must surface
+// in the same loop as unit regressions, not behind an opt-in env var.
 //
 // Isolation: each test spawns its own tmux server on a unique `-L <socket>`
 // name. The prefix `promptctl-tmux-control-` is distinct from the library's
@@ -17,8 +17,6 @@ import { TmuxControlConnection } from "./control";
 import { ensureSession } from "./session";
 
 const OWNED = "promptctl-test";
-
-const RUN_INTEGRATION = process.env.TMUX_INTEGRATION === "1";
 
 function uniqueSocket(): string {
   return `promptctl-tmux-control-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -58,7 +56,7 @@ afterEach(() => {
   TmuxControlConnection.__resetForTesting();
 });
 
-describe.skipIf(!RUN_INTEGRATION)("TmuxControlConnection (real tmux)", () => {
+describe("TmuxControlConnection (real tmux)", () => {
   let socket: string;
 
   beforeEach(() => {

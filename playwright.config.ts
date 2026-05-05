@@ -1,10 +1,12 @@
 // [LAW:single-enforcer] One Playwright config; all e2e tests inherit from it.
-// Tests live under tests/e2e/. The TMUX_INTEGRATION=1 gate matches the
-// vitest integration suite — default `npm test` runs neither.
+// E2E specs run unconditionally as part of `npm test` — tmux is a hard
+// project requirement (see README boundaries) and `pretest:e2e` packages
+// the app fresh, so there is no environment in which gating these tests
+// behind an opt-in env var would surface a real signal. Hiding e2e
+// regressions until someone happens to flip the flag is exactly how the
+// 77e.1.4 ensureSession regression slipped through.
 
 import { defineConfig } from "@playwright/test";
-
-const RUN_INTEGRATION = process.env.TMUX_INTEGRATION === "1";
 
 export default defineConfig({
   testDir: "./tests/e2e",
@@ -24,8 +26,4 @@ export default defineConfig({
   use: {
     trace: "retain-on-failure",
   },
-  // Skip everything unless TMUX_INTEGRATION=1 — the suite drives a real tmux
-  // server and a real Electron build, so it must opt-in. Without the gate
-  // contributors who don't have tmux + a packaged build see nothing.
-  grep: RUN_INTEGRATION ? /.*/ : /__never__/,
 });

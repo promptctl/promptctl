@@ -8,13 +8,12 @@ See also: @AGENTS.md — agent commit discipline + lit issue-tracker integration
 
 ```sh
 npm start                  # tsx scripts/dev.ts — Electron Forge with main+preload Vite watcher and auto-restart
-npm test                   # vitest run (single pass, default suite — no tmux integration)
+npm test                   # FULL gate: vitest (unit + tmux integration) + Playwright e2e (auto-packages first). Runs unconditionally — no opt-in env var.
+npm run test:unit          # vitest only (unit + tmux integration, no e2e) — fast inner loop while iterating
 npm run test:watch         # vitest watch mode
 npx vitest run <path>      # single file, e.g. src/main/tasks/runner.test.ts
 npx vitest run -t "<name>" # tests whose name matches a substring
-npm run test:e2e           # playwright; specs under tests/e2e/*.spec.ts
-TMUX_INTEGRATION=1 npx vitest run   # opt-in: real-tmux *.integration.test.ts
-TMUX_INTEGRATION=1 npm run test:e2e # opt-in: real-tmux Playwright suite
+npm run test:e2e           # playwright; pretest:e2e re-runs `electron-forge package` so it can never target a stale binary
 npm run typecheck          # tsc --noEmit
 npm run lint               # eslint src/
 npm run format             # prettier --write
@@ -26,7 +25,9 @@ npm run tokens:validate    # validate tiktoken estimator against an API-billed J
 
 `justfile` exposes `just dev` as an alias for `npm start`.
 
-**Convention split:** vitest owns `*.test.ts(x)`, Playwright owns `*.spec.ts`. Real-tmux suites are `*.integration.test.ts` and gated on `TMUX_INTEGRATION=1` so the default `npm test` runs neither tmux nor Playwright.
+**`npm test` is the gate that must pass before every commit.** Unit + tmux integration + Playwright e2e — all unconditional. tmux is a hard project requirement (see README boundaries), so the historical `TMUX_INTEGRATION=1` opt-in served no purpose except hiding regressions until the next slice tripped over them. It is gone. The `pretest:e2e` script forces a fresh `electron-forge package` so e2e can never target stale code — that footgun cost real time during the 77e.1.4 slice.
+
+**Convention split:** vitest owns `*.test.ts(x)` (units) and `*.integration.test.ts` (real-tmux integration). Playwright owns `*.spec.ts` under `tests/e2e/`.
 
 ## Top tabs — distinct product areas
 

@@ -1,9 +1,12 @@
 // @vitest-environment node
 //
 // Integration tests for TmuxTopologyTracker against a real tmux binary.
-// Gated behind TMUX_INTEGRATION=1; mirrors the isolation pattern from
-// control.integration.test.ts (unique `-L <socket>` per test, prefix
-// `promptctl-tmux-topology-` so this suite can run alongside the others).
+// Run unconditionally with the default `npm test` — tmux is a hard project
+// requirement (README boundaries) and integration regressions must surface
+// in the same loop as unit regressions, not behind an opt-in env var.
+// Mirrors the isolation pattern from control.integration.test.ts (unique
+// `-L <socket>` per test, prefix `promptctl-tmux-topology-` so this suite
+// can run alongside the others).
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
@@ -14,8 +17,6 @@ import { TmuxTopologyTracker } from "./topology";
 import type { TmuxSnapshot } from "../../shared/types";
 
 const OWNED = "promptctl-test-topo";
-
-const RUN_INTEGRATION = process.env.TMUX_INTEGRATION === "1";
 
 function uniqueSocket(): string {
   return `promptctl-tmux-topology-${Date.now()}-${Math.random()
@@ -59,7 +60,7 @@ afterEach(() => {
   TmuxControlConnection.__resetForTesting();
 });
 
-describe.skipIf(!RUN_INTEGRATION)("TmuxTopologyTracker (real tmux)", () => {
+describe("TmuxTopologyTracker (real tmux)", () => {
   let socket: string;
 
   beforeEach(() => {
