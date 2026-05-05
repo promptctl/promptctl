@@ -261,15 +261,20 @@ export interface TmuxControlState {
 
 // Structural shape the library's renderer bridge expects. Exposed by the
 // preload as `window.tmuxIpc`. Matches IpcRendererLike from
-// tmux-control-mode-js/electron/renderer.
+// tmux-control-mode-js/electron/renderer — `on` and `removeListener` both
+// receive the IpcRendererEvent (`{ sender?: unknown }`) as the first arg so
+// the listener shapes are interchangeable, which is what TS structural
+// compatibility checks require at the bridge boundary.
+type TmuxIpcListener = (
+  event: { sender?: unknown },
+  ...args: unknown[]
+) => void;
+
 export interface TmuxIpc {
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   send(channel: string, ...args: unknown[]): void;
-  on(
-    channel: string,
-    listener: (event: { sender?: unknown }, ...args: unknown[]) => void,
-  ): void;
-  removeListener(channel: string, listener: (...args: unknown[]) => void): void;
+  on(channel: string, listener: TmuxIpcListener): void;
+  removeListener(channel: string, listener: TmuxIpcListener): void;
 }
 
 declare global {

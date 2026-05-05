@@ -17,7 +17,10 @@ const tmuxIpc = {
   ) => {
     ipcRenderer.on(channel, listener);
   },
-  removeListener: (channel: string, listener: (...args: unknown[]) => void) => {
+  removeListener: (
+    channel: string,
+    listener: (event: Electron.IpcRendererEvent, ...args: unknown[]) => void,
+  ) => {
     ipcRenderer.removeListener(channel, listener);
   },
 };
