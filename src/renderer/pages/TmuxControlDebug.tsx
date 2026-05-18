@@ -6,9 +6,10 @@
 // deterministically across every transition.
 
 import { useState } from "react";
+import { PaneTerminal } from "@promptctl/pane-terminal/react";
+import "@xterm/xterm/css/xterm.css";
 import type { PaneId, TmuxPane } from "../../shared/types";
-import { useControlState, useTopology } from "../tmux/proxy";
-import { PaneTerminal } from "../tmux/PaneTerminal";
+import { useControlState, usePaneStream, useTopology } from "../tmux/proxy";
 
 export function TmuxControlDebug() {
   const state = useControlState();
@@ -20,6 +21,7 @@ export function TmuxControlDebug() {
     selectedPane !== null &&
     topology.panes.some((p) => p.id === selectedPane);
   const activePane = paneExists ? selectedPane : null;
+  const stream = usePaneStream(activePane);
 
   return (
     <div className="flex h-full flex-col gap-4 bg-neutral-950 p-6 text-sm text-neutral-200">
@@ -77,14 +79,24 @@ export function TmuxControlDebug() {
         />
       </section>
 
-      {activePane !== null && (
+      {activePane !== null && stream !== null && (
         <section className="flex w-full flex-col gap-2 rounded border border-neutral-800 bg-neutral-900 p-4">
           <div className="flex items-baseline justify-between">
             <h2 className="font-mono text-xs uppercase tracking-wide text-neutral-400">
               output — {activePane}
             </h2>
           </div>
-          <PaneTerminal paneId={activePane} />
+          <div
+            data-testid="pane-terminal"
+            data-pane-id={activePane}
+            className="h-96 w-full rounded bg-neutral-950"
+          >
+            <PaneTerminal
+              stream={stream}
+              className="h-full w-full"
+              autoFocus
+            />
+          </div>
         </section>
       )}
     </div>

@@ -11,5 +11,12 @@ export default defineConfig({
       "@renderer": path.resolve(__dirname, "src/renderer"),
       "@main": path.resolve(__dirname, "src/main"),
     },
+    // [LAW:one-source-of-truth] @promptctl/pane-terminal is linked via `file:`
+    // from a workspace that has its own React 18 installed for tests. Without
+    // dedupe, Vite bundles two Reacts — the library's hooks then run against a
+    // null dispatcher and every render throws "Cannot read properties of null
+    // (reading 'useRef')". Dedupe forces every `react`/`react-dom` import to
+    // resolve to promptctl's copy.
+    dedupe: ["react", "react-dom", "react/jsx-runtime"],
   },
 });

@@ -13,8 +13,9 @@ import {
   createRendererBridge,
   type TmuxClientProxy,
 } from "tmux-control-mode-js/electron/renderer";
+import { PaneStream } from "@promptctl/pane-terminal/stream";
 import type { TmuxControlState } from "../env";
-import type { TmuxSnapshot } from "../../shared/types";
+import type { PaneId, TmuxSnapshot } from "../../shared/types";
 
 let proxyInstance: TmuxClientProxy | null = null;
 
@@ -81,3 +82,34 @@ export function useTopology(): TmuxSnapshot {
   return snapshot;
 }
 
+// [LAW:locality-or-seam] The renderer's only path from a branded PaneId
+// string (`%17`) to a library PaneStream lives here. Components consume
+// `usePaneStream(paneId)` and pass the result to `<PaneTerminal stream={}>`;
+// nothing else strips the `%` prefix or constructs PaneStream by hand.
+//
+// [LAW:single-enforcer] One stream per (paneId, mount). When paneId changes,
+// the prior stream is disposed before a fresh one is constructed — the cleanup
+// runs synchronously between renders, so no two streams ever attach to the same
+// pane from this hook at once.
+export function usePaneStream(paneId: PaneId | null): PaneStream | null {
+  const [stream, setStream] = useState<PaneStream | null>(null);
+
+  useEffect(() => {
+    if (paneId === null) {
+      setStream(null);
+      return undefined;
+    }
+    const numericPaneId = Number.parseInt(paneId.replace(/^%/, ""), 10);
+    const next = new PaneStream({
+      client: getTmuxProxy(),
+      paneId: numericPaneId,
+    });
+    setStream(next);
+    return () => {
+      next.dispose();
+      setStream(null);
+    };
+  }, [paneId]);
+
+  return stream;
+}

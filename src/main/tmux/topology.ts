@@ -74,7 +74,7 @@ const TOPOLOGY_EVENTS = [
 
 // Minimal client surface the tracker actually exercises. Letting tests pass a
 // fake instead of standing up the full TmuxClient.
-export type TopologyClient = Pick<TmuxClient, "execute" | "subscribe">;
+export type TopologyClient = Pick<TmuxClient, "execute" | "subscribeRaw">;
 
 export interface TopologyDeps {
   // Reconnect-safe event subscription. In production this is
@@ -179,7 +179,7 @@ export class TmuxTopologyTracker {
     // same sequence runs on every ready, regardless of "is this a reconnect."
     for (const sub of TOPOLOGY_SUBSCRIPTIONS) {
       await safeAwait(
-        client.subscribe(sub.name, sub.what, sub.format),
+        client.subscribeRaw(sub.name, sub.what, sub.format),
         `subscribe(${sub.name})`,
       );
     }

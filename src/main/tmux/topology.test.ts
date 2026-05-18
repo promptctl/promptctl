@@ -98,7 +98,7 @@ function makeHarness(): Harness {
         success: true,
       };
     },
-    async subscribe(
+    async subscribeRaw(
       name: string,
       what: string,
       format: string,
