@@ -1,18 +1,34 @@
 // [LAW:single-enforcer] All command execution goes through here.
 // [LAW:one-type-per-behavior] Unifies former SchedulerEngine + MatcherEngine.
+// [LAW:locality-or-seam] The engine consumes tmux through a single seam
+// (CommandEngineDeps) — three methods: byte stream in, send-keys out, execute
+// out. Production wires them to TmuxControlConnection; tests pass a fake.
+// Nothing in this file imports the tmux library or the connection class — the
+// type is the only surface.
+
 import type {
   Command,
   CommandEvent,
   PaneId,
   TaskSchedule,
 } from "../../shared/types";
-import { sendKeys, capturePane } from "../tmux/client";
-import { tmuxExec } from "../tmux/exec";
-import type { TmuxStateManager } from "../tmux/state";
-import type { PaneOutputManager } from "../tmux/output";
 import type { WebContents } from "electron";
 import { Notification } from "electron";
 import { parseCron, nextCronOccurrence } from "./cron";
+import { tmuxEscape } from "tmux-control-mode-js/protocol";
+
+export interface CommandEngineDeps {
+  // [LAW:dataflow-not-control-flow] Output flows through one handler shape —
+  // the same `(paneId, data) => void` for every pane, every byte. The engine
+  // doesn't ask "is this the pane I care about" at subscribe time; it filters
+  // per command at match time.
+  onOutput(handler: (paneId: PaneId, data: string) => void): () => void;
+  // Send a literal key sequence to a pane (-l semantics: bytes flow as-is,
+  // no key-name interpretation). Append "\r" upstream for Enter.
+  sendKeys(target: PaneId, keys: string): Promise<void>;
+  // Run any tmux command. Used for kill-pane and capture-pane actions.
+  execute(command: string): Promise<void>;
+}
 
 export class CommandEngine {
   private commands = new Map<string, Command>();
@@ -21,20 +37,17 @@ export class CommandEngine {
   private lineBuffers = new Map<string, string>();
   private subscribers = new Set<WebContents>();
   private lastActivity = new Map<string, number>();
-  private stateManager: TmuxStateManager;
   private unsubOutput: (() => void) | null = null;
 
-  constructor(stateManager: TmuxStateManager) {
-    this.stateManager = stateManager;
-  }
+  constructor(private readonly deps: CommandEngineDeps) {}
 
   subscribe(webContents: WebContents): void {
     this.subscribers.add(webContents);
     webContents.once("destroyed", () => this.subscribers.delete(webContents));
   }
 
-  start(outputManager: PaneOutputManager): void {
-    this.unsubOutput = outputManager.addListener((paneId, data) => {
+  start(): void {
+    this.unsubOutput = this.deps.onOutput((paneId, data) => {
       this.recordActivity(paneId);
       this.processOutput(paneId, data);
     });
@@ -75,7 +88,6 @@ export class CommandEngine {
     const wasEnabled = command.enabled;
     Object.assign(command, updates);
 
-    // Rebuild trigger if enabled state or trigger config changed
     this.teardownTrigger(id);
     if (command.enabled) this.setupTrigger(command);
     if (wasEnabled && !command.enabled) this.teardownTrigger(id);
@@ -102,7 +114,6 @@ export class CommandEngine {
     const trigger = command.trigger;
     switch (trigger.kind) {
       case "manual":
-        // No automatic trigger — fired via fireCommand()
         break;
       case "schedule":
         this.scheduleTimer(command);
@@ -151,14 +162,12 @@ export class CommandEngine {
   private async onTimerFire(command: Command): Promise<void> {
     this.timers.delete(command.id);
 
-    // For idle triggers, verify actually idle
     if (
       command.trigger.kind === "schedule" &&
       command.trigger.schedule.kind === "idle" &&
       command.target.kind === "tmux-pane"
     ) {
-      const last =
-        this.lastActivity.get(command.target.paneId) ?? 0;
+      const last = this.lastActivity.get(command.target.paneId) ?? 0;
       const elapsed = Date.now() - last;
       if (elapsed < command.trigger.schedule.idleMs) {
         this.scheduleTimer(command);
@@ -168,7 +177,6 @@ export class CommandEngine {
 
     await this.executeAction(command);
 
-    // Reschedule if still enabled
     if (command.enabled && command.trigger.kind === "schedule") {
       this.scheduleTimer(command);
     }
@@ -237,12 +245,18 @@ export class CommandEngine {
       switch (action.kind) {
         case "send-keys": {
           const paneId = this.resolveTargetPane(command);
-          if (paneId) await sendKeys(paneId, action.text, action.pressEnter);
+          if (paneId)
+            await this.deps.sendKeys(
+              paneId,
+              action.pressEnter ? action.text + "\r" : action.text,
+            );
           break;
         }
         case "send-command": {
           const paneId = this.resolveTargetPane(command);
-          if (paneId) await sendKeys(paneId, action.command, true);
+          // [LAW:dataflow-not-control-flow] send-command is send-keys with
+          // pressEnter=true baked in — same dep path, just data differs.
+          if (paneId) await this.deps.sendKeys(paneId, action.command + "\r");
           break;
         }
         case "notify": {
@@ -255,16 +269,19 @@ export class CommandEngine {
         }
         case "capture-output": {
           const paneId = this.resolveTargetPane(command);
-          if (paneId) await capturePane(paneId);
+          if (paneId)
+            await this.deps.execute(
+              `capture-pane -t ${paneId} -p -e -J -S -500`,
+            );
           break;
         }
         case "kill-pane": {
           const paneId = this.resolveTargetPane(command);
-          if (paneId) await tmuxExec(["kill-pane", "-t", paneId]);
+          if (paneId)
+            await this.deps.execute(`kill-pane -t ${tmuxEscape(paneId)}`);
           break;
         }
         case "log":
-          // Log action just emits the event below
           break;
       }
 
@@ -290,7 +307,6 @@ export class CommandEngine {
 
   private resolveTargetPane(command: Command): PaneId | null {
     if (command.target.kind === "tmux-pane") return command.target.paneId;
-    // For session/window targets, could resolve to first pane — for now, null
     return null;
   }
 

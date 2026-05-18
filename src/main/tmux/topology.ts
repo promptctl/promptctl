@@ -27,7 +27,7 @@
 
 import type { TmuxClient, TmuxEventMap } from "tmux-control-mode-js";
 import type { SubscriptionChangedMessage } from "tmux-control-mode-js/protocol";
-import { detectToolKind, PANE_FORMAT, parsePaneList } from "./client";
+import { detectToolKind, PANE_FORMAT, parsePaneList } from "./pane-parse";
 import type { ConnectionStateEvent } from "./control";
 import type {
   PaneId,

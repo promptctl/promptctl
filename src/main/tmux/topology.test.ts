@@ -21,7 +21,7 @@ import type {
   WindowAddMessage,
   WindowCloseMessage,
 } from "tmux-control-mode-js/protocol";
-import { PANE_FORMAT } from "./client";
+import { PANE_FORMAT } from "./pane-parse";
 import type { ConnectionStateEvent } from "./control";
 import {
   TmuxTopologyTracker,

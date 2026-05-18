@@ -35,8 +35,6 @@
     "@uiw/react-textarea-code-editor": "^3.1.1",
     "@promptctl/pane-terminal": "file:../tmux-control-mode-js/packages/pane-terminal",
     "@vscode/ripgrep": "^1.17.1",
-    "@xterm/addon-fit": "^0.10.0",
-    "@xterm/addon-web-links": "^0.11.0",
     "@xterm/xterm": "^5.5.0",
     "diff": "^9.0.0",
     "electron-squirrel-startup": "^1.0.1",
