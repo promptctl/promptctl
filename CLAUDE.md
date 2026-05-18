@@ -34,7 +34,7 @@ npm run tokens:validate    # validate tiktoken estimator against an API-billed J
 `src/renderer/App.tsx` declares four tabs that share almost nothing functionally; the only common boot is the tmux/output/command/proxy subscriptions in `App.useEffect`. Identify the owning tab before editing.
 
 ### 1. Loops (`/loops/*`) — the tmux control plane
-The tmux state model is the foundation. Sub-pages: **Panes** (live output + input + process tree), **Commands** (declarative "do X when Y" rules — triggers: manual / interval / idle / cron / output-pattern; actions: send-keys, send-command, notify, capture-output, kill-pane, log; persisted to `~/.promptctl/commands.json`), **Prompts** (markdown prompt library in the in-repo `prompts/` directory; loaded via `app.getAppPath()` and checked into git so prompts travel with the repo). `isIdle`, `launchTool`, `toolKind` detection in `src/main/tmux/controllable.ts` assume `bash/zsh/fish/sh/dash` shells and `claude/codex/gemini` tools — no tmux means not supported.
+The tmux state model is the foundation. Sub-pages: **Panes** (live xterm.js terminal backed by `@promptctl/pane-terminal`'s `<PaneTerminal>` — input + output + resize all live in the library; the renderer's only seam is `usePaneStream(paneId)` in `src/renderer/tmux/proxy.ts`), **Commands** (declarative "do X when Y" rules — triggers: manual / interval / idle / cron / output-pattern; actions: send-keys, send-command, notify, capture-output, kill-pane, log; persisted to `~/.promptctl/commands.json`), **Prompts** (markdown prompt library in the in-repo `prompts/` directory; loaded via `app.getAppPath()` and checked into git so prompts travel with the repo). Tool-kind detection (`claude`/`codex`/`gemini`) lives in `src/main/tmux/pane-parse.ts`. No tmux means not supported.
 
 ### 2. Context Workshop (`/workshop` → `SessionsPage` → `SessionEditor`) — session editor
 Goal: extract the essential context from a long AI coding conversation so a new session can be seeded cheaply. Conversations are on disk as JSONL (Claude) or JSON (Gemini); the tab parses, renders, and edits them in place with versioned safety. Pipeline: discover → load → mark for removal (manual / Auto-Trim heuristics / Smart Compress via LLM / Topic Focus via LLM) → unified **Compress Tools** operation that token-thresholds tool results into summarize / middle-truncate / skip → save through the versioning coordinator. `ProviderAdapter` (`src/main/sessions/types.ts`) is the seam — Claude and Gemini are registered in `main.ts`; new providers are one adapter + one `registerProvider()` call. Token counting uses tiktoken's `gpt-4o` encoding (`src/main/sessions/tokenizer.ts`) as a directional approximation of Claude's tokenizer.
@@ -48,13 +48,13 @@ OpenAI API key + model (powers Smart Compress, Topic Focus, and tool-result summ
 ## Architecture
 
 ### Main process owns state; renderer is a projection
-The Electron main process runs long-lived subsystems and owns mutable state. The renderer holds Zustand stores that mirror these subsystems (`src/renderer/store/{tmux,command,pane-output,prompt,sessions,tasks,proxy}.ts`). Stores subscribe on mount via `init*Subscription()` helpers and treat IPC events as the source of truth — never cache independently.
+The Electron main process runs long-lived subsystems and owns mutable state. The renderer holds Zustand stores that mirror these subsystems (`src/renderer/store/{command,pane-selection,prompt,sessions,tasks,proxy}.ts`). Stores subscribe on mount via `init*Subscription()` helpers and treat IPC events as the source of truth — never cache independently. Topology, control-state, and per-pane output don't have promptctl-owned stores — the renderer reads them via hooks in `src/renderer/tmux/proxy.ts` (`useTopology`, `useControlState`, `usePaneStream`) backed by the library's renderer bridge.
 
 Subsystems wired in `src/main/main.ts::app.whenReady`:
-- `TmuxStateManager` (`src/main/tmux/state.ts`) — legacy 2s polling, broadcasts `tmux:snapshot` only on diff.
-- `PaneOutputManager` (`src/main/tmux/output.ts`) — legacy `pipe-pane` + file polling, emits `tmux:pane-output`.
-- `TmuxControlConnection` (`src/main/tmux/control.ts`) — event-driven control-mode client; produces snapshots/output via `TmuxTopologyTracker` and `TmuxOutputRouter`. Runs alongside the legacy polling stack until the cutover slice retires it. Only the legacy stack drives Loops today.
-- `CommandEngine` (`src/main/command/engine.ts`) — unified scheduler + matcher. Triggers fire → actions execute → events broadcast. `[LAW:one-type-per-behavior]` collapses former `SchedulerEngine` + `MatcherEngine`.
+- `TmuxControlConnection` (`src/main/tmux/control.ts`) — singleton event-driven control-mode client. Sole producer of tmux state and the only channel through which the rest of the app drives tmux (send-keys, execute, capture-pane). Wraps `tmux-control-mode-js` and maintains the attach-session-bound control client across reconnects.
+- `TmuxTopologyTracker` (`src/main/tmux/topology.ts`) — event-driven topology snapshots, fed by the control connection's subscriptions. The single source of truth for "which panes exist." Broadcast to renderers via `tmux:topology`.
+- `TmuxOutputRouter` (`src/main/tmux/output-router.ts`) — per-pane output stream router; subscribers attach via `tmux:output:subscribe` and receive `tmux:output:chunk`/`tmux:output:state` events plus an initial scrollback capture.
+- `CommandEngine` (`src/main/command/engine.ts`) — unified scheduler + matcher. Consumes tmux through a three-method seam (`onOutput`/`sendKeys`/`execute`); production wires that to the control connection. Triggers fire → actions execute → events broadcast. `[LAW:one-type-per-behavior]` collapses former `SchedulerEngine` + `MatcherEngine`.
 - `proxyManager` (`src/main/proxy/index.ts`) — module-scope singleton. One proxy per app process; auto-starts on launch, lazy-creates the HAR file on first response.
 - `deepLinkServer` (`src/main/deep-link-server.ts`) — HTTP loopback for `promptctl://` dispatch when the URL scheme can't reach Electron in dev. Port written to `~/.promptctl/deep-link-port`.
 - Session-editor singletons (`src/main/sessions/editor.ts`) — active adapter, active file path. Versioning store at `~/.promptctl/versions/<hash>/` (linear history with redo drop).
@@ -95,7 +95,7 @@ Subsystems wired in `src/main/main.ts::app.whenReady`:
 
 ## What lives where
 
-- `src/main/` — Electron main: tmux (legacy polling + new control-mode), command engine, sessions, proxy, IPC handlers, LLM client, task runner, settings store, deep-link.
+- `src/main/` — Electron main: tmux control-mode subsystems (control connection, topology tracker, output router), command engine, sessions, proxy, IPC handlers, LLM client, task runner, settings store, deep-link.
 - `src/renderer/` — React UI, Zustand stores, page components, and the `env.d.ts` IPC type contract.
 - `src/shared/` — `types.ts` and `proxy-events.ts` — canonical shapes shared across the process boundary.
 - `src/test/` — shared test helpers (`electron-mock.ts`, `setup.ts`).
