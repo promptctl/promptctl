@@ -63,6 +63,7 @@ async function selectFirstPane(page: import("playwright").Page): Promise<string>
 test.describe("/debug/tmux-control xterm rendering", () => {
   let server: TmuxServerHandle;
   let appHandle: ElectronAppHandle;
+  let rendererErrors: string[];
 
   test.beforeEach(async ({}, testInfo) => {
     server = createTmuxServer(testInfo.workerIndex);
@@ -71,11 +72,29 @@ test.describe("/debug/tmux-control xterm rendering", () => {
       initialRoute: "/debug/tmux-control",
       env: { PROMPTCTL_TMUX_SESSION: OWNED_SESSION },
     });
+    // [LAW:verifiable-goals] Any uncaught renderer error fails the test —
+    // including the silent ones that wouldn't disturb a DOM assertion. This
+    // is how the chunk-A debug session surfaced the two-Reacts crash:
+    // `Cannot read properties of null (reading 'useRef')` rendered nothing
+    // visible, but pageerror fired. Keep it permanent.
+    rendererErrors = [];
+    appHandle.window.on("pageerror", (err) => {
+      rendererErrors.push(`${err.message}\n${err.stack ?? ""}`);
+    });
+    appHandle.window.on("console", (msg) => {
+      if (msg.type() === "error") {
+        rendererErrors.push(`[console.error] ${msg.text()}`);
+      }
+    });
   });
 
   test.afterEach(async () => {
     await appHandle?.close();
     server?.killServer();
+    expect(
+      rendererErrors,
+      "Renderer reported uncaught errors during test",
+    ).toEqual([]);
   });
 
   test("plain bytes from tmux send-keys appear in xterm rows", async () => {
