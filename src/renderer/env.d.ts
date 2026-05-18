@@ -2,7 +2,6 @@
 
 import type {
   TmuxSnapshot,
-  PaneOutputChunk,
   PaneProcesses,
   Command,
   CommandEvent,
@@ -47,35 +46,13 @@ interface AppSettingsShape {
 export interface ElectronAPI {
   send(
     channel:
-      | "tmux:subscribe"
-      | "tmux:unsubscribe"
       | "command:subscribe"
       | "proxy:subscribe"
       | "proxy:unsubscribe",
   ): void;
-  send(channel: "tmux:watch-pane" | "tmux:unwatch-pane", paneId: string): void;
   send(channel: string, ...args: unknown[]): void;
 
-  invoke(
-    channel: "tmux:snapshot" | "tmux:topology:get",
-  ): Promise<TmuxSnapshot>;
-  invoke(
-    channel: "tmux:send-keys",
-    paneId: string,
-    text: string,
-    pressEnter?: boolean,
-  ): Promise<void>;
-  invoke(
-    channel: "tmux:send-keys-literal",
-    paneId: string,
-    data: string,
-  ): Promise<void>;
-  invoke(
-    channel: "tmux:capture-pane",
-    paneId: string,
-    start: number,
-    end: number,
-  ): Promise<string>;
+  invoke(channel: "tmux:topology:get"): Promise<TmuxSnapshot>;
   invoke(channel: "tmux:pane-processes", paneId: string): Promise<PaneProcesses>;
   invoke(
     channel: "tmux:launch-tool",
@@ -191,7 +168,7 @@ export interface ElectronAPI {
   writeClipboard(text: string): void;
 
   on(
-    channel: "tmux:snapshot" | "tmux:topology",
+    channel: "tmux:topology",
     listener: (snapshot: TmuxSnapshot) => void,
   ): () => void;
   on(
@@ -209,10 +186,6 @@ export interface ElectronAPI {
   on(
     channel: "proxy:clients",
     listener: (infos: ClientInfo[]) => void,
-  ): () => void;
-  on(
-    channel: "tmux:pane-output",
-    listener: (chunk: PaneOutputChunk) => void,
   ): () => void;
   on(
     channel: "command:list",

@@ -1,6 +1,6 @@
 import { useState } from "react";
 import { useCommandStore } from "../store/command";
-import { useTmuxStore } from "../store/tmux";
+import { useTopology } from "../tmux/proxy";
 import type {
   CommandTarget,
   CommandAction,
@@ -120,7 +120,7 @@ export function CommandPanel() {
 }
 
 function AddCommandForm() {
-  const panes = useTmuxStore((s) => s.snapshot.panes);
+  const panes = useTopology().panes;
   const addCommand = useCommandStore((s) => s.addCommand);
 
   const [name, setName] = useState("");

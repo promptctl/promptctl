@@ -18,8 +18,6 @@ import { TmuxControlDebug } from "./pages/TmuxControlDebug";
 import { TmuxTree } from "./components/TmuxTree";
 import { CommandBar } from "./components/CommandBar";
 import { LaunchToolDialog } from "./components/LaunchToolDialog";
-import { initTmuxSubscription } from "./store/tmux";
-import { initOutputSubscription } from "./store/pane-output";
 import { initCommandSubscription } from "./store/command";
 import { initProxySubscription } from "./store/proxy";
 
@@ -174,8 +172,6 @@ function LoopsLayout() {
 
 export function App() {
   useEffect(() => {
-    const unsubTmux = initTmuxSubscription();
-    const unsubOutput = initOutputSubscription();
     const unsubProxy = initProxySubscription();
     let unsubCommand: (() => void) | undefined;
 
@@ -184,8 +180,6 @@ export function App() {
     });
 
     return () => {
-      unsubTmux();
-      unsubOutput();
       unsubProxy();
       unsubCommand?.();
     };

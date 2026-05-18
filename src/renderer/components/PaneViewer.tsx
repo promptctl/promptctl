@@ -1,7 +1,8 @@
 import { useEffect, useState } from "react";
-import { useTmuxStore } from "../store/tmux";
-import { PaneOutput } from "./PaneOutput";
-import { PaneInput } from "./PaneInput";
+import { PaneTerminal } from "@promptctl/pane-terminal/react";
+import "@xterm/xterm/css/xterm.css";
+import { usePaneSelectionStore } from "../store/pane-selection";
+import { useTopology, usePaneStream } from "../tmux/proxy";
 import type { ToolKind, PaneProcesses } from "../../shared/types";
 
 const TOOL_COLORS: Record<ToolKind, string> = {
@@ -78,10 +79,15 @@ function ProcessInfoPanel({ paneId }: { paneId: string }) {
 }
 
 export function PaneViewer() {
-  const selectedPaneId = useTmuxStore((s) => s.selectedPaneId);
-  const pane = useTmuxStore((s) =>
-    s.snapshot.panes.find((p) => p.id === s.selectedPaneId),
-  );
+  const selectedPaneId = usePaneSelectionStore((s) => s.selectedPaneId);
+  const topology = useTopology();
+  const pane = topology.panes.find((p) => p.id === selectedPaneId);
+  // [LAW:dataflow-not-control-flow] Stream is keyed on the *valid* pane id —
+  // if selection points to a gone pane, we drop to null and the terminal
+  // unmounts. The selection store is untouched (user keeps their intent);
+  // when the pane comes back or another is picked the stream rebuilds.
+  const activePaneId = pane ? pane.id : null;
+  const stream = usePaneStream(activePaneId);
 
   if (!selectedPaneId || !pane) {
     return (
@@ -93,7 +99,6 @@ export function PaneViewer() {
 
   return (
     <div className="flex h-full flex-col gap-3">
-      {/* Header */}
       <div className="flex flex-col gap-1">
         <div className="flex items-center gap-3">
           <h2 className="text-lg font-semibold text-neutral-100">
@@ -114,13 +119,15 @@ export function PaneViewer() {
         <ProcessInfoPanel paneId={selectedPaneId} />
       </div>
 
-      {/* Terminal output */}
-      <div className="min-h-0 flex-1">
-        <PaneOutput paneId={selectedPaneId} />
+      <div
+        data-testid="loops-pane-terminal"
+        data-pane-id={pane.id}
+        className="min-h-0 flex-1 overflow-hidden rounded-lg bg-neutral-900"
+      >
+        {stream !== null && (
+          <PaneTerminal stream={stream} className="h-full w-full" autoFocus />
+        )}
       </div>
-
-      {/* Input */}
-      <PaneInput paneId={selectedPaneId} />
     </div>
   );
 }
