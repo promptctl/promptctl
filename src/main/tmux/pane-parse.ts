@@ -36,13 +36,19 @@ export function detectToolKind(command: string): ToolKind {
   return "unknown";
 }
 
+// [LAW:single-enforcer] This is the trust boundary where tmux output earns the
+// PaneId brand. A line whose first field is not a `%<number>` is not a pane —
+// it is dropped here rather than rubber-stamped into a TmuxPane that downstream
+// code would `parseInt` into NaN. Consumers trust the brand and never re-check.
+const PANE_ID = /^%\d+$/;
+
 export function parsePaneList(stdout: string): TmuxPane[] {
   return stdout
     .trim()
     .split("\n")
-    .filter((line) => line.length > 0)
-    .map((line) => {
-      const fields = line.split("\t");
+    .map((line) => line.split("\t"))
+    .filter((fields) => PANE_ID.test(fields[0] ?? ""))
+    .map((fields) => {
       const currentCommand = fields[8] ?? "";
       return {
         id: (fields[0] ?? "") as PaneId,

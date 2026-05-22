@@ -55,6 +55,16 @@ describe("parsePaneList", () => {
     expect(parsePaneList("")).toHaveLength(0);
     expect(parsePaneList("\n")).toHaveLength(0);
   });
+
+  it("drops lines whose first field is not a %<number> pane id", () => {
+    const input = [
+      "%0\twork\t$0\tcode\t@0\t0\t0\t1234\tclaude\t/home/user\t120\t40\t1",
+      "\tgarbage\t$0\tcode\t@0\t0\t0\t1\tbash\t/x\t1\t1\t0", // empty pane id
+      "bogus\twork\t$0\tcode\t@0\t0\t0\t1\tbash\t/x\t1\t1\t0", // malformed id
+    ].join("\n");
+    const panes = parsePaneList(input);
+    expect(panes.map((p) => p.id)).toEqual(["%0"]);
+  });
 });
 
 describe("PANE_FORMAT", () => {
