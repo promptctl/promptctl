@@ -3,7 +3,7 @@ import { PaneTerminal } from "@promptctl/pane-terminal/react";
 import "@xterm/xterm/css/xterm.css";
 import { usePaneSelectionStore } from "../store/pane-selection";
 import { useTopology, usePaneStream } from "../tmux/proxy";
-import type { ToolKind, PaneProcesses } from "../../shared/types";
+import type { ToolKind, PaneProcesses, PaneId } from "../../shared/types";
 
 const TOOL_COLORS: Record<ToolKind, string> = {
   claude: "bg-orange-500/10 text-orange-400 border-orange-500/20",
@@ -12,7 +12,7 @@ const TOOL_COLORS: Record<ToolKind, string> = {
   unknown: "",
 };
 
-function ProcessInfoPanel({ paneId }: { paneId: string }) {
+function ProcessInfoPanel({ paneId }: { paneId: PaneId }) {
   const [processes, setProcesses] = useState<PaneProcesses | null>(null);
   const [expanded, setExpanded] = useState(false);
 

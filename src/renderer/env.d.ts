@@ -21,6 +21,7 @@ import type {
   TmuxOutputChunk,
   TmuxOutputStateEvent,
   SessionId,
+  PaneId,
 } from "../shared/types";
 import type {
   ClientInfo,
@@ -54,13 +55,13 @@ export interface ElectronAPI {
   send(channel: string, ...args: unknown[]): void;
 
   invoke(channel: "tmux:topology:get"): Promise<TmuxSnapshot>;
-  invoke(channel: "tmux:pane-processes", paneId: string): Promise<PaneProcesses>;
+  invoke(channel: "tmux:pane-processes", paneId: PaneId): Promise<PaneProcesses>;
   invoke(
     channel: "tmux:launch-tool",
     kind: string,
     sessionName: string,
     cwd: string,
-  ): Promise<string>;
+  ): Promise<PaneId>;
   invoke(channel: "command:list"): Promise<Command[]>;
   invoke(channel: "command:add", command: Command): Promise<void>;
   invoke(channel: "command:remove" | "command:fire" | "tmux:output:subscribe" | "tmux:output:unsubscribe", id: string): Promise<void>;
