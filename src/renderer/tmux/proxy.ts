@@ -99,8 +99,19 @@ export function usePaneStream(pane: TmuxPane | null): PaneStream | null {
   const sessionId = pane?.sessionId ?? null;
   const [stream, setStream] = useState<PaneStream | null>(null);
 
+  // [LAW:dataflow-not-control-flow] The watch intent's only input is the
+  // session, so it fires only when the session changes — switching panes within
+  // one session never re-issues switch-client. The rejection is handled
+  // deliberately (not swallowed): main owns attach-failure recovery via reconnect
+  // and the control-state broadcast, so the renderer's sole duty is to keep a
+  // rejected intent from becoming an unhandled promise rejection.
   useEffect(() => {
-    void window.electronAPI.invoke("tmux:watch-session", sessionId);
+    window.electronAPI
+      .invoke("tmux:watch-session", sessionId)
+      .catch((err) => console.error("tmux:watch-session rejected", err));
+  }, [sessionId]);
+
+  useEffect(() => {
     if (paneId === null) {
       setStream(null);
       return undefined;
@@ -115,7 +126,7 @@ export function usePaneStream(pane: TmuxPane | null): PaneStream | null {
       next.dispose();
       setStream(null);
     };
-  }, [paneId, sessionId]);
+  }, [paneId]);
 
   return stream;
 }
