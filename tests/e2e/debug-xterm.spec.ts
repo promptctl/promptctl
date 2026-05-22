@@ -43,13 +43,25 @@ async function selectFirstPane(page: import("playwright").Page): Promise<string>
 
   // Settle: wait for topology row to materialize before snapshotting.
   await page.waitForTimeout(150);
-  const paneIds = await page
-    .locator("[data-pane-row]")
-    .evaluateAll((nodes) =>
-      nodes.map((n) => n.getAttribute("data-pane-row") ?? ""),
+  // Topology now surfaces every pane on the server (including the fixture's
+  // bootstrap session). Live %output events only fire for the attached
+  // session, so pick the OWNED_SESSION pane deterministically — testing the
+  // xterm render pipeline, not cross-session output reachability.
+  const ownedPanes = await page
+    .locator(`[data-pane-row]`)
+    .evaluateAll((nodes, owned) =>
+      nodes
+        .filter(
+          (n) =>
+            n.parentElement?.querySelector(
+              `[data-testid="${n.getAttribute("data-testid")}-session"]`,
+            )?.textContent === owned,
+        )
+        .map((n) => n.getAttribute("data-pane-row") ?? ""),
+      OWNED_SESSION,
     );
-  expect(paneIds.length).toBeGreaterThanOrEqual(1);
-  const paneId = paneIds[0];
+  expect(ownedPanes.length).toBeGreaterThanOrEqual(1);
+  const paneId = ownedPanes[0];
   expect(paneId.startsWith("%")).toBe(true);
   await page.locator(`[data-testid="watch-${paneId}"]`).click();
   // The library's <PaneTerminal> renders a `.xterm` wrapper once XtermSink

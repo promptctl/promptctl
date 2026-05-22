@@ -54,7 +54,7 @@ afterEach(() => {
 });
 
 describe("TmuxControlConnection", () => {
-  it("enters ready after server probe + setFlags resolves", async () => {
+  it("enters ready after server probe + setFlags + attach resolve", async () => {
     const transport = new FakeTransport();
     const states: ConnectionStateEvent[] = [];
 
@@ -70,10 +70,78 @@ describe("TmuxControlConnection", () => {
     expect(transport.sent[0]).toBe("refresh-client -f pause-after=2\n");
 
     transport.ack(1);
+    // applyWatchedSession attaches the client to the owned session after
+    // setFlags; readiness waits on this so the attachment is established first.
+    await waitFor(() => transport.sent.length > 1);
+    expect(transport.sent[1]).toBe("switch-client -t promptctl-test\n");
+
+    transport.ack(2);
     await conn.ready;
 
     expect(conn.getState().status).toBe("ready");
     expect(states.map((s) => s.status)).toContain("ready");
+  });
+
+  it("watchSession switches the live client to the requested session", async () => {
+    const transport = new FakeTransport();
+    const conn = TmuxControlConnection.start({
+      transportFactory: () => transport,
+      sessionName: "promptctl-test",
+      bootstrap: async () => undefined,
+      reconnectDelayMs: 50,
+    });
+
+    await waitFor(() => transport.sent.length > 0);
+    transport.ack(1); // setFlags
+    await waitFor(() => transport.sent.length > 1);
+    transport.ack(2); // initial attach to the owned session
+    await conn.ready;
+
+    const before = transport.sent.length;
+    const watching = conn.watchSession("$3");
+    await waitFor(() => transport.sent.length > before);
+    expect(transport.sent[before]).toBe("switch-client -t $3\n");
+    transport.ack(3);
+    await watching;
+  });
+
+  it("re-applies the watched session after a reconnect", async () => {
+    const t1 = new FakeTransport();
+    const t2 = new FakeTransport();
+    const transports = [t1, t2];
+
+    const conn = TmuxControlConnection.start({
+      transportFactory: () => {
+        const next = transports.shift();
+        if (!next) throw new Error("test exhausted transport pool");
+        return next;
+      },
+      sessionName: "promptctl-test",
+      bootstrap: async () => undefined,
+      reconnectDelayMs: 10,
+    });
+
+    await waitFor(() => t1.sent.length > 0);
+    t1.ack(1);
+    await waitFor(() => t1.sent.length > 1);
+    t1.ack(2);
+    await conn.ready;
+
+    const watching = conn.watchSession("$5");
+    await waitFor(() => t1.sent.length > 2);
+    t1.ack(3);
+    await watching;
+
+    t1.externalDrop();
+
+    await waitFor(() => t2.sent.length > 0, 1000);
+    t2.ack(1); // setFlags on the fresh client
+    // The new client must re-attach to the WATCHED session, not the owned one —
+    // the renderer never sees the drop, so only the connection can restore it.
+    await waitFor(() => t2.sent.length > 1, 1000);
+    expect(t2.sent[1]).toBe("switch-client -t $5\n");
+    t2.ack(2);
+    await waitFor(() => conn.getState().status === "ready");
   });
 
   it("re-registers subscriptions on reconnect", async () => {
@@ -97,6 +165,8 @@ describe("TmuxControlConnection", () => {
 
     await waitFor(() => t1.sent.length > 0);
     t1.ack(1);
+    await waitFor(() => t1.sent.length > 1);
+    t1.ack(2);
     await conn.ready;
 
     t1.feed("%window-add @42\n");
@@ -106,6 +176,8 @@ describe("TmuxControlConnection", () => {
 
     await waitFor(() => t2.sent.length > 0, 1000);
     t2.ack(1);
+    await waitFor(() => t2.sent.length > 1, 1000);
+    t2.ack(2);
     await waitFor(() => conn.getState().status === "ready");
 
     t2.feed("%window-add @99\n");
@@ -130,6 +202,8 @@ describe("TmuxControlConnection", () => {
     expect(conn.getState().status).toBe("connecting");
 
     transport.ack(1);
+    await waitFor(() => transport.sent.length > 1, 1000);
+    transport.ack(2);
     await conn.ready;
     expect(conn.getState().status).toBe("ready");
   });
@@ -174,6 +248,8 @@ describe("TmuxControlConnection", () => {
 
     await waitFor(() => t1.sent.length > 0);
     t1.ack(1);
+    await waitFor(() => t1.sent.length > 1);
+    t1.ack(2);
     await conn.ready;
 
     off();
@@ -181,6 +257,8 @@ describe("TmuxControlConnection", () => {
 
     await waitFor(() => t2.sent.length > 0, 1000);
     t2.ack(1);
+    await waitFor(() => t2.sent.length > 1, 1000);
+    t2.ack(2);
     await waitFor(() => conn.getState().status === "ready");
 
     t2.feed("%window-add @7\n");

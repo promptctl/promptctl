@@ -100,7 +100,7 @@ test.describe("/debug/tmux-control reflects live topology", () => {
     expect(cmdText.length).toBeGreaterThan(0);
   });
 
-  test("ignores panes in sessions outside the promptctl-owned one", async () => {
+  test("surfaces panes from other sessions on the same server", async () => {
     const { window } = appHandle;
 
     await expect(window.locator("[data-testid=control-status]")).toHaveText(
@@ -113,8 +113,8 @@ test.describe("/debug/tmux-control reflects live topology", () => {
     const before = Number(await countLocator.textContent());
 
     // Pre-existing fixture session "bootstrap" + add another window in it.
-    // None of these panes belong to the owned session, so the count must
-    // not change.
+    // Both belong to a non-owned session; promptctl now surfaces every pane
+    // on the connected server, so the count must grow by exactly 2.
     execSync(`tmux -L ${server.socket} split-window -t bootstrap`, {
       stdio: "ignore",
     });
@@ -122,12 +122,9 @@ test.describe("/debug/tmux-control reflects live topology", () => {
       stdio: "ignore",
     });
 
-    // Give the tracker a beat — if the filter were broken, the count would
-    // jump by 2 within ~50ms. We poll for that for 800ms; if it never
-    // happens, the filter is working.
-    await window.waitForTimeout(800);
-    const after = Number(await countLocator.textContent());
-    expect(after).toBe(before);
+    await expect(countLocator).toHaveText(String(before + 2), {
+      timeout: TOPOLOGY_TIMEOUT_MS,
+    });
   });
 
   test("removes a pane row within one event tick of kill-window", async () => {

@@ -1,11 +1,13 @@
-// [LAW:one-source-of-truth] Sole producer of tmux-server state for the new
-// event-driven path. Until 77e.1.3/.4 retire src/main/tmux/state.ts and output.ts,
-// this connection runs in parallel with the legacy polling stack — both observe
-// the same tmux server, only the legacy stack is wired to renderers today.
+// [LAW:one-source-of-truth] Sole producer of tmux-server state and the only
+// channel through which the rest of the app drives tmux. Outside callers see a
+// stable handle (`client`, `ready`, `on`) regardless of whether the underlying
+// TmuxClient has been replaced after a reconnect.
 //
 // [LAW:single-enforcer] Connect / reconnect / close transitions go through this
-// class. Outside callers see a stable handle (`client`, `ready`, `on`) regardless
-// of whether the underlying TmuxClient has been replaced after a reconnect.
+// class — and so does the attached session. tmux delivers %output only for the
+// session the control client is attached to, so "which session is attached" is
+// a cross-cutting invariant: it gates what the output router, command engine,
+// and renderer pane streams can observe. watchSession() is its only writer.
 //
 // [LAW:dataflow-not-control-flow] connect() runs the same sequence every
 // invocation: setStatus("connecting") → spawn → register listeners → setFlags
@@ -71,6 +73,11 @@ export class TmuxControlConnection {
   private readonly clientListeners: PendingClientListener[] = [];
 
   private currentClient: TmuxClient | null = null;
+  // [LAW:one-source-of-truth] The session the control client should be attached
+  // to. `null` means the owned session (the bootstrap default). Re-applied on
+  // every (re)connect so a transport drop never silently strands the client on
+  // the owned session while the UI still believes it is watching another.
+  private watchedSession: string | null = null;
   private status: ConnectionStatus = "connecting";
   private statusReason: string | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -131,15 +138,37 @@ export class TmuxControlConnection {
     return this._ready;
   }
 
-  // The promptctl-owned session this connection is attached to. Stable for
-  // the lifetime of the singleton; downstream consumers (topology tracker,
-  // launch registry) read this to scope their observations.
-  get ownedSessionName(): string {
-    return this.sessionName;
-  }
-
   get client(): TmuxClient | null {
     return this.currentClient;
+  }
+
+  // [LAW:single-enforcer] The only writer of the attached session. Loops and
+  // the debug surface express intent ("watch this pane's session"); this method
+  // records it and switches the live client. `null` reverts to the owned
+  // session. The intent survives reconnects because connect() re-applies it on
+  // ready — the renderer cannot do this itself since it never sees the drop.
+  async watchSession(sessionId: string | null): Promise<void> {
+    this.watchedSession = sessionId;
+    const client = this.currentClient;
+    // [LAW:no-defensive-null-guards] currentClient is genuinely optional while
+    // (re)connecting; the intent is recorded above and connect() applies it on
+    // ready, so an early return here defers the work — it never drops it.
+    if (client === null) return;
+    await this.applyWatchedSession(client);
+  }
+
+  // [LAW:dataflow-not-control-flow] Always switches to the resolved target
+  // (watched session, else owned). On first connect that target is the owned
+  // session the argv already attached to — an idempotent no-op — so the same
+  // line runs on every ready transition without a "did the user pick a session"
+  // branch. A failed switch (target killed while detached) reverts to the owned
+  // session, which the bootstrap guarantees exists.
+  private async applyWatchedSession(client: TmuxClient): Promise<void> {
+    const target = this.watchedSession ?? this.sessionName;
+    const resp = await client.execute(`switch-client -t ${target}`);
+    if (resp.success) return;
+    this.watchedSession = null;
+    await client.execute(`switch-client -t ${this.sessionName}`);
   }
 
   getState(): ConnectionStateEvent {
@@ -213,6 +242,7 @@ export class TmuxControlConnection {
 
     try {
       await client.setFlags(["pause-after=2"]);
+      await this.applyWatchedSession(client);
     } catch (err) {
       this.handleClientFailure(client, errorMessage(err));
       return;

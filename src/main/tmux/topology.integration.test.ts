@@ -88,7 +88,6 @@ describe("TmuxTopologyTracker (real tmux)", () => {
       onEvent: (event, handler) => conn.on(event, handler),
       onConnectionState: (listener) => conn.onConnectionState(listener),
       getClient: () => conn.client,
-      ownedSessionName: () => conn.ownedSessionName,
     });
 
     const seen: TmuxSnapshot[] = [];
@@ -105,9 +104,7 @@ describe("TmuxTopologyTracker (real tmux)", () => {
 
     const snapshot = seen[seen.length - 1];
     expect(snapshot.panes.length).toBeGreaterThanOrEqual(1);
-    // Every pane in the snapshot must belong to the owned session — the
-    // tracker filters out anything else.
-    expect(snapshot.panes.every((p) => p.sessionName === OWNED)).toBe(true);
+    expect(snapshot.panes.some((p) => p.sessionName === OWNED)).toBe(true);
 
     tracker.dispose();
     conn.close();
@@ -124,7 +121,6 @@ describe("TmuxTopologyTracker (real tmux)", () => {
       onEvent: (event, handler) => conn.on(event, handler),
       onConnectionState: (listener) => conn.onConnectionState(listener),
       getClient: () => conn.client,
-      ownedSessionName: () => conn.ownedSessionName,
     });
 
     await conn.ready;
@@ -149,9 +145,10 @@ describe("TmuxTopologyTracker (real tmux)", () => {
     conn.close();
   });
 
-  it("ignores panes that belong to other sessions on the same server", async () => {
+  it("surfaces panes from other sessions on the same server", async () => {
     // Pre-create a "user" session on the same server. This stands in for
-    // the user's existing tmux work; promptctl must not surface its panes.
+    // the user's existing tmux work — promptctl must surface its panes
+    // alongside its own, not hide them.
     execSync(tmuxCmd(socket, "new-session -d -s user-work"), {
       stdio: "ignore",
     });
@@ -170,20 +167,19 @@ describe("TmuxTopologyTracker (real tmux)", () => {
       onEvent: (event, handler) => conn.on(event, handler),
       onConnectionState: (listener) => conn.onConnectionState(listener),
       getClient: () => conn.client,
-      ownedSessionName: () => conn.ownedSessionName,
     });
 
     await conn.ready;
     await waitFor(
-      () => tracker.snapshot().panes.length >= 1,
+      () =>
+        tracker.snapshot().panes.some((p) => p.sessionName === "user-work"),
       5000,
-      "owned session pane appears",
+      "user-work panes appear in snapshot",
     );
 
-    // Snapshot must contain ONLY owned-session panes — never user-work's.
     const snap = tracker.snapshot();
-    expect(snap.panes.every((p) => p.sessionName === OWNED)).toBe(true);
-    expect(snap.panes.some((p) => p.sessionName === "user-work")).toBe(false);
+    expect(snap.panes.some((p) => p.sessionName === OWNED)).toBe(true);
+    expect(snap.panes.filter((p) => p.sessionName === "user-work")).toHaveLength(2);
 
     tracker.dispose();
     conn.close();
@@ -200,7 +196,6 @@ describe("TmuxTopologyTracker (real tmux)", () => {
       onEvent: (event, handler) => conn.on(event, handler),
       onConnectionState: (listener) => conn.onConnectionState(listener),
       getClient: () => conn.client,
-      ownedSessionName: () => conn.ownedSessionName,
     });
 
     await conn.ready;

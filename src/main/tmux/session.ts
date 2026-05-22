@@ -6,8 +6,8 @@
 // production, or two checkouts) get different names and do not collide.
 //
 // [LAW:single-enforcer] Every consumer (TmuxControlConnection bootstrap,
-// topology tracker filter, future launch registry) reads ownedSessionName()
-// rather than recomputing the hash.
+// future launch registry) reads ownedSessionName() rather than recomputing
+// the hash.
 
 import { createHash } from "node:crypto";
 import { TmuxError, tmuxExec } from "./exec";

@@ -20,6 +20,7 @@ import type {
   DiffEntry,
   TmuxOutputChunk,
   TmuxOutputStateEvent,
+  SessionId,
 } from "../shared/types";
 import type {
   ClientInfo,
@@ -164,6 +165,7 @@ export interface ElectronAPI {
   invoke(channel: "proxy:load-har", filePath: string): Promise<ProxyStatus>;
   invoke(channel: "proxy:pick-har"): Promise<string | null>;
   invoke(channel: "tmux:control-state:get"): Promise<TmuxControlState>;
+  invoke(channel: "tmux:watch-session", sessionId: SessionId | null): Promise<void>;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   writeClipboard(text: string): void;
 

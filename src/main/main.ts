@@ -111,7 +111,6 @@ const tmuxTopology = new TmuxTopologyTracker({
   onEvent: (event, handler) => tmuxControl.on(event, handler),
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   getClient: () => tmuxControl.client,
-  ownedSessionName: () => tmuxControl.ownedSessionName,
 });
 const tmuxOutputRouter = new TmuxOutputRouter({
   onEvent: (event, handler) => tmuxControl.on(event, handler),

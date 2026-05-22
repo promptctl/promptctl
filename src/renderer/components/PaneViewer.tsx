@@ -82,12 +82,11 @@ export function PaneViewer() {
   const selectedPaneId = usePaneSelectionStore((s) => s.selectedPaneId);
   const topology = useTopology();
   const pane = topology.panes.find((p) => p.id === selectedPaneId);
-  // [LAW:dataflow-not-control-flow] Stream is keyed on the *valid* pane id —
-  // if selection points to a gone pane, we drop to null and the terminal
-  // unmounts. The selection store is untouched (user keeps their intent);
-  // when the pane comes back or another is picked the stream rebuilds.
-  const activePaneId = pane ? pane.id : null;
-  const stream = usePaneStream(activePaneId);
+  // [LAW:dataflow-not-control-flow] Stream is keyed on the *valid* pane — if
+  // selection points to a gone pane, we drop to null and the terminal unmounts.
+  // The selection store is untouched (user keeps their intent); when the pane
+  // comes back or another is picked the stream rebuilds.
+  const stream = usePaneStream(pane ?? null);
 
   if (!selectedPaneId || !pane) {
     return (
