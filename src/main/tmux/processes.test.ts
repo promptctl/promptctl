@@ -1,5 +1,14 @@
+// @vitest-environment node
+//
+// Unit tests for the pure pieces of processes.ts: ps-output parsing and the
+// exit-code policy that decides whether an execFile error is the empty-set
+// (exit 1) or a real failure. The real-subprocess wiring test for
+// getPaneProcesses lives in processes.integration.test.ts to keep this suite
+// hermetic, matching the *.test.ts / *.integration.test.ts split used by the
+// other src/main/tmux modules.
+
 import { describe, it, expect } from "vitest";
-import { parsePsOutput, isRealExecFailure, getPaneProcesses } from "./processes";
+import { parsePsOutput, isRealExecFailure } from "./processes";
 
 describe("parsePsOutput", () => {
   it("parses standard ps output", () => {
@@ -44,14 +53,5 @@ describe("isRealExecFailure", () => {
   it("treats any other exit code as a genuine failure", () => {
     expect(isRealExecFailure({ code: 127 })).toBe(true);
     expect(isRealExecFailure({ code: 2 })).toBe(true);
-  });
-});
-
-describe("getPaneProcesses", () => {
-  it("returns [] for a pane with no children without throwing", async () => {
-    // A ppid with no children makes the real `pgrep -P` exit 1 — the empty-set
-    // path must resolve [] end-to-end rather than reject. 2147483647 is above
-    // any live pid, so it reliably has no children.
-    await expect(getPaneProcesses(2147483647)).resolves.toEqual([]);
   });
 });
