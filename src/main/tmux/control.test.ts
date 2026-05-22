@@ -73,7 +73,7 @@ describe("TmuxControlConnection", () => {
     // applyWatchedSession attaches the client to the owned session after
     // setFlags; readiness waits on this so the attachment is established first.
     await waitFor(() => transport.sent.length > 1);
-    expect(transport.sent[1]).toBe("switch-client -t promptctl-test\n");
+    expect(transport.sent[1]).toBe("switch-client -t 'promptctl-test'\n");
 
     transport.ack(2);
     await conn.ready;
@@ -100,7 +100,7 @@ describe("TmuxControlConnection", () => {
     const before = transport.sent.length;
     const watching = conn.watchSession("$3");
     await waitFor(() => transport.sent.length > before);
-    expect(transport.sent[before]).toBe("switch-client -t $3\n");
+    expect(transport.sent[before]).toBe("switch-client -t '$3'\n");
     transport.ack(3);
     await watching;
   });
@@ -139,7 +139,7 @@ describe("TmuxControlConnection", () => {
     // The new client must re-attach to the WATCHED session, not the owned one —
     // the renderer never sees the drop, so only the connection can restore it.
     await waitFor(() => t2.sent.length > 1, 1000);
-    expect(t2.sent[1]).toBe("switch-client -t $5\n");
+    expect(t2.sent[1]).toBe("switch-client -t '$5'\n");
     t2.ack(2);
     await waitFor(() => conn.getState().status === "ready");
   });

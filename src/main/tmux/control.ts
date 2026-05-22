@@ -20,6 +20,7 @@ import {
   type TmuxEventMap,
   type TmuxTransport,
 } from "tmux-control-mode-js";
+import { tmuxEscape } from "tmux-control-mode-js/protocol";
 import { ensureSession } from "./session";
 
 export type ConnectionStatus = "connecting" | "ready" | "closed";
@@ -161,14 +162,33 @@ export class TmuxControlConnection {
   // (watched session, else owned). On first connect that target is the owned
   // session the argv already attached to — an idempotent no-op — so the same
   // line runs on every ready transition without a "did the user pick a session"
-  // branch. A failed switch (target killed while detached) reverts to the owned
-  // session, which the bootstrap guarantees exists.
+  // branch.
+  //
+  // [LAW:no-silent-fallbacks] A failed switch to a foreign watched session
+  // (killed while we were detached) reverts to the owned session, which the
+  // bootstrap guarantees exists — but the fallback's success is checked. A
+  // swallowed failure would let connect() reach `ready` with the client
+  // unattached, silently killing %output delivery; instead it throws so connect
+  // routes through the reconnect path. When the target already WAS the owned
+  // session there is no fallback, so the failure surfaces directly.
   private async applyWatchedSession(client: TmuxClient): Promise<void> {
     const target = this.watchedSession ?? this.sessionName;
-    const resp = await client.execute(`switch-client -t ${target}`);
+    const resp = await client.execute(`switch-client -t ${tmuxEscape(target)}`);
     if (resp.success) return;
+    if (this.watchedSession === null) {
+      throw new Error(
+        `switch-client to owned session ${target} failed: ${resp.output.join("\n")}`,
+      );
+    }
     this.watchedSession = null;
-    await client.execute(`switch-client -t ${this.sessionName}`);
+    const owned = await client.execute(
+      `switch-client -t ${tmuxEscape(this.sessionName)}`,
+    );
+    if (!owned.success) {
+      throw new Error(
+        `switch-client to owned session ${this.sessionName} failed: ${owned.output.join("\n")}`,
+      );
+    }
   }
 
   getState(): ConnectionStateEvent {

@@ -118,13 +118,13 @@ describe("CommandEngine", () => {
     expect(deps.executed).toEqual([`kill-pane -t '${PANE}'`]);
   });
 
-  it("capture-output action invokes execute with capture-pane flags", async () => {
+  it("capture-output action invokes execute with single-quoted target", async () => {
     engine.addCommand(
       makeCommand({ action: { kind: "capture-output" } }),
     );
     await engine.fireCommand("cmd-1");
     expect(deps.executed).toEqual([
-      `capture-pane -t ${PANE} -p -e -J -S -500`,
+      `capture-pane -t '${PANE}' -p -e -J -S -500`,
     ]);
   });
 

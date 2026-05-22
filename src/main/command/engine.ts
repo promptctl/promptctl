@@ -271,7 +271,7 @@ export class CommandEngine {
           const paneId = this.resolveTargetPane(command);
           if (paneId)
             await this.deps.execute(
-              `capture-pane -t ${paneId} -p -e -J -S -500`,
+              `capture-pane -t ${tmuxEscape(paneId)} -p -e -J -S -500`,
             );
           break;
         }
