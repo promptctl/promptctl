@@ -13,6 +13,7 @@ import type {
   ConnectionStateEvent,
   TmuxControlConnection,
 } from "../tmux/control";
+import type { SessionId } from "../../shared/types";
 
 export function registerTmuxControlHandlers(
   connection: TmuxControlConnection,
@@ -26,7 +27,7 @@ export function registerTmuxControlHandlers(
   // drives switch-client directly — main owns the attachment across reconnects.
   ipcMain.handle(
     "tmux:watch-session",
-    (_e, sessionId: string | null): Promise<void> =>
+    (_e, sessionId: SessionId | null): Promise<void> =>
       connection.watchSession(sessionId),
   );
 

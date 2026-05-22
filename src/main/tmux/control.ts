@@ -21,6 +21,7 @@ import {
   type TmuxTransport,
 } from "tmux-control-mode-js";
 import { tmuxEscape } from "tmux-control-mode-js/protocol";
+import type { SessionId } from "../../shared/types";
 import { ensureSession } from "./session";
 
 export type ConnectionStatus = "connecting" | "ready" | "closed";
@@ -78,7 +79,7 @@ export class TmuxControlConnection {
   // to. `null` means the owned session (the bootstrap default). Re-applied on
   // every (re)connect so a transport drop never silently strands the client on
   // the owned session while the UI still believes it is watching another.
-  private watchedSession: string | null = null;
+  private watchedSession: SessionId | null = null;
   private status: ConnectionStatus = "connecting";
   private statusReason: string | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -148,7 +149,7 @@ export class TmuxControlConnection {
   // records it and switches the live client. `null` reverts to the owned
   // session. The intent survives reconnects because connect() re-applies it on
   // ready — the renderer cannot do this itself since it never sees the drop.
-  async watchSession(sessionId: string | null): Promise<void> {
+  async watchSession(sessionId: SessionId | null): Promise<void> {
     this.watchedSession = sessionId;
     const client = this.currentClient;
     // [LAW:no-defensive-null-guards] currentClient is genuinely optional while

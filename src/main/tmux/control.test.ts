@@ -11,6 +11,7 @@ import {
   type ConnectionStateEvent,
 } from "./control";
 import type { TmuxTransport } from "tmux-control-mode-js";
+import type { SessionId } from "../../shared/types";
 
 class FakeTransport implements TmuxTransport {
   readonly sent: string[] = [];
@@ -98,7 +99,7 @@ describe("TmuxControlConnection", () => {
     await conn.ready;
 
     const before = transport.sent.length;
-    const watching = conn.watchSession("$3");
+    const watching = conn.watchSession("$3" as SessionId);
     await waitFor(() => transport.sent.length > before);
     expect(transport.sent[before]).toBe("switch-client -t '$3'\n");
     transport.ack(3);
@@ -127,7 +128,7 @@ describe("TmuxControlConnection", () => {
     t1.ack(2);
     await conn.ready;
 
-    const watching = conn.watchSession("$5");
+    const watching = conn.watchSession("$5" as SessionId);
     await waitFor(() => t1.sent.length > 2);
     t1.ack(3);
     await watching;
