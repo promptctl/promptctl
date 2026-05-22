@@ -1,5 +1,6 @@
 import { useState, type MouseEvent } from "react";
-import { useTmuxStore } from "../store/tmux";
+import { usePaneSelectionStore } from "../store/pane-selection";
+import { useTopology } from "../tmux/proxy";
 import { buildTree, filterPanes, flatLabel } from "../lib/tmux-tree";
 import { ContextMenu, type ContextMenuItem } from "./ContextMenu";
 import type { PaneId, TmuxPane, ToolKind } from "../../shared/types";
@@ -47,6 +48,8 @@ function PaneRow({
     <button
       onClick={() => onSelect(pane.id)}
       onContextMenu={handleContext}
+      data-testid={`loops-pane-row-${pane.id}`}
+      data-pane-id={pane.id}
       className={`flex w-full items-center gap-2 rounded px-2 py-1 text-left text-xs transition-colors ${
         selected
           ? "bg-neutral-700 text-neutral-100"
@@ -156,13 +159,13 @@ function WindowNode({
 }
 
 export function TmuxTree() {
-  const snapshot = useTmuxStore((s) => s.snapshot);
-  const selectedPaneId = useTmuxStore((s) => s.selectedPaneId);
-  const selectPane = useTmuxStore((s) => s.selectPane);
-  const filterText = useTmuxStore((s) => s.filterText);
-  const setFilterText = useTmuxStore((s) => s.setFilterText);
-  const viewMode = useTmuxStore((s) => s.viewMode);
-  const setViewMode = useTmuxStore((s) => s.setViewMode);
+  const snapshot = useTopology();
+  const selectedPaneId = usePaneSelectionStore((s) => s.selectedPaneId);
+  const selectPane = usePaneSelectionStore((s) => s.selectPane);
+  const filterText = usePaneSelectionStore((s) => s.filterText);
+  const setFilterText = usePaneSelectionStore((s) => s.setFilterText);
+  const viewMode = usePaneSelectionStore((s) => s.viewMode);
+  const setViewMode = usePaneSelectionStore((s) => s.setViewMode);
 
   const [ctxMenu, setCtxMenu] = useState<{
     x: number;

@@ -21,7 +21,7 @@ import type {
   WindowAddMessage,
   WindowCloseMessage,
 } from "tmux-control-mode-js/protocol";
-import { PANE_FORMAT } from "./client";
+import { PANE_FORMAT } from "./pane-parse";
 import type { ConnectionStateEvent } from "./control";
 import {
   TmuxTopologyTracker,
@@ -98,7 +98,7 @@ function makeHarness(): Harness {
         success: true,
       };
     },
-    async subscribe(
+    async subscribeRaw(
       name: string,
       what: string,
       format: string,
@@ -135,9 +135,6 @@ function makeHarness(): Harness {
     },
     getClient() {
       return client;
-    },
-    ownedSessionName() {
-      return "promptctl-test";
     },
   });
 
@@ -365,11 +362,11 @@ describe("TmuxTopologyTracker", () => {
     expect(h.tracker.snapshot().panes.map((p) => p.id)).toEqual(["%1"]);
   });
 
-  it("filters out panes that don't belong to the owned session", async () => {
+  it("surfaces panes from every session on the connected tmux server", async () => {
     const h = makeHarness();
     h.setListPanesResponse([
       paneLine({ id: "%1", sessionName: "promptctl-test" }),
-      paneLine({ id: "%2", sessionName: "work" }), // user's own session
+      paneLine({ id: "%2", sessionName: "work" }),
       paneLine({ id: "%3", sessionName: "promptctl-test" }),
       paneLine({ id: "%4", sessionName: "scratch" }),
     ]);
@@ -377,7 +374,7 @@ describe("TmuxTopologyTracker", () => {
     await flush();
 
     const ids = h.tracker.snapshot().panes.map((p) => p.id);
-    expect(ids).toEqual(["%1", "%3"]);
+    expect(ids).toEqual(["%1", "%2", "%3", "%4"]);
   });
 
   it("dispose() removes all listeners and clears state", async () => {

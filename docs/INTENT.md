@@ -105,16 +105,15 @@ traffic from tools we *didn't* launch (a stray `claude` someone ran by hand).
 Each workstream is one to three tickets in `lit`. Order below is the
 intended sequence — earlier workstreams unblock later ones.
 
-### A. Tmux foundation cleanup *(in flight)*
+### A. Tmux foundation cleanup *(shipped — 77e.1.9)*
 
 **Outcome:** Loops runs on the new control-mode path. The legacy polling
 tmux stack and the throwaway in-repo `PaneTerminal` are deleted. Loops
 consumes the `@promptctl/pane-terminal` library package — same rendering
-substrate as any other consumer of `tmux-control-mode-js`. The
-`/debug/tmux-control` route remains as the permanent diagnostic surface.
-
-Why now: Loops is currently non-functional and we have a free hand. The
-library exists. There is no reason to keep two tmux stacks in the repo.
+substrate as any other consumer of `tmux-control-mode-js`. CommandEngine
+drives matchers / actions through a three-method seam wired to the
+singleton `TmuxControlConnection`. The `/debug/tmux-control` route remains
+as the permanent diagnostic surface.
 
 ### B. Loops polish
 

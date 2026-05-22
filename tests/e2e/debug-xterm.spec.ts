@@ -1,13 +1,15 @@
-// End-to-end verification for the xterm rendering slice.
+// End-to-end verification for the library-backed xterm rendering on
+// /debug/tmux-control. Drives the packaged app against an isolated tmux
+// server and asserts that selecting a pane mounts @promptctl/pane-terminal's
+// <PaneTerminal>, that live tmux output reaches the xterm grid through
+// PaneStream's client.on("output") subscription, and that keystrokes flow
+// back to tmux via PaneStream.sendKeys.
 //
-// Drives the packaged app against an isolated tmux server. Asserts that
-// /debug/tmux-control's PaneTerminal renders live tmux output through
-// xterm.js: plain bytes land in the buffer, ANSI color escapes set cell
-// attributes, and keystrokes flow back to tmux via the sendKeys path.
-//
-// The test reads xterm's own buffer through `window.__paneTerminal` —
-// the same data structure the renderer-unit tests assert against, scaled
-// up to a real tmux server end-to-end.
+// Observation strategy: xterm's rendered DOM is authoritative. `.xterm`
+// (the wrapping element) signals mount; `.xterm-rows` exposes the rendered
+// text; `.xterm-helper-textarea` is xterm's hidden input target. This
+// mirrors the pattern the library's own e2e tests use against the
+// web-multiplexer demo — what the user sees IS what we test.
 
 import { test, expect } from "@playwright/test";
 import { execSync } from "node:child_process";
@@ -19,12 +21,6 @@ import {
   launchElectronApp,
   type ElectronAppHandle,
 } from "./fixtures/electron-app";
-
-// `window.__paneTerminal` is set by PaneTerminal during its mount effect.
-// The renderer side declares the global (in src/renderer/tmux/PaneTerminal.tsx)
-// against the xterm.js Terminal type. Inside Playwright's `evaluate` the
-// runtime is the renderer; the function body is type-checked against the
-// browser's lib.dom Window, with the renderer-side global merged in.
 
 const READY_TIMEOUT_MS = 10_000;
 const RENDER_TIMEOUT_MS = 5_000;
@@ -47,29 +43,39 @@ async function selectFirstPane(page: import("playwright").Page): Promise<string>
 
   // Settle: wait for topology row to materialize before snapshotting.
   await page.waitForTimeout(150);
-  const paneIds = await page
-    .locator("[data-pane-row]")
-    .evaluateAll((nodes) =>
-      nodes.map((n) => n.getAttribute("data-pane-row") ?? ""),
+  // Topology now surfaces every pane on the server (including the fixture's
+  // bootstrap session). Live %output events only fire for the attached
+  // session, so pick the OWNED_SESSION pane deterministically — testing the
+  // xterm render pipeline, not cross-session output reachability.
+  const ownedPanes = await page
+    .locator(`[data-pane-row]`)
+    .evaluateAll((nodes, owned) =>
+      nodes
+        .filter(
+          (n) =>
+            n.parentElement?.querySelector(
+              `[data-testid="${n.getAttribute("data-testid")}-session"]`,
+            )?.textContent === owned,
+        )
+        .map((n) => n.getAttribute("data-pane-row") ?? ""),
+      OWNED_SESSION,
     );
-  expect(paneIds.length).toBeGreaterThanOrEqual(1);
-  const paneId = paneIds[0];
+  expect(ownedPanes.length).toBeGreaterThanOrEqual(1);
+  const paneId = ownedPanes[0];
   expect(paneId.startsWith("%")).toBe(true);
   await page.locator(`[data-testid="watch-${paneId}"]`).click();
-  await expect(page.locator("[data-testid=pane-terminal]")).toBeVisible({
-    timeout: RENDER_TIMEOUT_MS,
-  });
-  // The component sets window.__paneTerminal during the mount effect; wait
-  // until it's populated so subsequent buffer reads don't race the mount.
-  await page.waitForFunction(() => window.__paneTerminal !== undefined, {
-    timeout: RENDER_TIMEOUT_MS,
-  });
+  // The library's <PaneTerminal> renders a `.xterm` wrapper once XtermSink
+  // mounts the Terminal. That's the single observable mount signal.
+  await expect(
+    page.locator("[data-testid=pane-terminal] .xterm").first(),
+  ).toBeVisible({ timeout: RENDER_TIMEOUT_MS });
   return paneId;
 }
 
 test.describe("/debug/tmux-control xterm rendering", () => {
   let server: TmuxServerHandle;
   let appHandle: ElectronAppHandle;
+  let rendererErrors: string[];
 
   test.beforeEach(async ({}, testInfo) => {
     server = createTmuxServer(testInfo.workerIndex);
@@ -78,14 +84,32 @@ test.describe("/debug/tmux-control xterm rendering", () => {
       initialRoute: "/debug/tmux-control",
       env: { PROMPTCTL_TMUX_SESSION: OWNED_SESSION },
     });
+    // [LAW:verifiable-goals] Any uncaught renderer error fails the test —
+    // including the silent ones that wouldn't disturb a DOM assertion. This
+    // is how the chunk-A debug session surfaced the two-Reacts crash:
+    // `Cannot read properties of null (reading 'useRef')` rendered nothing
+    // visible, but pageerror fired. Keep it permanent.
+    rendererErrors = [];
+    appHandle.window.on("pageerror", (err) => {
+      rendererErrors.push(`${err.message}\n${err.stack ?? ""}`);
+    });
+    appHandle.window.on("console", (msg) => {
+      if (msg.type() === "error") {
+        rendererErrors.push(`[console.error] ${msg.text()}`);
+      }
+    });
   });
 
   test.afterEach(async () => {
     await appHandle?.close();
     server?.killServer();
+    expect(
+      rendererErrors,
+      "Renderer reported uncaught errors during test",
+    ).toEqual([]);
   });
 
-  test("plain bytes from tmux send-keys appear in xterm buffer", async () => {
+  test("plain bytes from tmux send-keys appear in xterm rows", async () => {
     const page = appHandle.window;
     const paneId = await selectFirstPane(page);
 
@@ -97,29 +121,16 @@ test.describe("/debug/tmux-control xterm rendering", () => {
     await page.waitForTimeout(200);
     tmux(server.socket, `send-keys -t ${paneId} '${marker}' Enter`);
 
-    // Poll the active buffer for the marker. Any visible line containing
-    // the marker satisfies the assertion — line position depends on shell
-    // prompt height, which varies across machines.
-    await expect
-      .poll(
-        () =>
-          page.evaluate(() => {
-            const t = window.__paneTerminal?.terminal;
-            if (t === undefined) return "";
-            const buf = t.buffer.active;
-            const out: string[] = [];
-            for (let i = 0; i < buf.length; i++) {
-              const line = buf.getLine(i);
-              if (line !== undefined) out.push(line.translateToString(true));
-            }
-            return out.join("\n");
-          }),
-        { timeout: RENDER_TIMEOUT_MS },
-      )
-      .toContain(marker);
+    // The xterm-rows element's text content is the rendered grid as text.
+    // Any visible line containing the marker satisfies the assertion —
+    // line position depends on shell prompt height, which varies across
+    // machines.
+    await expect(
+      page.locator("[data-testid=pane-terminal] .xterm-rows").first(),
+    ).toContainText(marker, { timeout: RENDER_TIMEOUT_MS });
   });
 
-  test("ANSI color escapes set cell foreground color attribute", async () => {
+  test("ANSI color escapes set red foreground on rendered cells", async () => {
     const page = appHandle.window;
     const paneId = await selectFirstPane(page);
 
@@ -136,60 +147,40 @@ test.describe("/debug/tmux-control xterm rendering", () => {
       `send-keys -t ${paneId} "printf '\\033[31m${marker}\\033[0m\\n'" Enter`,
     );
 
-    // Poll the buffer for the COLORED occurrence of the marker. The plain
-    // (typed-echo) occurrence has default colors and is rejected; the
-    // shell's printf output paints cells with palette index 1 (red).
-    await expect
-      .poll(
-        () =>
-          page.evaluate((m: string) => {
-            const t = window.__paneTerminal?.terminal;
-            if (t === undefined) return null;
-            const buf = t.buffer.active;
-            for (let i = 0; i < buf.length; i++) {
-              const line = buf.getLine(i);
-              if (line === undefined) continue;
-              const text = line.translateToString(true);
-              const at = text.indexOf(m);
-              if (at < 0) continue;
-              const cell = line.getCell(at);
-              if (cell === undefined) continue;
-              if (!cell.isFgPalette()) continue;
-              if (cell.getFgColor() !== 1) continue;
-              return { isPalette: cell.isFgPalette(), fg: cell.getFgColor() };
-            }
-            return null;
-          }, marker),
-        { timeout: 20_000, intervals: [200, 500, 1000, 2000] },
-      )
-      .toEqual({ isPalette: true, fg: 1 });
+    // xterm renders palette foreground colors as inline-styled `<span>`s with
+    // the class `xterm-fg-1` (palette index 1 = red). Asserting on a span
+    // whose text contains the marker AND whose class is `xterm-fg-1` proves
+    // the byte stream carried the escape AND xterm parsed it AND the renderer
+    // applied the color attribute.
+    await expect(
+      page
+        .locator("[data-testid=pane-terminal] .xterm-rows span.xterm-fg-1")
+        .filter({ hasText: marker })
+        .first(),
+    ).toBeVisible({ timeout: 20_000 });
   });
 
   test("typing into the page sends keystrokes to the pane via tmux", async () => {
     const page = appHandle.window;
     const paneId = await selectFirstPane(page);
 
-    // Click on the xterm container so xterm's textarea captures focus.
-    await page.locator("[data-testid=pane-terminal]").click();
-    // xterm's hidden textarea is the input target; focus it explicitly so
-    // synthetic keypresses route through xterm's onData handler.
-    await page.evaluate(() => {
-      const ta = document.querySelector(
-        "[data-testid=pane-terminal] textarea",
-      ) as HTMLTextAreaElement | null;
-      ta?.focus();
-    });
+    // xterm focuses its `.xterm-helper-textarea` on click. Force focus
+    // explicitly so synthetic keypresses route through xterm's onData
+    // handler → PaneStream.sendKeys → tmux send-keys -l.
+    await page.locator("[data-testid=pane-terminal] .xterm").first().click();
+    const textarea = page
+      .locator("[data-testid=pane-terminal] .xterm-helper-textarea")
+      .first();
+    await textarea.focus();
 
     // Pick a marker without shell-special characters.
     const marker = `KEYS${Date.now().toString(36)}`;
     await page.keyboard.type(marker);
-    // Press Enter so cat / shell flushes the line.
     await page.keyboard.press("Enter");
 
     // tmux capture-pane shows what's currently rendered in the pane. The
-    // marker should appear once xterm has forwarded the keystrokes through
-    // sendKeys, tmux has fed them to the underlying process, and the
-    // process has echoed them back.
+    // marker should appear once xterm forwarded the keystrokes through
+    // sendKeys, tmux fed them to the shell, and the shell echoed them.
     await expect
       .poll(
         () => tmux(server.socket, `capture-pane -p -t ${paneId}`),

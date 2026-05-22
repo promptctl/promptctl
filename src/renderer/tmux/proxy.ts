@@ -13,8 +13,9 @@ import {
   createRendererBridge,
   type TmuxClientProxy,
 } from "tmux-control-mode-js/electron/renderer";
+import { PaneStream } from "@promptctl/pane-terminal/stream";
 import type { TmuxControlState } from "../env";
-import type { TmuxSnapshot } from "../../shared/types";
+import type { PaneId, TmuxPane, TmuxSnapshot } from "../../shared/types";
 
 let proxyInstance: TmuxClientProxy | null = null;
 
@@ -81,3 +82,61 @@ export function useTopology(): TmuxSnapshot {
   return snapshot;
 }
 
+// [LAW:locality-or-seam] The renderer's only path from a topology pane to a
+// library PaneStream lives here. Components pass the selected `TmuxPane` (or
+// `null`) and hand the result to `<PaneTerminal stream={}>`; nothing else
+// strips the `%` prefix or constructs PaneStream by hand. Taking the whole pane
+// rather than a (paneId, sessionId) pair makes the "id without its session"
+// state unrepresentable at the call boundary.
+//
+// [LAW:single-enforcer] One stream per (pane, mount); the prior stream is
+// disposed before a fresh one is constructed. The attached session is NOT this
+// hook's to drive — tmux delivers %output only for the attached session, so the
+// renderer sends that intent to main (the lone owner across reconnects) and
+// constructs the stream; it never issues switch-client itself.
+//
+// [LAW:types-are-the-program] The stream is created in an effect, so the `stream`
+// state lags the render that changed `paneId` by one tick. Pairing the stream
+// with the paneId it was built for lets the return reject a stream that belongs
+// to a stale selection: <PaneTerminal> is never handed a stream for a different
+// pane than the current one, so keystrokes can't be routed to the previous pane
+// during a fast switch. The matched-pane gate makes that mismatch unrepresentable.
+export function usePaneStream(pane: TmuxPane | null): PaneStream | null {
+  const paneId = pane?.id ?? null;
+  const sessionId = pane?.sessionId ?? null;
+  const [active, setActive] = useState<{
+    paneId: PaneId;
+    stream: PaneStream;
+  } | null>(null);
+
+  // [LAW:dataflow-not-control-flow] The watch intent's only input is the
+  // session, so it fires only when the session changes — switching panes within
+  // one session never re-issues switch-client. The rejection is handled
+  // deliberately (not swallowed): main owns attach-failure recovery via reconnect
+  // and the control-state broadcast, so the renderer's sole duty is to keep a
+  // rejected intent from becoming an unhandled promise rejection.
+  useEffect(() => {
+    window.electronAPI
+      .invoke("tmux:watch-session", sessionId)
+      .catch((err) => console.error("tmux:watch-session rejected", err));
+  }, [sessionId]);
+
+  useEffect(() => {
+    if (paneId === null) {
+      setActive(null);
+      return undefined;
+    }
+    const numericPaneId = Number.parseInt(paneId.replace(/^%/, ""), 10);
+    const next = new PaneStream({
+      client: getTmuxProxy(),
+      paneId: numericPaneId,
+    });
+    setActive({ paneId, stream: next });
+    return () => {
+      next.dispose();
+      setActive(null);
+    };
+  }, [paneId]);
+
+  return active?.paneId === paneId ? active.stream : null;
+}

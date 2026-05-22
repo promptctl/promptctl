@@ -1,5 +1,5 @@
 import { describe, it, expect } from "vitest";
-import { parsePaneList, detectToolKind } from "./client";
+import { parsePaneList, detectToolKind, PANE_FORMAT } from "./pane-parse";
 
 describe("detectToolKind", () => {
   it("detects claude", () => {
@@ -54,5 +54,33 @@ describe("parsePaneList", () => {
   it("handles empty input", () => {
     expect(parsePaneList("")).toHaveLength(0);
     expect(parsePaneList("\n")).toHaveLength(0);
+  });
+
+  it("drops lines whose first field is not a %<number> pane id", () => {
+    const input = [
+      "%0\twork\t$0\tcode\t@0\t0\t0\t1234\tclaude\t/home/user\t120\t40\t1",
+      "\tgarbage\t$0\tcode\t@0\t0\t0\t1\tbash\t/x\t1\t1\t0", // empty pane id
+      "bogus\twork\t$0\tcode\t@0\t0\t0\t1\tbash\t/x\t1\t1\t0", // malformed id
+    ].join("\n");
+    const panes = parsePaneList(input);
+    expect(panes.map((p) => p.id)).toEqual(["%0"]);
+  });
+});
+
+describe("PANE_FORMAT", () => {
+  it("covers every field parsePaneList reads", () => {
+    expect(PANE_FORMAT).toContain("#{pane_id}");
+    expect(PANE_FORMAT).toContain("#{session_name}");
+    expect(PANE_FORMAT).toContain("#{session_id}");
+    expect(PANE_FORMAT).toContain("#{window_name}");
+    expect(PANE_FORMAT).toContain("#{window_id}");
+    expect(PANE_FORMAT).toContain("#{window_index}");
+    expect(PANE_FORMAT).toContain("#{pane_index}");
+    expect(PANE_FORMAT).toContain("#{pane_pid}");
+    expect(PANE_FORMAT).toContain("#{pane_current_command}");
+    expect(PANE_FORMAT).toContain("#{pane_current_path}");
+    expect(PANE_FORMAT).toContain("#{pane_width}");
+    expect(PANE_FORMAT).toContain("#{pane_height}");
+    expect(PANE_FORMAT).toContain("#{pane_active}");
   });
 });

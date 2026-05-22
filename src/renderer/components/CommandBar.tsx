@@ -1,12 +1,12 @@
 import { useState, useCallback, useMemo, useRef, useEffect, type KeyboardEvent } from "react";
-import { useTmuxStore } from "../store/tmux";
+import { usePaneSelectionStore } from "../store/pane-selection";
 import { useCommandStore } from "../store/command";
+import { getTmuxProxy, useTopology } from "../tmux/proxy";
 
 export function CommandBar() {
-  const selectedPaneId = useTmuxStore((s) => s.selectedPaneId);
-  const pane = useTmuxStore((s) =>
-    s.snapshot.panes.find((p) => p.id === s.selectedPaneId),
-  );
+  const selectedPaneId = usePaneSelectionStore((s) => s.selectedPaneId);
+  const topology = useTopology();
+  const pane = topology.panes.find((p) => p.id === selectedPaneId);
   const commands = useCommandStore((s) => s.commands);
   const events = useCommandStore((s) => s.events);
   const recentEvents = useMemo(() => events.slice(-5), [events]);
@@ -26,12 +26,11 @@ export function CommandBar() {
   const sendToPane = useCallback(async () => {
     const text = input.trim();
     if (!text || !selectedPaneId) return;
-    await window.electronAPI.invoke(
-      "tmux:send-keys",
-      selectedPaneId,
-      text,
-      true,
-    );
+    // [LAW:one-source-of-truth] The library's TmuxClientProxy is the single
+    // renderer-side surface for tmux operations. `sendKeys` sends the keys
+    // literally (`-l`), so an embedded "\r" is what tmux delivers as Enter
+    // to the child process — same effect as the legacy `send-keys ... Enter`.
+    await getTmuxProxy().sendKeys(selectedPaneId, text + "\r");
     setInput("");
     setShowSuggestions(false);
   }, [input, selectedPaneId]);

@@ -3,19 +3,18 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createMainBridge } from "tmux-control-mode-js/electron/main";
-import { TmuxStateManager } from "./tmux/state";
-import { PaneOutputManager } from "./tmux/output";
 import { TmuxControlConnection } from "./tmux/control";
 import { ownedSessionName } from "./tmux/session";
 import { TmuxTopologyTracker } from "./tmux/topology";
 import { CommandEngine } from "./command/engine";
 import { loadCommands } from "./command/persistence";
-import { registerTmuxHandlers } from "./ipc/tmux-handlers";
 import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
 import { registerTmuxTopologyHandlers } from "./ipc/tmux-topology-handlers";
 import { TmuxOutputRouter } from "./tmux/output-router";
 import { registerTmuxOutputHandlers } from "./ipc/tmux-output-handlers";
+import { registerTmuxPaneHandlers } from "./ipc/tmux-pane-handlers";
 import { registerCommandHandlers } from "./ipc/command-handlers";
+import type { PaneId } from "../shared/types";
 import { registerSessionHandlers } from "./ipc/session-handlers";
 import { registerPromptHandlers } from "./ipc/prompt-handlers";
 import { registerSettingsHandlers } from "./ipc/settings-handlers";
@@ -61,11 +60,12 @@ if (process.defaultApp) {
 declare const MAIN_WINDOW_VITE_DEV_SERVER_URL: string;
 declare const MAIN_WINDOW_VITE_NAME: string;
 
-const tmuxState = new TmuxStateManager();
-const outputManager = new PaneOutputManager();
-const commandEngine = new CommandEngine(tmuxState);
-// [LAW:one-source-of-truth] Foundation for the event-driven tmux path; runs
-// alongside the legacy polling stack until 77e.1.3/.4 retire state.ts/output.ts.
+// [LAW:one-source-of-truth] The TmuxControlConnection is the single producer
+// of tmux server state and the single channel through which the rest of the
+// app drives tmux (send-keys, execute, capture-pane). The legacy polling
+// stack (state.ts / output.ts / client.ts / exec.ts / controllable.ts) is
+// gone as of 77e.1.9.
+//
 // The session name is derived deterministically from the install path, so two
 // instances of the same install co-attach to the same session and different
 // installs (dev + prod) get different names without collision.
@@ -106,18 +106,57 @@ tmuxControl.onConnectionState((ev) => {
 });
 
 // [LAW:one-source-of-truth] Single tracker per process; the IPC handler
-// fans its snapshots out to every renderer. Topology runs alongside the
-// legacy TmuxStateManager polling until the cutover slice retires it.
+// fans its snapshots out to every renderer.
 const tmuxTopology = new TmuxTopologyTracker({
   onEvent: (event, handler) => tmuxControl.on(event, handler),
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   getClient: () => tmuxControl.client,
-  ownedSessionName: () => tmuxControl.ownedSessionName,
 });
 const tmuxOutputRouter = new TmuxOutputRouter({
   onEvent: (event, handler) => tmuxControl.on(event, handler),
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   getClient: () => tmuxControl.client,
+});
+
+// [LAW:locality-or-seam] CommandEngine consumes tmux through three method
+// surfaces; this adapter is the seam between the engine and the singleton
+// control connection. No tmux imports inside CommandEngine — the type is
+// the only thing it knows.
+const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
+const toPaneId = (n: number): PaneId => `%${n}` as PaneId;
+const commandEngine = new CommandEngine({
+  onOutput: (handler) => {
+    const offOutput = tmuxControl.on("output", (msg) =>
+      handler(toPaneId(msg.paneId), utf8Decoder.decode(msg.data)),
+    );
+    const offExtended = tmuxControl.on("extended-output", (msg) =>
+      handler(toPaneId(msg.paneId), utf8Decoder.decode(msg.data)),
+    );
+    return () => {
+      offOutput();
+      offExtended();
+    };
+  },
+  sendKeys: async (target, keys) => {
+    const client = tmuxControl.client;
+    if (client === null) {
+      throw new Error("tmux control connection is not ready");
+    }
+    const resp = await client.sendKeys(target, keys);
+    if (!resp.success) {
+      throw new Error(`send-keys failed: ${resp.output.join("\n")}`);
+    }
+  },
+  execute: async (command) => {
+    const client = tmuxControl.client;
+    if (client === null) {
+      throw new Error("tmux control connection is not ready");
+    }
+    const resp = await client.execute(command);
+    if (!resp.success) {
+      throw new Error(`tmux command failed: ${resp.output.join("\n")}`);
+    }
+  },
 });
 let deepLinkServer: Server | null = null;
 
@@ -240,10 +279,13 @@ app.whenReady().then(async () => {
   // Initialize subsystems
   registerProvider(geminiAdapter);
   registerProvider(claudeAdapter);
-  registerTmuxHandlers(tmuxState, outputManager);
   registerTmuxControlHandlers(tmuxControl);
   registerTmuxTopologyHandlers(tmuxTopology);
   registerTmuxOutputHandlers(tmuxOutputRouter);
+  registerTmuxPaneHandlers({
+    getSnapshot: () => tmuxTopology.snapshot(),
+    getClient: () => tmuxControl.client,
+  });
   registerCommandHandlers(commandEngine);
   registerSessionHandlers();
   registerPromptHandlers();
@@ -251,9 +293,6 @@ app.whenReady().then(async () => {
   registerLlmHandlers();
   registerTaskHandlers();
   registerProxyHandlers();
-
-  await outputManager.init();
-  tmuxState.start();
 
   // Auto-start the proxy. HAR file is lazy-created on the first response
   // — until then, no file appears on disk. Settings drive port/target/dir.
@@ -273,8 +312,8 @@ app.whenReady().then(async () => {
 
   deepLinkServer = await startDeepLinkServer(handleDeepLink);
 
-  // Start command engine on output stream (handles both matchers and idle tracking)
-  commandEngine.start(outputManager);
+  // Start command engine on the control-mode output stream (matchers + idle).
+  commandEngine.start();
 
   // Restore persisted commands
   const savedCommands = await loadCommands();
@@ -296,7 +335,6 @@ app.on("window-all-closed", () => {
 });
 
 app.on("before-quit", async () => {
-  tmuxState.stop();
   commandEngine.stop();
   if (tmuxBridge !== null) {
     tmuxBridge.dispose();
@@ -305,7 +343,6 @@ app.on("before-quit", async () => {
   tmuxTopology.dispose();
   tmuxOutputRouter.dispose();
   tmuxControl.close();
-  await outputManager.unwatchAll();
   await shutdownProxy();
   if (deepLinkServer) {
     await stopDeepLinkServer(deepLinkServer);

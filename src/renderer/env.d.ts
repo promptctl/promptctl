@@ -2,7 +2,6 @@
 
 import type {
   TmuxSnapshot,
-  PaneOutputChunk,
   PaneProcesses,
   Command,
   CommandEvent,
@@ -21,6 +20,8 @@ import type {
   DiffEntry,
   TmuxOutputChunk,
   TmuxOutputStateEvent,
+  SessionId,
+  PaneId,
 } from "../shared/types";
 import type {
   ClientInfo,
@@ -47,45 +48,24 @@ interface AppSettingsShape {
 export interface ElectronAPI {
   send(
     channel:
-      | "tmux:subscribe"
-      | "tmux:unsubscribe"
       | "command:subscribe"
       | "proxy:subscribe"
       | "proxy:unsubscribe",
   ): void;
-  send(channel: "tmux:watch-pane" | "tmux:unwatch-pane", paneId: string): void;
   send(channel: string, ...args: unknown[]): void;
 
-  invoke(
-    channel: "tmux:snapshot" | "tmux:topology:get",
-  ): Promise<TmuxSnapshot>;
-  invoke(
-    channel: "tmux:send-keys",
-    paneId: string,
-    text: string,
-    pressEnter?: boolean,
-  ): Promise<void>;
-  invoke(
-    channel: "tmux:send-keys-literal",
-    paneId: string,
-    data: string,
-  ): Promise<void>;
-  invoke(
-    channel: "tmux:capture-pane",
-    paneId: string,
-    start: number,
-    end: number,
-  ): Promise<string>;
-  invoke(channel: "tmux:pane-processes", paneId: string): Promise<PaneProcesses>;
+  invoke(channel: "tmux:topology:get"): Promise<TmuxSnapshot>;
+  invoke(channel: "tmux:pane-processes", paneId: PaneId): Promise<PaneProcesses>;
   invoke(
     channel: "tmux:launch-tool",
     kind: string,
     sessionName: string,
     cwd: string,
-  ): Promise<string>;
+  ): Promise<PaneId>;
   invoke(channel: "command:list"): Promise<Command[]>;
   invoke(channel: "command:add", command: Command): Promise<void>;
-  invoke(channel: "command:remove" | "command:fire" | "tmux:output:subscribe" | "tmux:output:unsubscribe", id: string): Promise<void>;
+  invoke(channel: "command:remove" | "command:fire", id: string): Promise<void>;
+  invoke(channel: "tmux:output:subscribe" | "tmux:output:unsubscribe", paneId: PaneId): Promise<void>;
   invoke(
     channel: "command:update",
     id: string,
@@ -187,11 +167,12 @@ export interface ElectronAPI {
   invoke(channel: "proxy:load-har", filePath: string): Promise<ProxyStatus>;
   invoke(channel: "proxy:pick-har"): Promise<string | null>;
   invoke(channel: "tmux:control-state:get"): Promise<TmuxControlState>;
+  invoke(channel: "tmux:watch-session", sessionId: SessionId | null): Promise<void>;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   writeClipboard(text: string): void;
 
   on(
-    channel: "tmux:snapshot" | "tmux:topology",
+    channel: "tmux:topology",
     listener: (snapshot: TmuxSnapshot) => void,
   ): () => void;
   on(
@@ -209,10 +190,6 @@ export interface ElectronAPI {
   on(
     channel: "proxy:clients",
     listener: (infos: ClientInfo[]) => void,
-  ): () => void;
-  on(
-    channel: "tmux:pane-output",
-    listener: (chunk: PaneOutputChunk) => void,
   ): () => void;
   on(
     channel: "command:list",

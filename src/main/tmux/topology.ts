@@ -27,7 +27,7 @@
 
 import type { TmuxClient, TmuxEventMap } from "tmux-control-mode-js";
 import type { SubscriptionChangedMessage } from "tmux-control-mode-js/protocol";
-import { detectToolKind, PANE_FORMAT, parsePaneList } from "./client";
+import { detectToolKind, PANE_FORMAT, parsePaneList } from "./pane-parse";
 import type { ConnectionStateEvent } from "./control";
 import type {
   PaneId,
@@ -74,7 +74,7 @@ const TOPOLOGY_EVENTS = [
 
 // Minimal client surface the tracker actually exercises. Letting tests pass a
 // fake instead of standing up the full TmuxClient.
-export type TopologyClient = Pick<TmuxClient, "execute" | "subscribe">;
+export type TopologyClient = Pick<TmuxClient, "execute" | "subscribeRaw">;
 
 export interface TopologyDeps {
   // Reconnect-safe event subscription. In production this is
@@ -90,12 +90,6 @@ export interface TopologyDeps {
   // otherwise. The tracker only invokes commands inside the ready handler,
   // so the null branch is the safety net for racing disconnects.
   getClient(): TopologyClient | null;
-  // The promptctl-owned session name. All observation is scoped to this
-  // session — panes belonging to the user's other sessions on the same
-  // tmux server are invisible to promptctl. The tracker resolves the name
-  // to a SessionId at refresh time (via list-panes output) so kill+recreate
-  // of the session by an external client transparently re-binds.
-  ownedSessionName(): string;
 }
 
 export type TopologyListener = (snapshot: TmuxSnapshot) => void;
@@ -179,7 +173,7 @@ export class TmuxTopologyTracker {
     // same sequence runs on every ready, regardless of "is this a reconnect."
     for (const sub of TOPOLOGY_SUBSCRIPTIONS) {
       await safeAwait(
-        client.subscribe(sub.name, sub.what, sub.format),
+        client.subscribeRaw(sub.name, sub.what, sub.format),
         `subscribe(${sub.name})`,
       );
     }
@@ -202,12 +196,7 @@ export class TmuxTopologyTracker {
     if (generation !== this.refreshGeneration) return;
     const stdout = resp.output.join("\n");
     const allPanes = parsePaneList(stdout);
-    // [LAW:dataflow-not-control-flow] Filter is a predicate over data, not a
-    // branch that skips work. Same code path runs whether one pane matches
-    // or all of them do; non-matching panes are simply not in the result.
-    const ownedName = this.deps.ownedSessionName();
-    const ownedPanes = allPanes.filter((p) => p.sessionName === ownedName);
-    this.panes = new Map(ownedPanes.map((p) => [p.id, p] as const));
+    this.panes = new Map(allPanes.map((p) => [p.id, p] as const));
     this.broadcast();
   }
 
