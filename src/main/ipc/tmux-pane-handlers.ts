@@ -44,11 +44,10 @@ export function registerTmuxPaneHandlers(
 ): () => void {
   ipcMain.handle(
     "tmux:pane-processes",
-    async (_e, paneIdArg: string): Promise<PaneProcesses> => {
-      // [LAW:locality-or-seam] The IPC boundary is the trust seam where a raw
-      // wire string becomes a branded PaneId. Renderer code already speaks
-      // PaneId everywhere; the cast lives here so callers see the brand.
-      const paneId = paneIdArg as PaneId;
+    async (_e, paneId: PaneId): Promise<PaneProcesses> => {
+      // [LAW:locality-or-seam] The renderer IPC contract declares this channel's
+      // argument as PaneId; the handler honors that brand rather than re-casting
+      // a raw wire string.
       const snapshot = deps.getSnapshot();
       const pane = snapshot.panes.find((p) => p.id === paneId);
       if (!pane) {
