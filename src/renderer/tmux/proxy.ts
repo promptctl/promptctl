@@ -15,7 +15,7 @@ import {
 } from "tmux-control-mode-js/electron/renderer";
 import { PaneStream } from "@promptctl/pane-terminal/stream";
 import type { TmuxControlState } from "../env";
-import type { TmuxPane, TmuxSnapshot } from "../../shared/types";
+import type { PaneId, TmuxPane, TmuxSnapshot } from "../../shared/types";
 
 let proxyInstance: TmuxClientProxy | null = null;
 
@@ -94,10 +94,20 @@ export function useTopology(): TmuxSnapshot {
 // hook's to drive — tmux delivers %output only for the attached session, so the
 // renderer sends that intent to main (the lone owner across reconnects) and
 // constructs the stream; it never issues switch-client itself.
+//
+// [LAW:types-are-the-program] The stream is created in an effect, so the `stream`
+// state lags the render that changed `paneId` by one tick. Pairing the stream
+// with the paneId it was built for lets the return reject a stream that belongs
+// to a stale selection: <PaneTerminal> is never handed a stream for a different
+// pane than the current one, so keystrokes can't be routed to the previous pane
+// during a fast switch. The matched-pane gate makes that mismatch unrepresentable.
 export function usePaneStream(pane: TmuxPane | null): PaneStream | null {
   const paneId = pane?.id ?? null;
   const sessionId = pane?.sessionId ?? null;
-  const [stream, setStream] = useState<PaneStream | null>(null);
+  const [active, setActive] = useState<{
+    paneId: PaneId;
+    stream: PaneStream;
+  } | null>(null);
 
   // [LAW:dataflow-not-control-flow] The watch intent's only input is the
   // session, so it fires only when the session changes — switching panes within
@@ -113,7 +123,7 @@ export function usePaneStream(pane: TmuxPane | null): PaneStream | null {
 
   useEffect(() => {
     if (paneId === null) {
-      setStream(null);
+      setActive(null);
       return undefined;
     }
     const numericPaneId = Number.parseInt(paneId.replace(/^%/, ""), 10);
@@ -121,12 +131,12 @@ export function usePaneStream(pane: TmuxPane | null): PaneStream | null {
       client: getTmuxProxy(),
       paneId: numericPaneId,
     });
-    setStream(next);
+    setActive({ paneId, stream: next });
     return () => {
       next.dispose();
-      setStream(null);
+      setActive(null);
     };
   }, [paneId]);
 
-  return stream;
+  return active?.paneId === paneId ? active.stream : null;
 }
