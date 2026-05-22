@@ -5,7 +5,7 @@
 
 import { describe, it, expect, beforeEach } from "vitest";
 import { CommandEngine, type CommandEngineDeps } from "./engine";
-import type { Command, PaneId } from "../../shared/types";
+import type { Command, CommandId, PaneId } from "../../shared/types";
 
 interface RecordedSend {
   readonly target: PaneId;
@@ -52,7 +52,7 @@ const PANE = "%17" as PaneId;
 
 function makeCommand(overrides: Partial<Command> = {}): Command {
   return {
-    id: "cmd-1",
+    id: "cmd-1" as CommandId,
     name: "test",
     enabled: true,
     target: { kind: "tmux-pane", paneId: PANE },
@@ -60,7 +60,6 @@ function makeCommand(overrides: Partial<Command> = {}): Command {
     action: { kind: "send-keys", text: "hello", pressEnter: true },
     lastRun: null,
     runCount: 0,
-    createdAt: Date.now(),
     ...overrides,
   };
 }
@@ -131,7 +130,7 @@ describe("CommandEngine", () => {
   it("matcher trigger fires action on matching output", async () => {
     engine.addCommand(
       makeCommand({
-        id: "cmd-match",
+        id: "cmd-match" as CommandId,
         trigger: {
           kind: "matcher",
           paneId: PANE,
@@ -151,7 +150,7 @@ describe("CommandEngine", () => {
   it("matcher trigger ignores output from a different pane", async () => {
     engine.addCommand(
       makeCommand({
-        id: "cmd-match",
+        id: "cmd-match" as CommandId,
         trigger: {
           kind: "matcher",
           paneId: PANE,
@@ -171,7 +170,7 @@ describe("CommandEngine", () => {
   it("matcher with null paneId fires across every pane", async () => {
     engine.addCommand(
       makeCommand({
-        id: "cmd-any",
+        id: "cmd-any" as CommandId,
         trigger: {
           kind: "matcher",
           paneId: null,
@@ -191,7 +190,7 @@ describe("CommandEngine", () => {
   it("disabled commands do not fire on output", async () => {
     engine.addCommand(
       makeCommand({
-        id: "cmd-off",
+        id: "cmd-off" as CommandId,
         enabled: false,
         trigger: {
           kind: "matcher",
@@ -211,7 +210,7 @@ describe("CommandEngine", () => {
   it("strips ANSI escape sequences before regex match", async () => {
     engine.addCommand(
       makeCommand({
-        id: "cmd-match",
+        id: "cmd-match" as CommandId,
         trigger: {
           kind: "matcher",
           paneId: PANE,
