@@ -191,12 +191,16 @@ async function handleRequest(
   //
   // `lastSeenNs` refreshes per request so the Live tab's active-client
   // signal tracks the current request, not the connection's first.
-  const socket = req.socket as ClientSocket;
   const cachedFallback = (sock: net.Socket): Promise<ClientInfo> => {
-    const existing = socket[CLIENT_INFO];
+    // [LAW:single-enforcer] Cache lives on the socket the caller hands
+    // us — same object as req.socket today but we read/write through
+    // the parameter so a future refactor that splits these can't end
+    // up with the cache stranded on the wrong socket.
+    const cs = sock as ClientSocket;
+    const existing = cs[CLIENT_INFO];
     if (existing) return existing;
     const promise = resolveClientId(sock);
-    socket[CLIENT_INFO] = promise;
+    cs[CLIENT_INFO] = promise;
     return promise;
   };
   const resolved = await resolveRequestClient(

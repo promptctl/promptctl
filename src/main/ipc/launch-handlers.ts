@@ -31,12 +31,19 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
   const subscribers = new Set<WebContents>();
 
   ipcMain.on("launch:subscribe", (event) => {
-    // [LAW:dataflow-not-control-flow] Same hook every time a renderer
-    // attaches: add to the set, send the current snapshot, schedule
-    // removal on destroy. No "is this the first subscriber" branch.
+    // Resend the current snapshot on every subscribe (a re-subscribe
+    // after HMR or remount should see fresh state), but register the
+    // destroyed listener exactly once per WebContents — `once` itself
+    // doesn't dedupe, so repeated subscribe cycles would otherwise
+    // pile up pending listeners against the same sender. The set's
+    // membership is the right guard: first add returns "was new",
+    // re-add is the repeat case.
+    const isNew = !subscribers.has(event.sender);
     subscribers.add(event.sender);
+    if (isNew) {
+      event.sender.once("destroyed", () => subscribers.delete(event.sender));
+    }
     event.sender.send("launch:list", registry.list());
-    event.sender.once("destroyed", () => subscribers.delete(event.sender));
   });
 
   // Explicit unsubscribe so the renderer's `initLaunchSubscription`
