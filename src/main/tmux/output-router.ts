@@ -1,17 +1,17 @@
 // [LAW:one-source-of-truth] The TmuxOutputRouter is the sole producer of
-// pane-output byte streams in the new control-mode path. It runs alongside
-// src/main/tmux/output.ts (PaneOutputManager) until the cutover slice retires
-// the legacy module; both observe the same tmux server, only the legacy stack
-// still drives Loops today.
+// pane-output byte streams in the new control-mode path.
 //
 // [LAW:single-enforcer] Every output chunk and state marker for a watched pane
 // flows through this router. Outside callers subscribe/unsubscribe via IPC;
-// the router manages per-pane watcher sets and scrollback capture.
+// the router manages per-pane watcher sets and scrollback capture. Backpressure
+// release (auto-resume on %pause) does NOT live here — it's owned by the
+// TmuxControlConnection so the right client (primary or follower) issues the
+// continue at the source. The router only projects the brief "paused" /
+// "streaming" transition to subscribers.
 //
 // [LAW:dataflow-not-control-flow] The router runs the same sequence for every
 // output event: receive → lookup watchers → broadcast. Variability lives in
-// the data (which pane, which watchers), not in control flow. The pause/continue
-// auto-resume follows the same pattern: receive → broadcast state → resume.
+// the data (which pane, which watchers), not in control flow.
 
 import type { TmuxEventMap } from "tmux-control-mode-js";
 import type { CommandResponse } from "tmux-control-mode-js/protocol";

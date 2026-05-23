@@ -342,8 +342,10 @@ export class TmuxControlConnection {
     this.primaryClient = client;
     for (const lst of this.listeners) {
       // Primary receives every registered listener — server-scoped events
-      // come only from here, and session-scoped events come from here too
-      // (the primary's attached session is observed like any other).
+      // come only from here, and session-scoped events flow from here for
+      // the owned session's panes (followers cover the foreign sessions).
+      // main.ts explicitly excludes the owned session from observeSessions()
+      // so no follower duplicates this client's %output delivery.
       client.on(lst.event, lst.handler);
     }
     this.installPauseAutoResume(client, "primary");
