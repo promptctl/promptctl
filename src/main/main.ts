@@ -338,7 +338,6 @@ app.whenReady().then(async () => {
   registerTmuxOutputHandlers(tmuxOutputRouter);
   registerTmuxPaneHandlers({
     getSnapshot: () => tmuxTopology.snapshot(),
-    getClient: () => tmuxControl.client,
   });
   registerCommandHandlers(commandEngine);
   registerSessionHandlers();

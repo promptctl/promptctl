@@ -3,6 +3,8 @@
 // [LAW:one-type-per-behavior] Live and replay produce the same ProxyEvent shape;
 // downstream code never branches on "is this a replay".
 
+import type { LaunchId } from "./types";
+
 // ─── Anthropic SSE event types ─────────────────────────────────────────────
 // Mirrors the Anthropic Messages API streaming protocol. See:
 //   docs/anthropic-api/ANTHROPIC-MESSAGES-API.md
@@ -121,7 +123,12 @@ export interface ClientInfo {
   // attribution is O(1) and authoritative for traffic from tools
   // promptctl itself spawned — the socket→pid walk is only the
   // fallback path for untagged traffic. [LAW:single-enforcer]
-  launchId: string | null;
+  //
+  // Branded as LaunchId so the identity spine reads as the same type
+  // end-to-end (registry → resolver → ClientInfo → renderer store).
+  // Construction sites guarantee the brand; consumers can pass this
+  // value straight to LaunchRegistry.get without re-casting.
+  launchId: LaunchId | null;
 }
 
 export type RequestRecordState = "in_flight" | "streaming" | "complete" | "errored";

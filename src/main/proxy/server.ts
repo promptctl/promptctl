@@ -8,6 +8,7 @@ import { URL } from "node:url";
 
 import type {
   AnthropicMessage,
+  ClientInfo,
   HarEntry,
   ProxyEvent,
   SseEvent,
@@ -15,7 +16,6 @@ import type {
 import type { Launch, LaunchId } from "../../shared/types";
 import { ResponseAssembler } from "./assembler";
 import { resolveRequestClient } from "./client-identity";
-import type { resolveClientId } from "./client-identity";
 import { makeEnvelope, newRequestId } from "./envelope";
 import { proxyEventBus } from "./events";
 import { parseSseFrame } from "./sse-parser";
@@ -99,7 +99,7 @@ export interface RunningServer {
 const CLIENT_INFO = Symbol("promptctl.clientInfo");
 
 type ClientSocket = http.IncomingMessage["socket"] & {
-  [CLIENT_INFO]?: ReturnType<typeof resolveClientId>;
+  [CLIENT_INFO]?: Promise<ClientInfo>;
 };
 
 // Notification path for completed entries (HAR recorder subscribes here).

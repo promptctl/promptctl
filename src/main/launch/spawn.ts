@@ -102,10 +102,10 @@ export async function spawnLaunch(deps: SpawnDeps, spec: LaunchSpec): Promise<La
   // ANTHROPIC_CUSTOM_HEADERS) contain spaces.
   const shellCommand = composeShellCommand(env, binary);
 
-  // tmux's `new-session -d -s NAME` fails with `%error` if NAME already
-  // exists, so collision detection is the natural result of the call —
-  // no pre-check needed. The library surfaces `%error` as a thrown
-  // TmuxCommandError; we let it propagate with the original tmux message.
+  // The has-session pre-check above is the collision-rejection point;
+  // new-session here is expected to succeed. tmux still surfaces
+  // unexpected errors (binary missing, permission denied, etc.) as a
+  // thrown TmuxCommandError, which we let propagate verbatim.
   await client.execute(
     [
       "new-session",

@@ -1,7 +1,9 @@
-// [LAW:single-enforcer] One IPC site for the launch registry. The renderer
-// invokes (launch:list, launch:get) for reads and subscribes to launch:event
-// for push updates. Mutating channels (launch:create, launch:terminate)
-// land in later slices; this slice registers the read+subscribe surface.
+// [LAW:single-enforcer] One IPC site for the launch registry. Reads
+// (`launch:list`, `launch:get`) and subscribe (`launch:subscribe` +
+// push `launch:event` / `launch:list`) come from the registry's
+// projection. The lone mutating channel — `launch:create` — delegates
+// to the spawn flow which is the only constructor of launch rows
+// (`launch:terminate` lands when the Workshop tab needs it).
 //
 // [LAW:one-source-of-truth] All payloads project off the registry — no
 // caching at the IPC boundary. The handler is a thin pass-through.

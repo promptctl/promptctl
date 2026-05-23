@@ -12,7 +12,6 @@
 // subscription. [LAW:one-source-of-truth] one spawn path.
 
 import { ipcMain } from "electron";
-import type { TmuxClient } from "tmux-control-mode-js";
 import type {
   PaneId,
   PaneProcesses,
@@ -22,10 +21,6 @@ import { getPaneProcesses } from "../tmux/processes";
 
 export interface TmuxPaneHandlersDeps {
   readonly getSnapshot: () => TmuxSnapshot;
-  // [LAW:no-defensive-null-guards] Client is null between disconnect and
-  // reconnect-ready. The handler propagates that as the natural empty-
-  // children response when the snapshot doesn't have the pane.
-  readonly getClient: () => TmuxClient | null;
 }
 
 export function registerTmuxPaneHandlers(
