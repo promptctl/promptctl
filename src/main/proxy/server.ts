@@ -180,15 +180,23 @@ async function handleRequest(
   // [LAW:dataflow-not-control-flow] One resolver. The header path wins
   // when present and known; the socket walk is the fallback. Cache on
   // the socket so a keep-alive connection's later requests skip the
-  // resolution. Publish whichever ClientInfo we ended up with so the
-  // Live tab's client list reflects the active row.
+  // resolution — but refresh `lastSeenNs` per request so the recency
+  // signal driving the Live tab's active-client list (and the
+  // proxyEventBus.listClients() ordering) tracks the current request,
+  // not the connection's first request. The cached identity is reused;
+  // the timestamp is the only field that varies per request.
   const socket = req.socket as ClientSocket;
   const cached = socket[CLIENT_INFO];
-  const clientInfo = await (cached ?? (() => {
+  const resolved = await (cached ?? (() => {
     const promise = resolveRequestClient(req, req.socket, resolveLaunch);
     socket[CLIENT_INFO] = promise;
     return promise;
   })());
+  const clientInfo: ClientInfo = {
+    ...resolved,
+    lastSeenNs: Number(process.hrtime.bigint()),
+  };
+  socket[CLIENT_INFO] = Promise.resolve(clientInfo);
   proxyEventBus.publishClient(clientInfo);
   const envelope = () => makeEnvelope(requestId, clientInfo.clientId);
   const startedAt = Date.now();
