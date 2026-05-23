@@ -88,17 +88,17 @@ interface RegisteredListener {
   readonly scope: "primary" | "all";
 }
 
-// A follower owns its transport, its client, and the disposers for the
-// listeners attached to it. Teardown is the inverse — drop every listener,
-// then close the transport. The map below is the entire state of "which
-// sessions are currently observed."
+// A follower owns its transport and its client. Teardown derives the set of
+// listeners to detach from `this.listeners` at the moment of teardown — so
+// listener subscribe/unsubscribe never has to push or remove disposer
+// closures per follower, and the stored shape stays small.
 interface FollowerClient {
   readonly sessionId: SessionId;
   readonly client: TmuxClient;
   readonly transport: TmuxTransport;
-  readonly listenerDisposers: (() => void)[];
-  // True once we've issued the teardown (or the transport dropped on its own)
-  // so the auto-respawn-on-exit path doesn't double-act.
+  // Set once we've issued the teardown (or the transport dropped on its own)
+  // so the unexpected-exit handler and tearDownFollower don't both delete
+  // the row and double-call client.close().
   shuttingDown: boolean;
 }
 
@@ -114,9 +114,6 @@ export class TmuxControlConnection {
 
   private primaryClient: TmuxClient | null = null;
   private readonly followers = new Map<SessionId, FollowerClient>();
-  // Last-observed session set. observeSessions() is idempotent; this guards
-  // a transient transport drop from racing the next reconcile.
-  private observed: ReadonlySet<SessionId> = new Set();
 
   private status: ConnectionStatus = "connecting";
   private statusReason: string | undefined;
@@ -194,7 +191,6 @@ export class TmuxControlConnection {
   // and runs the same add/remove loops every invocation; the variability is
   // which session ids are new vs gone, not which branch fires.
   observeSessions(sessions: ReadonlySet<SessionId>): void {
-    this.observed = new Set(sessions);
     if (this.closed) return;
     // Add followers for newly-observed sessions. Skip if we already have one
     // — observation is a set, not a queue.
@@ -248,9 +244,6 @@ export class TmuxControlConnection {
     if (scope === "all") {
       for (const follower of this.followers.values()) {
         follower.client.on(event, handler);
-        follower.listenerDisposers.push(() =>
-          follower.client.off(event, handler),
-        );
       }
     }
     return () => {
@@ -406,33 +399,33 @@ export class TmuxControlConnection {
       sessionId,
       client,
       transport,
-      listenerDisposers: [],
       shuttingDown: false,
     };
     this.followers.set(sessionId, follower);
 
     // Attach every session-scoped listener that's currently registered.
+    // Teardown will derive its detach pass from `this.listeners` at the time
+    // it runs, so we don't store per-follower disposers.
     for (const lst of this.listeners) {
       if (lst.scope !== "all") continue;
       client.on(lst.event, lst.handler);
-      follower.listenerDisposers.push(() =>
-        client.off(lst.event, lst.handler),
-      );
     }
 
     this.installPauseAutoResume(client, `follower(${sessionId})`);
 
-    // Transport drops drop the follower from the map. The next
-    // observeSessions() call (driven by the topology snapshot) respawns it
-    // if the session still exists.
+    // Unexpected transport drop: drop the follower from the map. The next
+    // topology snapshot (which is the only writer of the observed set) will
+    // call observeSessions again with the still-existing session id and
+    // respawn the follower then. We do NOT respawn here directly — a session
+    // that just died might fire its `window-close` event milliseconds later,
+    // which would race a snapshot-driven removal and could loop.
     client.on("exit", (ev) => {
       if (follower.shuttingDown) return;
+      follower.shuttingDown = true;
       console.warn(
         `[tmux-control] follower(${sessionId}) exited unexpectedly: ${ev.reason ?? "transport closed"}`,
       );
       this.followers.delete(sessionId);
-      for (const dispose of follower.listenerDisposers) dispose();
-      follower.listenerDisposers.length = 0;
     });
 
     // Same backpressure policy as primary so per-burst output pauses, then
@@ -471,8 +464,16 @@ export class TmuxControlConnection {
   ): void {
     if (follower.shuttingDown) return;
     follower.shuttingDown = true;
-    for (const dispose of follower.listenerDisposers) dispose();
-    follower.listenerDisposers.length = 0;
+    // [LAW:single-enforcer] Detach every session-scoped listener that is
+    // CURRENTLY registered — derived at teardown time so subscribe/unsubscribe
+    // doesn't have to maintain a per-follower disposer list that grows stale.
+    // A listener that was unsubscribed earlier was already removed from
+    // `this.listeners`, so its off() never runs here (and a subsequent off()
+    // on the library would be a harmless no-op anyway).
+    for (const lst of this.listeners) {
+      if (lst.scope !== "all") continue;
+      follower.client.off(lst.event, lst.handler);
+    }
     follower.client.close();
     this.followers.delete(sessionId);
   }

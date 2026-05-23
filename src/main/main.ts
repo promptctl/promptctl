@@ -124,13 +124,23 @@ const tmuxOutputRouter = new TmuxOutputRouter({
 });
 
 // [LAW:single-enforcer] The connection's follower mesh is a projection of
-// the topology: any session promptctl sees in the pane list becomes an
-// observation, and a per-session control client spawns to deliver its
-// %output. Without this, only the owned-session pane stream is live and
-// CommandEngine output-pattern triggers in foreign sessions silently pause.
+// the topology: any FOREIGN session promptctl sees in the pane list grows a
+// follower that delivers its %output. Without this, only the owned-session
+// pane stream is live and CommandEngine output-pattern triggers in foreign
+// sessions silently pause.
+//
+// [LAW:no-mode-explosion] The owned session is excluded by name at the
+// wiring site: the primary client already attaches there via argv, so adding
+// a follower for the same session would double-deliver %output. The
+// "owned vs foreign" distinction is data the call site has (TMUX_SESSION_NAME
+// vs pane.sessionName), so the filter belongs here rather than as a special
+// case inside the connection.
 tmuxTopology.onSnapshot((snapshot) => {
   const sessions = new Set<SessionId>();
-  for (const pane of snapshot.panes) sessions.add(pane.sessionId);
+  for (const pane of snapshot.panes) {
+    if (pane.sessionName === TMUX_SESSION_NAME) continue;
+    sessions.add(pane.sessionId);
+  }
   tmuxControl.observeSessions(sessions);
 });
 

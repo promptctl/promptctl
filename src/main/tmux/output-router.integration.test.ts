@@ -76,8 +76,8 @@ describe("TmuxOutputRouter (real tmux)", () => {
 
   it("receives output bytes from a pane running a command", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () =>
-        spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      transportFactory: (target) =>
+        spawnTmux(["attach-session", "-t", target], { socketPath: socket }),
       sessionName: OWNED,
       bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
@@ -165,8 +165,8 @@ describe("TmuxOutputRouter (real tmux)", () => {
 
   it("stops delivering after unsubscribe", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () =>
-        spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      transportFactory: (target) =>
+        spawnTmux(["attach-session", "-t", target], { socketPath: socket }),
       sessionName: OWNED,
       bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,

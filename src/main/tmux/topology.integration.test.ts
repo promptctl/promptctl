@@ -79,7 +79,7 @@ describe("TmuxTopologyTracker (real tmux)", () => {
 
   it("seeds the snapshot from list-panes when the connection becomes ready", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      transportFactory: (target) => spawnTmux(["attach-session", "-t", target], { socketPath: socket }),
       sessionName: OWNED,
       bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
@@ -112,7 +112,7 @@ describe("TmuxTopologyTracker (real tmux)", () => {
 
   it("reflects a new pane within one event tick of tmux split-window", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      transportFactory: (target) => spawnTmux(["attach-session", "-t", target], { socketPath: socket }),
       sessionName: OWNED,
       bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
@@ -157,8 +157,8 @@ describe("TmuxTopologyTracker (real tmux)", () => {
     });
 
     const conn = TmuxControlConnection.start({
-      transportFactory: () =>
-        spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      transportFactory: (target) =>
+        spawnTmux(["attach-session", "-t", target], { socketPath: socket }),
       sessionName: OWNED,
       bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
@@ -187,7 +187,7 @@ describe("TmuxTopologyTracker (real tmux)", () => {
 
   it("removes a pane within one event tick of tmux kill-window", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      transportFactory: (target) => spawnTmux(["attach-session", "-t", target], { socketPath: socket }),
       sessionName: OWNED,
       bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,

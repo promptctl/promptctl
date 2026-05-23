@@ -88,7 +88,7 @@ describe("TmuxControlConnection (real tmux)", () => {
 
   it("connects to a real tmux server and reaches ready", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      transportFactory: (target) => spawnTmux(["attach-session", "-t", target], { socketPath: socket }),
       sessionName: OWNED,
       bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
@@ -108,7 +108,7 @@ describe("TmuxControlConnection (real tmux)", () => {
 
   it("survives a kill-server / restart cycle and returns to ready", async () => {
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      transportFactory: (target) => spawnTmux(["attach-session", "-t", target], { socketPath: socket }),
       sessionName: OWNED,
       bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,
@@ -147,7 +147,7 @@ describe("TmuxControlConnection (real tmux)", () => {
     // held a reference to the connection (not the raw client) keeps working
     // across reconnects without re-fetching.
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
+      transportFactory: (target) => spawnTmux(["attach-session", "-t", target], { socketPath: socket }),
       sessionName: OWNED,
       bootstrap: () => ensureSession(OWNED, socket),
       reconnectDelayMs: 100,

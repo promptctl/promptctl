@@ -205,7 +205,7 @@ describe("TmuxControlConnection", () => {
   it("close() halts reconnect attempts", async () => {
     let factoryCalls = 0;
     const conn = TmuxControlConnection.start({
-      transportFactory: () => {
+      transportFactory: (_target) => {
         factoryCalls += 1;
         return new FakeTransport();
       },

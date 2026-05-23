@@ -138,11 +138,18 @@ describe("multi-session follower mesh (real tmux)", () => {
       getClient: () => conn.client,
     });
 
+    // Mirror main.ts's filtering: the owned session is attached via primary,
+    // so observation only contains foreign sessions. Without this filter,
+    // a follower would spawn for the owned session and double-deliver
+    // %output alongside the primary.
     let latestSnapshot: TmuxSnapshot | null = null;
     topology.onSnapshot((snap) => {
       latestSnapshot = snap;
       const sessions = new Set<SessionId>();
-      for (const pane of snap.panes) sessions.add(pane.sessionId);
+      for (const pane of snap.panes) {
+        if (pane.sessionName === OWNED) continue;
+        sessions.add(pane.sessionId);
+      }
       conn.observeSessions(sessions);
     });
 
@@ -182,21 +189,39 @@ describe("multi-session follower mesh (real tmux)", () => {
     await client.execute(
       `send-keys -t '${sidB}' 'printf marker-from-B' Enter`,
     );
+    // Also drive the OWNED session — the primary's territory. If the mesh
+    // wiring ever leaks the owned session into the observation set, a
+    // duplicate follower would deliver this marker a second time and the
+    // exactly-once assertion below would catch it.
+    await client.execute(
+      `send-keys -t '${OWNED}' 'printf marker-from-OWNED' Enter`,
+    );
 
-    // Both markers should appear in the captured outputs. If the mesh
-    // weren't installed, ONE of these markers would be absent — the prior
-    // failure mode this ticket exists to fix.
+    // All three markers must appear; the foreign ones at least once, the
+    // owned one EXACTLY once (would be twice if a follower also attached
+    // to the owned session).
     await waitFor(
       () => {
         const blob = outputs.map((o) => o.data).join("");
-        return blob.includes("marker-from-A") && blob.includes("marker-from-B");
+        return (
+          blob.includes("marker-from-A") &&
+          blob.includes("marker-from-B") &&
+          blob.includes("marker-from-OWNED")
+        );
       },
       5000,
-      "%output from both foreign sessions",
+      "%output from all three sessions",
     );
+
+    // Give a small grace window for any duplicate delivery to land — the
+    // test would still pass on a single delivery but fail loud on two.
+    await delay(150);
 
     const blob = outputs.map((o) => o.data).join("");
     expect(blob).toContain("marker-from-A");
     expect(blob).toContain("marker-from-B");
+
+    const ownedOccurrences = (blob.match(/marker-from-OWNED/g) ?? []).length;
+    expect(ownedOccurrences).toBe(1);
   });
 });
