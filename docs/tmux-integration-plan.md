@@ -77,11 +77,21 @@ matching.
   attached to *primary only* so consumers see each event exactly once.
 
 The follower set is a projection of the topology snapshot: `main.ts` wires
-`topology.onSnapshot → conn.observeSessions(<session ids from panes>)`,
+`topology.onSnapshot → conn.observeSessions(<foreign session ids>)`,
 making "which sessions are observed" data on every snapshot rather than an
-imperative `switch-client` call. Sessions appearing in the snapshot spawn
-followers; sessions disappearing tear them down. A follower whose transport
-drops unexpectedly is removed from the map; the next snapshot respawns it.
+imperative `switch-client` call. The owned session is excluded by the
+wiring filter (the primary already covers it). Sessions appearing in the
+snapshot spawn followers; sessions disappearing tear them down — both
+through the same `observeSessions(set)` reconciler.
+
+Recovery from an unexpected follower failure does not depend on the
+topology firing again (it's diff-gated and may not). Instead, the
+connection schedules a per-session backoff respawn timer when a
+follower's transport drops, setFlags rejects, or the transport factory
+throws — but only if the session is still in `this.observed`. The
+timer is a single shot; `observeSessions()` cancels any pending timer
+for a session that has left the set, so a session that genuinely died
+never races an attempt to attach to a vanished target.
 
 Subscriptions registered at startup (on the primary only):
 

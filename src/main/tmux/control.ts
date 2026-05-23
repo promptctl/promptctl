@@ -16,9 +16,12 @@
 // reason) and a scheduled reconnect — no branch that "skips" the lifecycle.
 // spawnFollower() runs an analogous but distinct sequence — spawn transport
 // → register session-scoped listeners → setFlags — and does NOT touch
-// connection status; follower failures only log and rely on the next
-// topology snapshot for reconciliation. The connection is "ready" iff the
-// primary is ready, independent of how many followers exist.
+// connection status. Follower failures (transport spawn, setFlags reject,
+// unexpected transport drop) schedule a per-session backoff respawn via
+// scheduleFollowerRespawn() if the session is still in `this.observed`,
+// so coverage doesn't depend on the (diff-gated) topology tracker firing
+// again. The connection is "ready" iff the primary is ready, independent
+// of how many followers exist.
 //
 // [LAW:one-type-per-behavior] Each registered listener carries an event-type
 // classification — server-scoped (attaches to primary only) or session-scoped
@@ -427,6 +430,10 @@ export class TmuxControlConnection {
       console.error(
         `[tmux-control] follower(${sessionId}) transport spawn failed: ${errorMessage(err)}`,
       );
+      // Same dark-spot risk as a silent transport drop — schedule respawn
+      // if the session is still observed so a transient factory failure
+      // doesn't leave coverage off until the next topology event.
+      this.scheduleFollowerRespawn(sessionId);
       return;
     }
 
@@ -474,13 +481,17 @@ export class TmuxControlConnection {
     });
 
     // Same backpressure policy as primary so per-burst output pauses, then
-    // self-resumes via the pause handler above.
+    // self-resumes via the pause handler above. On failure, tear this
+    // follower down and schedule a respawn if the session is still
+    // observed — same recovery posture as a silent transport drop, so a
+    // transient setFlags reject doesn't leave coverage dark.
     void client.setFlags(["pause-after=2"]).catch((err: unknown) => {
       console.error(
         `[tmux-control] follower(${sessionId}) setFlags failed:`,
         err,
       );
       this.tearDownFollower(sessionId, follower);
+      this.scheduleFollowerRespawn(sessionId);
     });
   }
 
