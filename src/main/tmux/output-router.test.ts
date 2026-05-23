@@ -6,10 +6,11 @@
 // here — the integration test (output-router.integration.test.ts) covers
 // that against a live server.
 //
-// Coverage focus per ticket 77e.1.4:
+// Coverage focus:
 //   - Subscribe triggers scrollback capture + streaming state.
 //   - Output bytes forwarded only to pane watchers.
-//   - Pause → auto-resume + state marker.
+//   - Pause → projects paused state marker (auto-resume lives in
+//     TmuxControlConnection so the right client issues the continue).
 //   - Continue → state marker.
 //   - Unsubscribe stops delivery.
 //   - WebContents destroyed during subscription cleans up.
