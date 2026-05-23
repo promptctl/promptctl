@@ -11,6 +11,7 @@ import { loadCommands } from "./command/persistence";
 import { LaunchRegistry } from "./launch/registry";
 import { loadLaunches, saveLaunches } from "./launch/persistence";
 import { startLaunchCorrelator } from "./launch/correlator";
+import { recoverLaunches } from "./launch/recovery";
 import { registerLaunchHandlers } from "./ipc/launch-handlers";
 import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
 import { registerTmuxTopologyHandlers } from "./ipc/tmux-topology-handlers";
@@ -321,6 +322,15 @@ app.whenReady().then(async () => {
       // already in use and the proxy fell back).
       getProxyPort: () => proxyManager.status().port,
     },
+  });
+
+  // [LAW:single-enforcer] Reconcile persisted launch rows against the OS
+  // process table. Tools still alive keep their identity; tools that
+  // exited while promptctl was down get marked exited. Fire-and-forget:
+  // takes a beat to walk N processes, no point gating the rest of
+  // startup on it (the registry's mutations broadcast as they land).
+  void recoverLaunches({ registry: launchRegistry }).catch((err) => {
+    console.error("[launch] recovery failed:", err);
   });
 
   registerTmuxControlHandlers(tmuxControl);

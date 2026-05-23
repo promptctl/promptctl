@@ -192,7 +192,14 @@ export { sessionExists as sessionExistsForTesting };
 //  - other (server gone) → different error text → propagate
 async function sessionExists(client: TmuxClient, name: string): Promise<boolean> {
   try {
-    await client.execute(`has-session -t =${tmuxEscape(name)}`);
+    const resp = await client.execute(`has-session -t =${tmuxEscape(name)}`);
+    // tmux 3.x returns `%end` (success) even when the session doesn't
+    // exist on some configurations — but with diagnostic output in the
+    // body. The robust read is: success AND no error-shaped output.
+    // [LAW:no-silent-fallbacks] If output mentions "can't find session"
+    // even on a `%end` success path, treat that as "doesn't exist".
+    const body = resp.output.join("\n");
+    if (/can't find session/.test(body)) return false;
     return true;
   } catch (err) {
     const message =
