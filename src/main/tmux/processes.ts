@@ -1,15 +1,24 @@
-import { execFile } from "node:child_process";
+import { execFile, type ExecFileException } from "node:child_process";
 import type { ProcessInfo } from "../../shared/types";
 
-function exec(cmd: string, args: string[]): Promise<string> {
+// [LAW:one-source-of-truth] The exit-code policy for process-set queries lives
+// here, named, exercised by both callers and asserted directly in tests.
+// [LAW:one-type-per-behavior] pgrep (enumerate children) and ps (read details)
+// are the same behavior — a process-set query — and the BSD/macOS convention is
+// exit code 1 == "no matching processes" for both.
+// [LAW:dataflow-not-control-flow] A child exiting between the enumerate and the
+// read is normal liveness churn: exit code 1 is the empty set (a value), not a
+// failure. Every other exit code (timeout, ENOENT, …) is a genuine failure.
+export function isRealExecFailure(
+  error: Pick<ExecFileException, "code"> | null,
+): boolean {
+  return error !== null && error.code !== 1;
+}
+
+function queryProcesses(cmd: string, args: string[]): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { timeout: 5000 }, (error, stdout) => {
-      if (error) {
-        // pgrep returns exit 1 when no processes found — that's not an error
-        if (cmd === "pgrep" && error.code === 1) {
-          resolve("");
-          return;
-        }
+      if (isRealExecFailure(error)) {
         reject(error);
         return;
       }
@@ -45,7 +54,7 @@ export async function getPaneProcesses(
   panePid: number,
 ): Promise<ProcessInfo[]> {
   // Find direct children of the pane's shell process
-  const pgrepOut = await exec("pgrep", ["-P", String(panePid)]);
+  const pgrepOut = await queryProcesses("pgrep", ["-P", String(panePid)]);
   if (!pgrepOut.trim()) return [];
 
   const childPids = pgrepOut
@@ -55,7 +64,7 @@ export async function getPaneProcesses(
     .filter((s) => s.length > 0);
 
   // Get process details
-  const psOut = await exec("ps", [
+  const psOut = await queryProcesses("ps", [
     "-o",
     "pid=,ppid=,comm=,etime=,cputime=,args=",
     "-p",
