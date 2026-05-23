@@ -10,6 +10,7 @@ import { CommandEngine } from "./command/engine";
 import { loadCommands } from "./command/persistence";
 import { LaunchRegistry } from "./launch/registry";
 import { loadLaunches, saveLaunches } from "./launch/persistence";
+import { startLaunchCorrelator } from "./launch/correlator";
 import { registerLaunchHandlers } from "./ipc/launch-handlers";
 import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
 import { registerTmuxTopologyHandlers } from "./ipc/tmux-topology-handlers";
@@ -298,6 +299,16 @@ app.whenReady().then(async () => {
   launchRegistry = new LaunchRegistry({
     initial: persistedLaunches,
     save: saveLaunches,
+  });
+  // [LAW:single-enforcer] Bridge tmux observation → registry mutation.
+  // Snapshots feed pid correlation (slice C); slices D/E will add the
+  // exit/recovery wiring in this same module.
+  startLaunchCorrelator({
+    registry: launchRegistry,
+    onTopologySnapshot: (listener) => tmuxTopology.onSnapshot(listener),
+    getTopologySnapshot: () => tmuxTopology.snapshot(),
+    onTmuxEvent: (event, handler) => tmuxControl.on(event, handler),
+    onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   });
   registerLaunchHandlers({
     registry: launchRegistry,
