@@ -451,6 +451,68 @@ describe("TmuxControlConnection", () => {
       expect(seen).toEqual([33]);
     });
 
+    it("respawns a follower whose transport drops while still observed", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      conn.observeSessions(new Set<SessionId>(["$23"] as SessionId[]));
+      const follower1 = await registry.waitFor("$23");
+      await waitFor(() => follower1.sent.length > 0);
+      follower1.ack(1);
+
+      // Drop the follower's transport without touching observation —
+      // simulates the "transport silently died, session is fine" case.
+      follower1.externalDrop();
+
+      // Wait through the backoff window for the respawn to spawn a fresh
+      // transport for the same session target.
+      const follower2 = await registry.waitFor("$23", 1500);
+      expect(follower2).not.toBe(follower1);
+      await waitFor(() => follower2.sent.length > 0, 1000);
+      expect(follower2.sent[0]).toBe("refresh-client -f pause-after=2\n");
+    });
+
+    it("does NOT respawn after the session leaves observation", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      conn.observeSessions(new Set<SessionId>(["$25"] as SessionId[]));
+      const follower = await registry.waitFor("$25");
+      await waitFor(() => follower.sent.length > 0);
+      follower.ack(1);
+
+      // Drop AND simultaneously remove from observation — the "session
+      // died, topology reconciled, follower exit fires" race. Respawn
+      // must skip; otherwise the timer would try to attach to a vanished
+      // session and loop.
+      follower.externalDrop();
+      conn.observeSessions(new Set<SessionId>());
+
+      // Wait beyond the respawn delay; no new transport should be built.
+      await delay(800);
+      expect(registry.buildCounts.get("$25")).toBe(1);
+    });
+
     it("close() tears down primary and every follower", async () => {
       const registry = new FakeTransportRegistry();
       const conn = TmuxControlConnection.start({

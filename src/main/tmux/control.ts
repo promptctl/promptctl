@@ -118,6 +118,24 @@ export class TmuxControlConnection {
 
   private primaryClient: TmuxClient | null = null;
   private readonly followers = new Map<SessionId, FollowerClient>();
+  // [LAW:one-source-of-truth] The last observation-set passed to
+  // observeSessions(). Read by the follower exit handler to decide whether
+  // to schedule a respawn — without it, an isolated follower transport drop
+  // that doesn't perturb the pane list would silently go dark since the
+  // topology tracker only broadcasts on diff. Re-observation calls overwrite
+  // this set; close() clears it.
+  private observed: ReadonlySet<SessionId> = new Set();
+  // Per-session pending respawn timers. One in flight at a time per
+  // session; cleared when a session leaves observation or close() runs.
+  private readonly respawnTimers = new Map<
+    SessionId,
+    ReturnType<typeof setTimeout>
+  >();
+  // [LAW:dataflow-not-control-flow] Backoff between unexpected-exit and
+  // respawn attempt. Long enough for an imminent window-close +
+  // topology-refresh to win the race when the session genuinely died,
+  // short enough that a healthy session's brief blip recovers quickly.
+  private readonly followerRespawnDelayMs = 500;
 
   private status: ConnectionStatus = "connecting";
   private statusReason: string | undefined;
@@ -195,6 +213,7 @@ export class TmuxControlConnection {
   // and runs the same add/remove loops every invocation; the variability is
   // which session ids are new vs gone, not which branch fires.
   observeSessions(sessions: ReadonlySet<SessionId>): void {
+    this.observed = new Set(sessions);
     if (this.closed) return;
     // Add followers for newly-observed sessions. Skip if we already have one
     // — observation is a set, not a queue.
@@ -202,10 +221,17 @@ export class TmuxControlConnection {
       if (this.followers.has(sessionId)) continue;
       this.spawnFollower(sessionId);
     }
-    // Tear down followers that are no longer observed.
+    // Tear down followers that are no longer observed. Also cancel any
+    // pending respawn timer for a session that just left the set —
+    // otherwise it would fire after the session is gone and try to attach
+    // to a non-existent target.
     for (const [sessionId, follower] of [...this.followers]) {
       if (sessions.has(sessionId)) continue;
       this.tearDownFollower(sessionId, follower);
+    }
+    for (const sessionId of [...this.respawnTimers.keys()]) {
+      if (sessions.has(sessionId)) continue;
+      this.cancelRespawn(sessionId);
     }
   }
 
@@ -270,9 +296,13 @@ export class TmuxControlConnection {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
+    for (const sessionId of [...this.respawnTimers.keys()]) {
+      this.cancelRespawn(sessionId);
+    }
     for (const [sessionId, follower] of [...this.followers]) {
       this.tearDownFollower(sessionId, follower);
     }
+    this.observed = new Set();
     const client = this.primaryClient;
     this.primaryClient = null;
     client?.close();
@@ -419,12 +449,14 @@ export class TmuxControlConnection {
 
     this.installPauseAutoResume(client, `follower(${sessionId})`);
 
-    // Unexpected transport drop: drop the follower from the map. The next
-    // topology snapshot (which is the only writer of the observed set) will
-    // call observeSessions again with the still-existing session id and
-    // respawn the follower then. We do NOT respawn here directly — a session
-    // that just died might fire its `window-close` event milliseconds later,
-    // which would race a snapshot-driven removal and could loop.
+    // Unexpected transport drop: drop the follower from the map and
+    // schedule a backoff respawn IF the session is still observed. The
+    // backoff window gives an imminent window-close + topology reconcile a
+    // chance to win the race when the session genuinely died — if topology
+    // wins, the session leaves `this.observed` and the timer is cancelled
+    // by observeSessions(). A respawn relying solely on the next topology
+    // snapshot would fail silently when a follower transport drops without
+    // perturbing the pane list (topology only broadcasts on diff).
     //
     // client.close() is called even though the transport already dropped so
     // any library-internal state (in-flight command promises, the closed
@@ -438,6 +470,7 @@ export class TmuxControlConnection {
       );
       this.followers.delete(sessionId);
       client.close();
+      this.scheduleFollowerRespawn(sessionId);
     });
 
     // Same backpressure policy as primary so per-burst output pauses, then
@@ -468,6 +501,34 @@ export class TmuxControlConnection {
           );
         });
     });
+  }
+
+  // [LAW:single-enforcer] One scheduler per session — re-queuing the same
+  // session cancels the prior timer. Idempotent and self-cancelling: if
+  // observeSessions has already removed the session by the time the timer
+  // fires, the body of the timer is a no-op.
+  private scheduleFollowerRespawn(sessionId: SessionId): void {
+    if (this.closed) return;
+    if (!this.observed.has(sessionId)) return;
+    this.cancelRespawn(sessionId);
+    const timer = setTimeout(() => {
+      this.respawnTimers.delete(sessionId);
+      if (this.closed) return;
+      if (!this.observed.has(sessionId)) return;
+      if (this.followers.has(sessionId)) return;
+      console.log(
+        `[tmux-control] follower(${sessionId}) respawning after unexpected exit`,
+      );
+      this.spawnFollower(sessionId);
+    }, this.followerRespawnDelayMs);
+    this.respawnTimers.set(sessionId, timer);
+  }
+
+  private cancelRespawn(sessionId: SessionId): void {
+    const timer = this.respawnTimers.get(sessionId);
+    if (timer === undefined) return;
+    clearTimeout(timer);
+    this.respawnTimers.delete(sessionId);
   }
 
   private tearDownFollower(
