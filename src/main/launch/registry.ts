@@ -290,7 +290,16 @@ export class LaunchRegistry {
       this.savePending = true;
       return;
     }
-    void this.runPersist();
+    // [LAW:no-silent-fallbacks] runPersist can reject (disk full,
+    // permission denied, rename failure on a corrupt FS). We catch
+    // here so the rejection doesn't become an unhandled promise — that
+    // would crash main or trigger noisy node warnings — but we log
+    // loudly and leave `saveInFlight`/`savePending` consistent so the
+    // next mutation retries. We do NOT swallow the error silently;
+    // the operator needs to know persistence is broken.
+    this.runPersist().catch((err) => {
+      console.error("[launch] failed to persist launches.json:", err);
+    });
   }
 
   private async runPersist(): Promise<void> {

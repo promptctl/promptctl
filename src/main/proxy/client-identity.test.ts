@@ -226,24 +226,70 @@ describe("resolveRequestClient", () => {
     expect(info.clientId).toBe("launch-L-1");
   });
 
-  it("falls back to the socket walk when the header is absent", async () => {
-    // The fallback hits the real resolveClientId which does I/O — we
-    // can't easily mock it here, but we can verify the launchId field
-    // is null on whatever shape comes back.
+  it("falls back to the socket resolver when the header is absent", async () => {
+    let fallbackCalls = 0;
+    const stub = async (_s: unknown) => {
+      fallbackCalls += 1;
+      return {
+        clientId: "stub-fallback",
+        pid: 100,
+        rootPid: 100,
+        displayName: "stub",
+        command: null,
+        cwd: null,
+        lastSeenNs: 0,
+        launchId: null,
+      } as const;
+    };
     const info = await resolveRequestClient(
       req({}),
       socket(),
       () => null,
+      stub,
     );
+    expect(fallbackCalls).toBe(1);
+    expect(info.clientId).toBe("stub-fallback");
     expect(info.launchId).toBeNull();
   });
 
-  it("falls back to the socket walk when the header references an unknown launch", async () => {
-    const info = await resolveRequestClient(
+  it("falls back to the socket resolver when the header references an unknown launch", async () => {
+    let fallbackCalls = 0;
+    const stub = async () => {
+      fallbackCalls += 1;
+      return {
+        clientId: "stub-fallback",
+        pid: null,
+        rootPid: null,
+        displayName: "stub",
+        command: null,
+        cwd: null,
+        lastSeenNs: 0,
+        launchId: null,
+      } as const;
+    };
+    await resolveRequestClient(
       req({ "x-promptctl-launch": "unknown" }),
       socket(),
       () => null,
+      stub,
     );
-    expect(info.launchId).toBeNull();
+    expect(fallbackCalls).toBe(1);
+  });
+
+  it("does NOT invoke the fallback when the header matches a known launch", async () => {
+    let fallbackCalls = 0;
+    const stub = async () => {
+      fallbackCalls += 1;
+      throw new Error("should not be called");
+    };
+    const launch = makeLaunch();
+    const info = await resolveRequestClient(
+      req({ "x-promptctl-launch": "L-1" }),
+      socket(),
+      (id) => (id === ("L-1" as LaunchId) ? launch : null),
+      stub,
+    );
+    expect(fallbackCalls).toBe(0);
+    expect(info.clientId).toBe("launch-L-1");
   });
 });

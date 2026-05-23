@@ -266,6 +266,49 @@ describe("LaunchRegistry persistence", () => {
     expect(events).toEqual([]);
   });
 
+  it("persistence rejection is caught (no unhandled-promise crash)", async () => {
+    // The save sink throws. The registry must catch it (so the
+    // unhandled rejection doesn't crash main) and remain ready for the
+    // next mutation to retry.
+    const errors: unknown[] = [];
+    const originalConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    let saveCount = 0;
+    try {
+      const reg = new LaunchRegistry({
+        save: async () => {
+          saveCount += 1;
+          throw new Error("disk full");
+        },
+      });
+      reg.create({
+        spec: { toolKind: "claude", cwd: "/x", sessionName: "a" },
+        paneId: PANE,
+        sessionId: SESS,
+        windowId: WIN,
+        env: {},
+      });
+      await reg.__flushForTesting();
+      // First mutation persisted, save() rejected, we caught + logged.
+      expect(saveCount).toBe(1);
+      expect(errors.length).toBeGreaterThan(0);
+      // Second mutation retries.
+      reg.create({
+        spec: { toolKind: "claude", cwd: "/y", sessionName: "b" },
+        paneId: PANE,
+        sessionId: SESS,
+        windowId: WIN,
+        env: {},
+      });
+      await reg.__flushForTesting();
+      expect(saveCount).toBe(2);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
   it("coalescer never piles up overlapping writes", async () => {
     let inFlight = 0;
     let maxInFlight = 0;

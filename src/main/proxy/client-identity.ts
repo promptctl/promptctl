@@ -110,10 +110,16 @@ export function clientInfoFromLaunch(launch: Launch): ClientInfo {
 // [LAW:dataflow-not-control-flow] Same shape returned on every path —
 // the variability is in which input was authoritative, not in whether
 // the resolver produced output.
+//
+// The `socketFallback` parameter is injectable so unit tests can drive
+// the fallback path without invoking the real socket walk (which does
+// real lsof/ps and is slow / environment-sensitive). Production omits
+// it and the default points at `resolveClientId`.
 export async function resolveRequestClient(
   req: http.IncomingMessage,
   socket: net.Socket,
   resolveLaunch: (id: LaunchId) => Launch | null,
+  socketFallback: (socket: net.Socket) => Promise<ClientInfo> = resolveClientId,
 ): Promise<ClientInfo> {
   const header = readLaunchHeader(req);
   if (header !== null) {
@@ -126,7 +132,7 @@ export async function resolveRequestClient(
     // outside our control. Fall back to the socket walk rather than
     // synthesizing a phantom row from header data we can't verify.
   }
-  return resolveClientId(socket);
+  return socketFallback(socket);
 }
 
 // Exported for unit testing. Returns the launchId from the request's
