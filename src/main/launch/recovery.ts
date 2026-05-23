@@ -61,7 +61,25 @@ export async function recoverLaunches(deps: RecoveryDeps): Promise<RecoveryResul
       if (next) exited.push(next);
       continue;
     }
-    const env = await readPidEnv(launch.pid).catch(() => null);
+    // [LAW:no-silent-fallbacks] readPidEnv returns null when the pid
+    // is genuinely gone (ENOENT, process-not-found) and throws on
+    // everything else (ps missing, permission denied, transient I/O
+    // failure). A `.catch(() => null)` here would coerce every error
+    // into "process gone" and incorrectly orphan still-running tools.
+    // Real errors land in the catch below: we log loudly and leave
+    // the launch row in its current state — the operator decides
+    // whether to investigate or retry.
+    let env: string | null;
+    try {
+      env = await readPidEnv(launch.pid);
+    } catch (err) {
+      console.error(
+        `[launch] recovery: failed to read env for pid ${launch.pid} (launch ${launch.launchId}); leaving row alive:`,
+        err,
+      );
+      recovered.push(launch);
+      continue;
+    }
     if (env === null) {
       const next = deps.registry.markExited(
         launch.launchId,

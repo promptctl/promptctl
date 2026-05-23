@@ -178,6 +178,34 @@ describe("recoverLaunches", () => {
     expect(reg.get("old" as LaunchId)?.status).toBe("exited");
   });
 
+  it("leaves the launch alive when readPidEnv throws (real error, not 'process gone')", async () => {
+    // readEnvMacos throws on ps-missing / permission-denied / etc.
+    // Recovery must NOT silently treat those as 'process gone' — the
+    // tool may still be running, and we'd orphan it.
+    const reg = makeRegistry([
+      row({ launchId: "alive" as LaunchId, status: "running", pid: 400 }),
+    ]);
+    const errors: unknown[] = [];
+    const originalConsoleError = console.error;
+    console.error = (...args: unknown[]) => {
+      errors.push(args);
+    };
+    try {
+      const result = await recoverLaunches({
+        registry: reg,
+        readPidEnv: async () => {
+          throw new Error("ps: command not found");
+        },
+      });
+      expect(result.recovered).toHaveLength(1);
+      expect(result.exited).toHaveLength(0);
+      expect(reg.get("alive" as LaunchId)?.status).toBe("running");
+      expect(errors.length).toBeGreaterThan(0);
+    } finally {
+      console.error = originalConsoleError;
+    }
+  });
+
   it("processes a mixed batch correctly", async () => {
     const reg = makeRegistry([
       row({ launchId: "alive" as LaunchId, status: "running", pid: 100 }),
