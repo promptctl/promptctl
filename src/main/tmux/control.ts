@@ -64,8 +64,9 @@ export interface TmuxControlConnectionOptions {
   // -s <name>` only if missing. Overridable for tests so unit suites
   // don't need a real tmux binary on PATH.
   readonly bootstrap?: () => Promise<void>;
-  // Backoff between reconnect attempts (primary client only — followers
-  // are respawned by the next observeSessions() reconciliation).
+  // Backoff between reconnect attempts. Applies only to the primary's
+  // connect() lifecycle; followers have their own per-session backoff
+  // (followerRespawnDelayMs) driven by scheduleFollowerRespawn().
   readonly reconnectDelayMs?: number;
 }
 
@@ -518,13 +519,30 @@ export class TmuxControlConnection {
   // session cancels the prior timer. Idempotent and self-cancelling: if
   // observeSessions has already removed the session by the time the timer
   // fires, the body of the timer is a no-op.
+  //
+  // [LAW:no-silent-fallbacks] Skip scheduling when primary isn't ready.
+  // If the tmux server is down, every observed session would retry
+  // attach-session every 500ms — a retry storm that floods logs and churns
+  // failed processes while primary's own reconnect cycle is already handling
+  // server recovery. When primary reaches ready again, topology fires a
+  // fresh snapshot, observeSessions runs with the live set, and any
+  // observed sessions that don't yet have followers get spawned through
+  // the normal path. The gate is at schedule time so missed respawns
+  // converge through that path, not through a backlog of stale timers.
   private scheduleFollowerRespawn(sessionId: SessionId): void {
     if (this.closed) return;
     if (!this.observed.has(sessionId)) return;
+    if (this.status !== "ready") {
+      console.log(
+        `[tmux-control] follower(${sessionId}) respawn deferred — primary not ready (status=${this.status}); will recover via the next topology snapshot after primary returns`,
+      );
+      return;
+    }
     this.cancelRespawn(sessionId);
     const timer = setTimeout(() => {
       this.respawnTimers.delete(sessionId);
       if (this.closed) return;
+      if (this.status !== "ready") return;
       if (!this.observed.has(sessionId)) return;
       if (this.followers.has(sessionId)) return;
       console.log(

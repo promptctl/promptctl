@@ -482,6 +482,42 @@ describe("TmuxControlConnection", () => {
       expect(follower2.sent[0]).toBe("refresh-client -f pause-after=2\n");
     });
 
+    it("does NOT respawn followers while primary is not ready (no retry storm during server outage)", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary1 = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary1.sent.length > 0);
+      primary1.ack(1);
+      await conn.ready;
+
+      conn.observeSessions(new Set<SessionId>(["$27"] as SessionId[]));
+      const follower = await registry.waitFor("$27");
+      await waitFor(() => follower.sent.length > 0);
+      follower.ack(1);
+
+      // Drop BOTH transports — server outage shape. Primary's failure
+      // routes through handlePrimaryFailure → status="closed" → schedule
+      // reconnect (50ms here). Follower's exit fires while primary is
+      // still in "closed" state, and that's the moment respawn must
+      // be skipped.
+      primary1.externalDrop();
+      follower.externalDrop();
+
+      // Give the follower exit handler time to run while primary is closed.
+      await waitFor(() => conn.getState().status === "closed", 500);
+      await delay(800);
+
+      // No respawn attempt while primary was down — buildCount should
+      // still be 1 (only the original spawn).
+      expect(registry.buildCounts.get("$27")).toBe(1);
+    });
+
     it("does NOT respawn after the session leaves observation", async () => {
       const registry = new FakeTransportRegistry();
       const conn = TmuxControlConnection.start({
