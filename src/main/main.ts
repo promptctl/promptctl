@@ -302,8 +302,9 @@ app.whenReady().then(async () => {
     save: saveLaunches,
   });
   // [LAW:single-enforcer] Bridge tmux observation → registry mutation.
-  // Snapshots feed pid correlation (slice C); slices D/E will add the
-  // exit/recovery wiring in this same module.
+  // Snapshots feed pid correlation and exit detection (pane-cmd revert,
+  // pane vanish); window-close / unlinked-window-close events feed the
+  // direct exit signal. Recovery-on-restart runs separately just below.
   startLaunchCorrelator({
     registry: launchRegistry,
     onTopologySnapshot: (listener) => tmuxTopology.onSnapshot(listener),

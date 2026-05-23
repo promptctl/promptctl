@@ -86,8 +86,18 @@ export function PaneViewer() {
   // [LAW:one-source-of-truth] The launch row is looked up by paneId from
   // the registry-backed store. The badge is presence-driven — non-null
   // means promptctl spawned this pane and the launch is still alive.
-  const launchByPane = useLaunchStore((s) => s.byPane);
-  const launch = pane ? launchByPane(pane.id) : undefined;
+  //
+  // Subscribe to the *result* (not the lookup function), so Zustand
+  // re-renders this component when the underlying `launches` array
+  // changes. Selecting `s.byPane` alone would memoize a stable
+  // function reference and miss every registry update.
+  const launch = useLaunchStore((s) =>
+    pane
+      ? s.launches.find(
+          (l) => l.paneId === pane.id && l.status !== "exited",
+        )
+      : undefined,
+  );
   // [LAW:dataflow-not-control-flow] Stream is keyed on the *valid* pane — if
   // selection points to a gone pane, we drop to null and the terminal unmounts.
   // The selection store is untouched (user keeps their intent); when the pane
