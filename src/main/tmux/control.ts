@@ -10,11 +10,15 @@
 // pattern matching from silently going dark when the UI navigates between
 // sessions. observeSessions() is its only writer.
 //
-// [LAW:dataflow-not-control-flow] connect() and spawnFollower() run the same
-// sequence every invocation: setStatus("connecting") → spawn → register
-// listeners → setFlags → setStatus("ready"). Failures flow into setStatus
-// ("closed", reason) and a scheduled reconnect — there is no branch that
-// "skips" the lifecycle.
+// [LAW:dataflow-not-control-flow] connect() runs the same primary lifecycle
+// every invocation: setStatus("connecting") → spawn → register listeners →
+// setFlags → setStatus("ready"). Failures flow into setStatus("closed",
+// reason) and a scheduled reconnect — no branch that "skips" the lifecycle.
+// spawnFollower() runs an analogous but distinct sequence — spawn transport
+// → register session-scoped listeners → setFlags — and does NOT touch
+// connection status; follower failures only log and rely on the next
+// topology snapshot for reconciliation. The connection is "ready" iff the
+// primary is ready, independent of how many followers exist.
 //
 // [LAW:one-type-per-behavior] Each registered listener carries an event-type
 // classification — server-scoped (attaches to primary only) or session-scoped
@@ -421,6 +425,11 @@ export class TmuxControlConnection {
     // respawn the follower then. We do NOT respawn here directly — a session
     // that just died might fire its `window-close` event milliseconds later,
     // which would race a snapshot-driven removal and could loop.
+    //
+    // client.close() is called even though the transport already dropped so
+    // any library-internal state (in-flight command promises, the closed
+    // flag) settles consistently. The library treats double-close as a
+    // no-op, so this is safe regardless of who initiated the drop.
     client.on("exit", (ev) => {
       if (follower.shuttingDown) return;
       follower.shuttingDown = true;
@@ -428,6 +437,7 @@ export class TmuxControlConnection {
         `[tmux-control] follower(${sessionId}) exited unexpectedly: ${ev.reason ?? "transport closed"}`,
       );
       this.followers.delete(sessionId);
+      client.close();
     });
 
     // Same backpressure policy as primary so per-burst output pauses, then
