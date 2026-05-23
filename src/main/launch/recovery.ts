@@ -147,7 +147,14 @@ async function readEnvLinux(pid: number): Promise<string | null> {
     // /proc/<pid>/environ is NUL-separated key=value entries.
     return await readFile(`/proc/${pid}/environ`, "utf-8");
   } catch (err) {
-    if (isENOENT(err) || isEACCES(err)) return null;
+    // ENOENT is the canonical "process is gone" signal — return null
+    // so recoverLaunches marks the row exited. EACCES means /proc
+    // exists but we can't read it (different user, hardened
+    // /proc/<pid>/environ permissions on modern distros). The tool
+    // is almost certainly still alive; conflating that with "gone"
+    // would orphan the row. Let it throw so the caller logs and
+    // leaves the row alive.
+    if (isENOENT(err)) return null;
     throw err;
   }
 }
@@ -172,15 +179,6 @@ function isENOENT(err: unknown): boolean {
     err !== null &&
     "code" in err &&
     (err as { code: unknown }).code === "ENOENT"
-  );
-}
-
-function isEACCES(err: unknown): boolean {
-  return (
-    typeof err === "object" &&
-    err !== null &&
-    "code" in err &&
-    (err as { code: unknown }).code === "EACCES"
   );
 }
 

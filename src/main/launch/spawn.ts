@@ -253,16 +253,24 @@ export async function waitForToolInPane(
 ): Promise<boolean> {
   // Race: the snapshot stream against a deadline. The listener calls
   // back synchronously with the current snapshot on attach (topology's
-  // onSnapshot contract), so a tool that already started by the time we
-  // ask is detected immediately. The unsubscribe handle is assigned
-  // AFTER onSnapshot returns — meaning the synchronous initial call
-  // would see a TDZ if it tried to call unsubscribe via the const. We
-  // route through a mutable holder so the function reference resolves
-  // at call time, not at lexical scope time.
+  // onSnapshot contract), so a tool that already started by the time
+  // we ask is detected immediately.
+  //
+  // Subscription-leak hazard: when the sync first call settles the
+  // promise, `unsubscribe` hasn't been assigned yet — but the topology
+  // tracker still adds the listener to its set AFTER returning from
+  // the sync call. If we don't run the unsubscribe handle once it
+  // exists, the listener stays in the set forever (one leak per
+  // spawn). The `unsubAfterAttach` flag records the intent so we can
+  // honor it the moment the handle becomes available.
   return new Promise<boolean>((resolve) => {
     let settled = false;
     let unsubscribe: (() => void) | null = null;
-    const stop = () => unsubscribe?.();
+    let unsubAfterAttach = false;
+    const stop = () => {
+      if (unsubscribe !== null) unsubscribe();
+      else unsubAfterAttach = true;
+    };
     const timer = setTimeout(() => {
       if (settled) return;
       settled = true;
@@ -282,5 +290,6 @@ export async function waitForToolInPane(
         resolve(true);
       }
     });
+    if (unsubAfterAttach) unsubscribe();
   });
 }

@@ -137,6 +137,30 @@ describe("waitForToolInPane", () => {
     expect(await waitForToolInPane(topology, PANE, "claude", 30)).toBe(false);
   });
 
+  it("unsubscribes after a synchronous initial match (no listener leak)", async () => {
+    // Production hazard: topology.onSnapshot calls the listener
+    // synchronously THEN adds it to its set. If we settle on the sync
+    // call, the unsubscribe handle returned from onSnapshot must
+    // still run — otherwise the listener stays in the set forever.
+    const listeners = new Set<(s: TmuxSnapshot) => void>();
+    const snapshot: TmuxSnapshot = {
+      timestamp: 0,
+      panes: [makePane({ toolKind: "claude" })],
+    };
+    const topology: SpawnTopology = {
+      snapshot: () => snapshot,
+      onSnapshot: (listener) => {
+        listener(snapshot); // sync call (may settle)
+        listeners.add(listener); // then add to set
+        return () => {
+          listeners.delete(listener);
+        };
+      },
+    };
+    expect(await waitForToolInPane(topology, PANE, "claude", 1000)).toBe(true);
+    expect(listeners.size).toBe(0); // no leak
+  });
+
   it("flips to true on a later snapshot", async () => {
     let listener: ((s: TmuxSnapshot) => void) | null = null;
     const topology: SpawnTopology = {
