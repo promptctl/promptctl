@@ -356,6 +356,11 @@ app.whenReady().then(async () => {
       port: settings.proxyPort,
       upstreamTarget: settings.proxyTarget,
       recordingsDir: settings.proxyRecordingsDir,
+      // Header-based attribution: launches we spawned carry
+      // `X-Promptctl-Launch: <id>`; the proxy reads that, hands the
+      // id to the registry, and gets a deterministic ClientInfo.
+      // [LAW:single-enforcer] one identity source per direction.
+      resolveLaunch: (id) => launchRegistry?.get(id) ?? null,
     });
     console.log(
       `[proxy] listening on 127.0.0.1:${proxyManager.status().port} -> ${settings.proxyTarget}`,

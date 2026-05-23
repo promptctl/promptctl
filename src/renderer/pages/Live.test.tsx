@@ -185,6 +185,7 @@ function client(clientId: string, displayName: string): ClientInfo {
     command: null,
     cwd: null,
     lastSeenNs: 1,
+    launchId: null,
   };
 }
 

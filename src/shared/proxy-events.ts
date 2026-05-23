@@ -116,6 +116,12 @@ export interface ClientInfo {
   command: string | null;
   cwd: string | null;
   lastSeenNs: number;
+  // Non-null when the request carried `X-Promptctl-Launch: <id>` and
+  // that id matches a row in the launch registry. Header-based
+  // attribution is O(1) and authoritative for traffic from tools
+  // promptctl itself spawned — the socket→pid walk is only the
+  // fallback path for untagged traffic. [LAW:single-enforcer]
+  launchId: string | null;
 }
 
 export type RequestRecordState = "in_flight" | "streaming" | "complete" | "errored";

@@ -223,5 +223,6 @@ function clientFromEvent(event: ProxyEvent, previous: ClientInfo | undefined): C
     command: previous?.command ?? null,
     cwd: previous?.cwd ?? null,
     lastSeenNs: event.recvNs,
+    launchId: previous?.launchId ?? null,
   };
 }

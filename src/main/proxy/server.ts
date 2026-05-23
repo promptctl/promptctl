@@ -12,8 +12,10 @@ import type {
   ProxyEvent,
   SseEvent,
 } from "../../shared/proxy-events";
+import type { Launch, LaunchId } from "../../shared/types";
 import { ResponseAssembler } from "./assembler";
-import { resolveClientId } from "./client-identity";
+import { resolveRequestClient } from "./client-identity";
+import type { resolveClientId } from "./client-identity";
 import { makeEnvelope, newRequestId } from "./envelope";
 import { proxyEventBus } from "./events";
 import { parseSseFrame } from "./sse-parser";
@@ -107,12 +109,18 @@ export type EntrySink = (entry: HarEntry) => void;
 
 export interface StartOptions extends ServerConfig {
   onEntry: EntrySink;
+  // Optional header-based attribution. When provided, requests carrying
+  // `X-Promptctl-Launch: <id>` are attributed via the launch registry
+  // (O(1), deterministic). Absent or unmatched headers fall back to the
+  // existing socket→pid walk. [LAW:single-enforcer] one resolver.
+  resolveLaunch?: (id: LaunchId) => Launch | null;
 }
 
 export async function startServer(opts: StartOptions): Promise<RunningServer> {
   const upstreamBase = new URL(opts.upstreamTarget);
+  const resolveLaunch = opts.resolveLaunch ?? (() => null);
   const server = http.createServer((req, res) =>
-    handleRequest(req, res, upstreamBase, opts.onEntry).catch((err) => {
+    handleRequest(req, res, upstreamBase, opts.onEntry, resolveLaunch).catch((err) => {
       // Last-resort error handler — handleRequest emits proxy_error before
       // throwing, so this is just to prevent server crashes.
       console.error("[proxy] unhandled error in handleRequest:", err);
@@ -124,14 +132,13 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
       }
     }),
   );
-  server.on("connection", (socket) => {
-    // [LAW:single-enforcer] Connection ownership is resolved once per socket;
-    // requests only consume the cached ClientInfo projection.
-    (socket as ClientSocket)[CLIENT_INFO] = resolveClientId(socket).then((info) => {
-      proxyEventBus.publishClient(info);
-      return info;
-    });
-  });
+  // Per-connection ClientInfo cache lives in the socket's symbol slot.
+  // The first request on a socket resolves identity (header-first;
+  // socket-walk fallback) and caches the result; subsequent requests
+  // on the same keep-alive connection reuse it. The header is stable
+  // across a connection's lifetime — the launching tool sets the
+  // ANTHROPIC_CUSTOM_HEADERS env once.
+  // [LAW:single-enforcer] One identity-resolution site per request.
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -167,9 +174,22 @@ async function handleRequest(
   res: http.ServerResponse,
   upstreamBase: URL,
   onEntry: EntrySink,
+  resolveLaunch: (id: LaunchId) => Launch | null,
 ): Promise<void> {
   const requestId = newRequestId();
-  const clientInfo = await clientInfoFor(req.socket as ClientSocket);
+  // [LAW:dataflow-not-control-flow] One resolver. The header path wins
+  // when present and known; the socket walk is the fallback. Cache on
+  // the socket so a keep-alive connection's later requests skip the
+  // resolution. Publish whichever ClientInfo we ended up with so the
+  // Live tab's client list reflects the active row.
+  const socket = req.socket as ClientSocket;
+  const cached = socket[CLIENT_INFO];
+  const clientInfo = await (cached ?? (() => {
+    const promise = resolveRequestClient(req, req.socket, resolveLaunch);
+    socket[CLIENT_INFO] = promise;
+    return promise;
+  })());
+  proxyEventBus.publishClient(clientInfo);
   const envelope = () => makeEnvelope(requestId, clientInfo.clientId);
   const startedAt = Date.now();
   const startedNs = process.hrtime.bigint();
@@ -346,14 +366,6 @@ async function handleRequest(
 
 function emit(event: ProxyEvent): void {
   proxyEventBus.emit(event);
-}
-
-async function clientInfoFor(socket: ClientSocket) {
-  const info = await (socket[CLIENT_INFO] ?? resolveClientId(socket));
-  const refreshed = { ...info, lastSeenNs: Number(process.hrtime.bigint()) };
-  socket[CLIENT_INFO] = Promise.resolve(refreshed);
-  proxyEventBus.publishClient(refreshed);
-  return refreshed;
 }
 
 function parseJsonBody(buf: Buffer): unknown {

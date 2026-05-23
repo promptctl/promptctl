@@ -136,6 +136,7 @@ export async function replayHarFile(filePath: string): Promise<HarEntry[]> {
     command: null,
     cwd: filePath,
     lastSeenNs: Number(process.hrtime.bigint()),
+    launchId: null,
   });
   for (const entry of entries) {
     for (const ev of synthesizeEvents(entry, clientId)) {
