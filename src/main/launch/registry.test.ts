@@ -215,13 +215,13 @@ describe("LaunchRegistry lookups", () => {
     expect(reg.findByPid(999)).toBeNull();
   });
 
-  it("listRunning excludes exited rows", () => {
+  it("listActive excludes exited rows", () => {
     const { reg } = makeRegistry();
     const a = reg.create(makeCreateInputs());
     reg.markRunning(a.launchId);
-    expect(reg.listRunning()).toHaveLength(1);
+    expect(reg.listActive()).toHaveLength(1);
     reg.markExited(a.launchId, "gone");
-    expect(reg.listRunning()).toHaveLength(0);
+    expect(reg.listActive()).toHaveLength(0);
   });
 });
 

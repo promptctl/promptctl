@@ -136,16 +136,20 @@ export async function resolveRequestClient(
 }
 
 // Exported for unit testing. Returns the launchId from the request's
-// `X-Promptctl-Launch` header, or null if absent / malformed. Multiple
-// header values resolve to the first non-empty one.
+// `X-Promptctl-Launch` header, or null if absent / malformed. When the
+// header repeats, scan for the first non-empty value (rather than
+// blindly using index 0, which may itself be empty whitespace and
+// would discard a real id later in the list).
 export function readLaunchHeader(req: http.IncomingMessage): LaunchId | null {
   const raw = req.headers["x-promptctl-launch"];
   if (raw === undefined) return null;
-  const first = Array.isArray(raw) ? raw[0] : raw;
-  if (typeof first !== "string") return null;
-  const trimmed = first.trim();
-  if (trimmed.length === 0) return null;
-  return trimmed as LaunchId;
+  const values = Array.isArray(raw) ? raw : [raw];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.length > 0) return trimmed as LaunchId;
+  }
+  return null;
 }
 
 async function resolveClientInfo(socket: net.Socket): Promise<ClientInfo> {

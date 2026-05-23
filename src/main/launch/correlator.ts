@@ -1,16 +1,23 @@
 // [LAW:single-enforcer] Sole module that turns tmux events into launch
 // registry mutations. The registry doesn't observe tmux directly; the
-// correlator is the bridge. Three subscription channels feed in:
+// correlator is the bridge. Two subscription channels feed in:
 //
 //  - Topology snapshots: pid correlation (pane.pid → launch.pid) and
-//    tool-exit detection (pane.toolKind reverts to "unknown" / shell).
-//  - Tmux `window-close` events: a launched window closing terminates
-//    its launch regardless of whether the tool ever exited cleanly.
-//  - Control-connection state transitions: tmux server dropping out
-//    marks every running launch exited.
+//    tool-exit detection (pane.toolKind reverts to "unknown" / shell,
+//    or the pane disappears from the snapshot entirely).
+//  - Tmux `window-close` / `unlinked-window-close` events: a launched
+//    window closing terminates its launch regardless of whether the
+//    tool ever exited cleanly.
 //
-// All three funnel through the registry's transition methods; the
-// correlator never constructs Launch values, only signals them.
+// Control-connection state transitions are deliberately NOT wired —
+// see the note at the bottom of startLaunchCorrelator: distinguishing
+// "tmux server died" from "promptctl shutting down" inside a state
+// listener is brittle, and the recovery flow at app start is the
+// canonical reconciliation. The onConnectionState dep remains in the
+// interface as a placeholder for the future reconnect-driven refresh.
+//
+// Both wired channels funnel through the registry's transition methods;
+// the correlator never constructs Launch values, only signals them.
 //
 // [LAW:dataflow-not-control-flow] Each subscription runs the same
 // pipeline on every event: read current state, project to the affected
@@ -66,7 +73,7 @@ export function startLaunchCorrelator(deps: CorrelatorDeps): () => void {
   // attach short-circuits on no-change), so duplicate snapshots don't
   // produce duplicate events.
   const reconcile = (snapshot: TmuxSnapshot): void => {
-    for (const launch of deps.registry.listRunning()) {
+    for (const launch of deps.registry.listActive()) {
       if (launch.status !== "running") continue;
       const pane = snapshot.panes.find((p) => p.id === launch.paneId);
       if (!pane) {
@@ -112,7 +119,7 @@ export function startLaunchCorrelator(deps: CorrelatorDeps): () => void {
   // [LAW:single-enforcer] Both routes call the same markExited.
   const closeHandler = (event: { windowId: number }): void => {
     const windowId = `@${event.windowId}` as WindowId;
-    for (const launch of deps.registry.listRunning()) {
+    for (const launch of deps.registry.listActive()) {
       if (launch.windowId === windowId) {
         deps.registry.markExited(launch.launchId, "window closed");
       }

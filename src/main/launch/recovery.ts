@@ -1,12 +1,14 @@
 // [LAW:single-enforcer] Sole reconciliation entrypoint for persisted
 // launches at app start. Reads each non-exited row, asks the OS whether
 // the original process is still our launched tool, and either keeps the
-// row alive (and re-attaches the pid) or marks it exited.
+// row alive unchanged or marks it exited. We never re-attach pid here —
+// the pid was already in the persisted row; verifying it's still ours
+// is the entire job.
 //
 // [LAW:dataflow-not-control-flow] One walk over the registry's
 // non-exited rows; each one runs the same pipeline (resolve pid →
-// inspect env → registry.attach or markExited). No "if this is a
-// claude vs codex" branching — the identity check is the same.
+// inspect env → keep-or-markExited). No "if this is a claude vs codex"
+// branching — the identity check is the same.
 //
 // macOS reads env via `ps -E`. Linux reads `/proc/<pid>/environ`. The
 // two paths converge on the same string match: PROMPTCTL_LAUNCH_ID=<id>.
@@ -33,7 +35,7 @@ export interface RecoveryResult {
 
 export async function recoverLaunches(deps: RecoveryDeps): Promise<RecoveryResult> {
   const readPidEnv = deps.readPidEnv ?? readEnv;
-  const candidates = deps.registry.listRunning();
+  const candidates = deps.registry.listActive();
   const recovered: Launch[] = [];
   const exited: Launch[] = [];
 

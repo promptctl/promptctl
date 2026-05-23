@@ -64,11 +64,14 @@ export interface LaunchAttachFields {
 // paneId/sessionId/windowId are resolved by the spawn flow after
 // new-session; env is the exact set of vars we injected.
 //
-// launchId is optional: the spawn flow generates the ID up front
-// (because it has to embed it in the env block before new-session
-// runs), so it supplies the ID at create time. Callers that don't
-// need the ID early can omit it and the registry mints one via
-// the injected newId() factory.
+// launchId is optional ONLY because the registry's `newId` option
+// lets tests mint deterministic ids without going through spawn. The
+// production spawn flow always provides launchId (the env block
+// already embeds it), and `create` enforces the invariant
+// `env.PROMPTCTL_LAUNCH_ID === launchId` whenever both are present —
+// the registry refuses to record a row whose env disagrees with its
+// own id. That keeps recovery / header attribution honest no matter
+// which constructor path landed the row.
 export interface LaunchCreateInputs {
   readonly spec: LaunchSpec;
   readonly paneId: PaneId;
@@ -126,8 +129,21 @@ export class LaunchRegistry {
   // for the pane-cmd subscription to confirm the tool actually started
   // before calling markRunning.
   create(inputs: LaunchCreateInputs): LaunchPending {
+    const launchId = inputs.launchId ?? this.newId();
+    // [LAW:one-source-of-truth] The env block embeds the launchId; the
+    // row IS that launchId. We refuse to record a row whose env
+    // disagrees — that would silently break recovery and header
+    // attribution, which both pattern-match PROMPTCTL_LAUNCH_ID. The
+    // check only fires when env carries the var (production always
+    // does; tests with an empty env block skip it).
+    const envId = inputs.env.PROMPTCTL_LAUNCH_ID;
+    if (envId !== undefined && envId !== launchId) {
+      throw new Error(
+        `LaunchRegistry.create: env.PROMPTCTL_LAUNCH_ID="${envId}" does not match launchId="${launchId}"`,
+      );
+    }
     const row: LaunchPending = {
-      launchId: inputs.launchId ?? this.newId(),
+      launchId,
       toolKind: inputs.spec.toolKind,
       paneId: inputs.paneId,
       sessionId: inputs.sessionId,
@@ -248,9 +264,12 @@ export class LaunchRegistry {
     return null;
   }
 
-  // Used by exit detection when the tmux server drops out — every
-  // running launch is then known to be unreachable.
-  listRunning(): readonly Launch[] {
+  // Every non-exited row — both `pending` and `running`. Callers that
+  // need only `running` (e.g. correlator's pid attach) filter on
+  // status themselves; callers that need to act on both (e.g. recovery
+  // at startup) iterate this list directly. Naming follows the actual
+  // semantics: "active" = "not yet known to be exited".
+  listActive(): readonly Launch[] {
     const out: Launch[] = [];
     for (const launch of this.launches.values()) {
       if (launch.status !== "exited") out.push(launch);
