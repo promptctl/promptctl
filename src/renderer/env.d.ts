@@ -22,6 +22,10 @@ import type {
   TmuxOutputStateEvent,
   SessionId,
   PaneId,
+  Launch,
+  LaunchEvent,
+  LaunchId,
+  LaunchSpec,
 } from "../shared/types";
 import type {
   ClientInfo,
@@ -49,6 +53,8 @@ export interface ElectronAPI {
   send(
     channel:
       | "command:subscribe"
+      | "launch:subscribe"
+      | "launch:unsubscribe"
       | "proxy:subscribe"
       | "proxy:unsubscribe",
   ): void;
@@ -56,12 +62,6 @@ export interface ElectronAPI {
 
   invoke(channel: "tmux:topology:get"): Promise<TmuxSnapshot>;
   invoke(channel: "tmux:pane-processes", paneId: PaneId): Promise<PaneProcesses>;
-  invoke(
-    channel: "tmux:launch-tool",
-    kind: string,
-    sessionName: string,
-    cwd: string,
-  ): Promise<PaneId>;
   invoke(channel: "command:list"): Promise<Command[]>;
   invoke(channel: "command:add", command: Command): Promise<void>;
   invoke(channel: "command:remove" | "command:fire", id: string): Promise<void>;
@@ -162,6 +162,9 @@ export interface ElectronAPI {
     query: string,
   ): Promise<SessionSearchResult[]>;
   invoke(channel: "task:cancel", taskId: string): Promise<boolean>;
+  invoke(channel: "launch:list"): Promise<Launch[]>;
+  invoke(channel: "launch:get", launchId: LaunchId): Promise<Launch | null>;
+  invoke(channel: "launch:create", spec: LaunchSpec): Promise<Launch>;
   invoke(channel: "proxy:status"): Promise<ProxyStatus>;
   invoke(channel: "proxy:list-clients"): Promise<ClientInfo[]>;
   invoke(channel: "proxy:load-har", filePath: string): Promise<ProxyStatus>;
@@ -198,6 +201,14 @@ export interface ElectronAPI {
   on(
     channel: "command:event",
     listener: (event: CommandEvent) => void,
+  ): () => void;
+  on(
+    channel: "launch:list",
+    listener: (launches: Launch[]) => void,
+  ): () => void;
+  on(
+    channel: "launch:event",
+    listener: (event: LaunchEvent) => void,
   ): () => void;
   on(
     channel: "task:event",

@@ -5,8 +5,83 @@
 export type PaneId = string & { readonly __brand: "PaneId" };
 export type SessionId = string & { readonly __brand: "SessionId" };
 export type WindowId = string & { readonly __brand: "WindowId" };
+export type LaunchId = string & { readonly __brand: "LaunchId" };
 
 export type ToolKind = "claude" | "codex" | "gemini" | "unknown";
+
+// Launch identity — the cross-tab spine.
+//
+// [LAW:types-are-the-program] A launch is exactly one of three states. The
+// type carries the discriminator so consumers cannot read `pid` from a
+// row that has not been confirmed running, and cannot read `exitReason`
+// from a row that is still alive. Field presence guarantees state.
+//
+// [LAW:dataflow-not-control-flow] Status is data on every row; no tab
+// branches on "do we know this yet" — they switch on status and let the
+// type narrow the available fields.
+//
+// `env` records only the env vars promptctl injected at spawn time —
+// PROMPTCTL_LAUNCH_ID, PROMPTCTL_LAUNCH_TOOL, ANTHROPIC_BASE_URL, and
+// ANTHROPIC_CUSTOM_HEADERS. We do not capture the child's full env;
+// that could leak secrets, and the four we set are the only ones the
+// registry and proxy attribution need.
+
+export type ToolLaunchKind = Exclude<ToolKind, "unknown">;
+
+interface LaunchCommon {
+  readonly launchId: LaunchId;
+  readonly toolKind: ToolLaunchKind;
+  readonly paneId: PaneId;
+  readonly sessionId: SessionId;
+  readonly windowId: WindowId;
+  readonly cwd: string;
+  readonly startedAt: number;
+  readonly env: Readonly<Record<string, string>>;
+}
+
+export interface LaunchPending extends LaunchCommon {
+  readonly status: "pending";
+}
+
+export interface LaunchRunning extends LaunchCommon {
+  readonly status: "running";
+  // pid is null until the pane-pid subscription delivers it. The launch is
+  // still "running" — pid is late-binding evidence, not the gate for the
+  // status transition (pane-cmd is). [LAW:no-defensive-null-guards] —
+  // optionality is explicit on the field, not laundered through guards.
+  readonly pid: number | null;
+  readonly proxyClientId: string | null;
+  readonly sessionFilePath: string | null;
+}
+
+export interface LaunchExited extends LaunchCommon {
+  readonly status: "exited";
+  readonly pid: number | null;
+  readonly proxyClientId: string | null;
+  readonly sessionFilePath: string | null;
+  readonly exitedAt: number;
+  readonly exitReason: string;
+}
+
+export type Launch = LaunchPending | LaunchRunning | LaunchExited;
+
+// [LAW:dataflow-not-control-flow] Every registry mutation emits the same
+// event shape with the post-state launch row. Consumers project off it.
+export interface LaunchEvent {
+  readonly kind: "created" | "updated" | "exited";
+  readonly launch: Launch;
+}
+
+// Input to launch:create — everything else (launchId, startedAt, paneId,
+// status) is set by the registry.
+export interface LaunchSpec {
+  readonly toolKind: ToolLaunchKind;
+  readonly cwd: string;
+  // Promptctl-owned tmux session name to create for this launch. The
+  // launch lives in a fresh session so a kill doesn't take other panes
+  // with it.
+  readonly sessionName: string;
+}
 
 // [LAW:one-type-per-behavior] A pane is a pane. toolKind distinguishes controllables.
 export interface TmuxPane {

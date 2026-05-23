@@ -19,6 +19,7 @@ import { TmuxTree } from "./components/TmuxTree";
 import { CommandBar } from "./components/CommandBar";
 import { LaunchToolDialog } from "./components/LaunchToolDialog";
 import { initCommandSubscription } from "./store/command";
+import { initLaunchSubscription } from "./store/launches";
 import { initProxySubscription } from "./store/proxy";
 
 function TopTab({
@@ -174,14 +175,29 @@ export function App() {
   useEffect(() => {
     const unsubProxy = initProxySubscription();
     let unsubCommand: (() => void) | undefined;
+    let unsubLaunch: (() => void) | undefined;
+    // [LAW:no-silent-fallbacks] If the App unmounts before either
+    // async init resolves, the cleanup runs without the eventual
+    // unsubscribe handle. Without this flag, the late-arriving handle
+    // would land in a closed-over variable and never be called,
+    // leaking the IPC subscription. The flag closes the race: any
+    // unsub that resolves after dispose is invoked immediately.
+    let disposed = false;
 
     initCommandSubscription().then((unsub) => {
-      unsubCommand = unsub;
+      if (disposed) unsub();
+      else unsubCommand = unsub;
+    });
+    initLaunchSubscription().then((unsub) => {
+      if (disposed) unsub();
+      else unsubLaunch = unsub;
     });
 
     return () => {
+      disposed = true;
       unsubProxy();
       unsubCommand?.();
+      unsubLaunch?.();
     };
   }, []);
 

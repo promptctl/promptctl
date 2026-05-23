@@ -4,16 +4,22 @@
 // "is this an Anthropic call" branch. Provider-aware logic (when added) will
 // dispatch off URL via a registry, not inline branches here.
 import http from "node:http";
+import type net from "node:net";
 import { URL } from "node:url";
 
 import type {
   AnthropicMessage,
+  ClientInfo,
   HarEntry,
   ProxyEvent,
   SseEvent,
 } from "../../shared/proxy-events";
+import type { Launch, LaunchId } from "../../shared/types";
 import { ResponseAssembler } from "./assembler";
-import { resolveClientId } from "./client-identity";
+import {
+  resolveClientId,
+  resolveRequestClient,
+} from "./client-identity";
 import { makeEnvelope, newRequestId } from "./envelope";
 import { proxyEventBus } from "./events";
 import { parseSseFrame } from "./sse-parser";
@@ -97,7 +103,7 @@ export interface RunningServer {
 const CLIENT_INFO = Symbol("promptctl.clientInfo");
 
 type ClientSocket = http.IncomingMessage["socket"] & {
-  [CLIENT_INFO]?: ReturnType<typeof resolveClientId>;
+  [CLIENT_INFO]?: Promise<ClientInfo>;
 };
 
 // Notification path for completed entries (HAR recorder subscribes here).
@@ -107,12 +113,18 @@ export type EntrySink = (entry: HarEntry) => void;
 
 export interface StartOptions extends ServerConfig {
   onEntry: EntrySink;
+  // Optional header-based attribution. When provided, requests carrying
+  // `X-Promptctl-Launch: <id>` are attributed via the launch registry
+  // (O(1), deterministic). Absent or unmatched headers fall back to the
+  // existing socket→pid walk. [LAW:single-enforcer] one resolver.
+  resolveLaunch?: (id: LaunchId) => Launch | null;
 }
 
 export async function startServer(opts: StartOptions): Promise<RunningServer> {
   const upstreamBase = new URL(opts.upstreamTarget);
+  const resolveLaunch = opts.resolveLaunch ?? (() => null);
   const server = http.createServer((req, res) =>
-    handleRequest(req, res, upstreamBase, opts.onEntry).catch((err) => {
+    handleRequest(req, res, upstreamBase, opts.onEntry, resolveLaunch).catch((err) => {
       // Last-resort error handler — handleRequest emits proxy_error before
       // throwing, so this is just to prevent server crashes.
       console.error("[proxy] unhandled error in handleRequest:", err);
@@ -124,14 +136,14 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
       }
     }),
   );
-  server.on("connection", (socket) => {
-    // [LAW:single-enforcer] Connection ownership is resolved once per socket;
-    // requests only consume the cached ClientInfo projection.
-    (socket as ClientSocket)[CLIENT_INFO] = resolveClientId(socket).then((info) => {
-      proxyEventBus.publishClient(info);
-      return info;
-    });
-  });
+  // Per-socket cache for the *fallback* ClientInfo (the socket→pid
+  // walk result). Identity itself is resolved per request:
+  // resolveRequestClient reads the X-Promptctl-Launch header every
+  // time and consults the launch registry; only when the header is
+  // absent or unknown do we drop to this cached walk. That way a
+  // connection that starts untagged can be tagged by a later request,
+  // and vice versa — the header is the authority.
+  // [LAW:single-enforcer] One identity-resolution site per request.
 
   await new Promise<void>((resolve, reject) => {
     server.once("error", reject);
@@ -167,9 +179,41 @@ async function handleRequest(
   res: http.ServerResponse,
   upstreamBase: URL,
   onEntry: EntrySink,
+  resolveLaunch: (id: LaunchId) => Launch | null,
 ): Promise<void> {
   const requestId = newRequestId();
-  const clientInfo = await clientInfoFor(req.socket as ClientSocket);
+  // [LAW:single-enforcer] resolveRequestClient owns the header-or-
+  // fallback decision; we inject a cached fallback closure so the
+  // expensive socket→pid walk runs at most once per connection. The
+  // header path doesn't touch the cache — when it wins, the cache
+  // stays untouched and a header-less follow-up request still gets
+  // resolved correctly.
+  //
+  // `lastSeenNs` refreshes per request so the Live tab's active-client
+  // signal tracks the current request, not the connection's first.
+  const cachedFallback = (sock: net.Socket): Promise<ClientInfo> => {
+    // [LAW:single-enforcer] Cache lives on the socket the caller hands
+    // us — same object as req.socket today but we read/write through
+    // the parameter so a future refactor that splits these can't end
+    // up with the cache stranded on the wrong socket.
+    const cs = sock as ClientSocket;
+    const existing = cs[CLIENT_INFO];
+    if (existing) return existing;
+    const promise = resolveClientId(sock);
+    cs[CLIENT_INFO] = promise;
+    return promise;
+  };
+  const resolved = await resolveRequestClient(
+    req,
+    req.socket,
+    resolveLaunch,
+    cachedFallback,
+  );
+  const clientInfo: ClientInfo = {
+    ...resolved,
+    lastSeenNs: Number(process.hrtime.bigint()),
+  };
+  proxyEventBus.publishClient(clientInfo);
   const envelope = () => makeEnvelope(requestId, clientInfo.clientId);
   const startedAt = Date.now();
   const startedNs = process.hrtime.bigint();
@@ -346,14 +390,6 @@ async function handleRequest(
 
 function emit(event: ProxyEvent): void {
   proxyEventBus.emit(event);
-}
-
-async function clientInfoFor(socket: ClientSocket) {
-  const info = await (socket[CLIENT_INFO] ?? resolveClientId(socket));
-  const refreshed = { ...info, lastSeenNs: Number(process.hrtime.bigint()) };
-  socket[CLIENT_INFO] = Promise.resolve(refreshed);
-  proxyEventBus.publishClient(refreshed);
-  return refreshed;
 }
 
 function parseJsonBody(buf: Buffer): unknown {

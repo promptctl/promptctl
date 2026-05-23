@@ -1,7 +1,7 @@
 import { useState } from "react";
-import type { ToolKind } from "../../shared/types";
+import type { ToolLaunchKind } from "../../shared/types";
 
-const TOOLS: { kind: Exclude<ToolKind, "unknown">; label: string }[] = [
+const TOOLS: { kind: ToolLaunchKind; label: string }[] = [
   { kind: "claude", label: "Claude Code" },
   { kind: "codex", label: "Codex" },
   { kind: "gemini", label: "Gemini CLI" },
@@ -12,7 +12,7 @@ export function LaunchToolDialog({
 }: {
   onClose: () => void;
 }) {
-  const [kind, setKind] = useState<Exclude<ToolKind, "unknown">>("claude");
+  const [kind, setKind] = useState<ToolLaunchKind>("claude");
   const [sessionName, setSessionName] = useState("");
   const [cwd, setCwd] = useState("/");
   const [launching, setLaunching] = useState(false);
@@ -23,12 +23,15 @@ export function LaunchToolDialog({
     setLaunching(true);
     setError(null);
     try {
-      await window.electronAPI.invoke(
-        "tmux:launch-tool",
-        kind,
-        sessionName.trim(),
+      // launch:create routes through the LaunchRegistry: env vars +
+      // X-Promptctl-Launch header are stamped before tmux runs the
+      // tool, so Live and future Workshop tabs can attribute the
+      // resulting traffic by header lookup. [LAW:one-source-of-truth]
+      await window.electronAPI.invoke("launch:create", {
+        toolKind: kind,
+        sessionName: sessionName.trim(),
         cwd,
-      );
+      });
       onClose();
     } catch (e) {
       setError(e instanceof Error ? e.message : String(e));

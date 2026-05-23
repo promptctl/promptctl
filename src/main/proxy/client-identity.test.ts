@@ -1,12 +1,18 @@
 // @vitest-environment node
 import { describe, expect, it } from "vitest";
+import type http from "node:http";
+import type net from "node:net";
 import {
+  clientInfoFromLaunch,
   parseLsofEntries,
   parseLsofPid,
   parseLsofPids,
+  readLaunchHeader,
+  resolveRequestClient,
   walkToClientRoot,
   type ProcessRow,
 } from "./client-identity";
+import type { Launch, LaunchId } from "../../shared/types";
 
 describe("client identity parsers", () => {
   it("parses lsof field output into a pid", () => {
@@ -110,5 +116,180 @@ describe("walkToClientRoot", () => {
       const root = await walkToClientRoot(7000, reader);
       expect(root.pid, `walk should stop before ${stopper}`).toBe(7000);
     }
+  });
+});
+
+describe("readLaunchHeader", () => {
+  function req(headers: http.IncomingHttpHeaders): http.IncomingMessage {
+    return { headers } as unknown as http.IncomingMessage;
+  }
+  it("returns the trimmed launchId when present", () => {
+    expect(readLaunchHeader(req({ "x-promptctl-launch": "abc-123" }))).toBe("abc-123");
+  });
+  it("returns null when absent", () => {
+    expect(readLaunchHeader(req({}))).toBeNull();
+  });
+  it("returns null on empty / whitespace value", () => {
+    expect(readLaunchHeader(req({ "x-promptctl-launch": "   " }))).toBeNull();
+  });
+  it("returns the first value when the header is repeated", () => {
+    expect(readLaunchHeader(req({ "x-promptctl-launch": ["first", "second"] }))).toBe("first");
+  });
+});
+
+describe("clientInfoFromLaunch", () => {
+  function makeLaunch(overrides: Partial<Launch> = {}): Launch {
+    return {
+      launchId: "L-1" as LaunchId,
+      toolKind: "claude",
+      paneId: "%17" as never,
+      sessionId: "$3" as never,
+      windowId: "@5" as never,
+      cwd: "/repo/foo",
+      startedAt: 1,
+      env: {},
+      status: "running",
+      pid: 1234,
+      proxyClientId: null,
+      sessionFilePath: null,
+      ...overrides,
+    } as Launch;
+  }
+
+  it("builds a ClientInfo with stable clientId, launchId, and pid", () => {
+    const info = clientInfoFromLaunch(makeLaunch());
+    expect(info.clientId).toBe("launch-L-1");
+    expect(info.launchId).toBe("L-1");
+    expect(info.pid).toBe(1234);
+    expect(info.rootPid).toBe(1234);
+    expect(info.command).toBe("claude");
+    expect(info.cwd).toBe("/repo/foo");
+    expect(info.displayName).toBe("claude @ foo");
+  });
+
+  it("uses 'unknown cwd' when launch cwd is empty", () => {
+    expect(clientInfoFromLaunch(makeLaunch({ cwd: "" })).displayName).toBe(
+      "claude @ unknown cwd",
+    );
+  });
+
+  it("returns null pid for pending launches", () => {
+    const pending: Launch = {
+      launchId: "P" as LaunchId,
+      toolKind: "claude",
+      paneId: "%17" as never,
+      sessionId: "$3" as never,
+      windowId: "@5" as never,
+      cwd: "/repo",
+      startedAt: 1,
+      env: {},
+      status: "pending",
+    };
+    expect(clientInfoFromLaunch(pending).pid).toBeNull();
+  });
+});
+
+describe("resolveRequestClient", () => {
+  function req(headers: http.IncomingHttpHeaders): http.IncomingMessage {
+    return { headers } as unknown as http.IncomingMessage;
+  }
+  function socket(): net.Socket {
+    // resolveRequestClient only delegates to resolveClientId when the
+    // header path doesn't hit; we just need a placeholder.
+    return { remotePort: 0 } as unknown as net.Socket;
+  }
+  function makeLaunch(): Launch {
+    return {
+      launchId: "L-1" as LaunchId,
+      toolKind: "claude",
+      paneId: "%17" as never,
+      sessionId: "$3" as never,
+      windowId: "@5" as never,
+      cwd: "/repo",
+      startedAt: 1,
+      env: {},
+      status: "running",
+      pid: 100,
+      proxyClientId: null,
+      sessionFilePath: null,
+    };
+  }
+
+  it("returns launch-derived ClientInfo when the header matches a known launch", async () => {
+    const launch = makeLaunch();
+    const info = await resolveRequestClient(
+      req({ "x-promptctl-launch": "L-1" }),
+      socket(),
+      (id) => (id === ("L-1" as LaunchId) ? launch : null),
+    );
+    expect(info.launchId).toBe("L-1");
+    expect(info.clientId).toBe("launch-L-1");
+  });
+
+  it("falls back to the socket resolver when the header is absent", async () => {
+    let fallbackCalls = 0;
+    const stub = async (_s: unknown) => {
+      fallbackCalls += 1;
+      return {
+        clientId: "stub-fallback",
+        pid: 100,
+        rootPid: 100,
+        displayName: "stub",
+        command: null,
+        cwd: null,
+        lastSeenNs: 0,
+        launchId: null,
+      } as const;
+    };
+    const info = await resolveRequestClient(
+      req({}),
+      socket(),
+      () => null,
+      stub,
+    );
+    expect(fallbackCalls).toBe(1);
+    expect(info.clientId).toBe("stub-fallback");
+    expect(info.launchId).toBeNull();
+  });
+
+  it("falls back to the socket resolver when the header references an unknown launch", async () => {
+    let fallbackCalls = 0;
+    const stub = async () => {
+      fallbackCalls += 1;
+      return {
+        clientId: "stub-fallback",
+        pid: null,
+        rootPid: null,
+        displayName: "stub",
+        command: null,
+        cwd: null,
+        lastSeenNs: 0,
+        launchId: null,
+      } as const;
+    };
+    await resolveRequestClient(
+      req({ "x-promptctl-launch": "unknown" }),
+      socket(),
+      () => null,
+      stub,
+    );
+    expect(fallbackCalls).toBe(1);
+  });
+
+  it("does NOT invoke the fallback when the header matches a known launch", async () => {
+    let fallbackCalls = 0;
+    const stub = async () => {
+      fallbackCalls += 1;
+      throw new Error("should not be called");
+    };
+    const launch = makeLaunch();
+    const info = await resolveRequestClient(
+      req({ "x-promptctl-launch": "L-1" }),
+      socket(),
+      (id) => (id === ("L-1" as LaunchId) ? launch : null),
+      stub,
+    );
+    expect(fallbackCalls).toBe(0);
+    expect(info.clientId).toBe("launch-L-1");
   });
 });

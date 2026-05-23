@@ -6,6 +6,7 @@ import path from "node:path";
 import { homedir } from "node:os";
 
 import type { ClientInfo, HarEntry, ProxyStatus } from "../../shared/proxy-events";
+import type { Launch, LaunchId } from "../../shared/types";
 import { HarRecorder } from "./har-recorder";
 import { replayHarFile } from "./har-replayer";
 import { startServer, type RunningServer } from "./server";
@@ -16,6 +17,9 @@ export interface ProxyStartOptions {
   port: number;
   upstreamTarget: string;
   recordingsDir: string;
+  // Optional header-based attribution. Main wires this to the
+  // LaunchRegistry; bare proxy starts (e.g. in tests) can omit it.
+  resolveLaunch?: (id: LaunchId) => Launch | null;
 }
 
 class ProxyManager {
@@ -38,6 +42,7 @@ class ProxyManager {
       port: opts.port,
       upstreamTarget: opts.upstreamTarget,
       onEntry: (e: HarEntry) => recorder.appendEntry(e),
+      resolveLaunch: opts.resolveLaunch,
     });
     return this.status();
   }

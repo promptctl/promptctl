@@ -8,6 +8,11 @@ import { ownedSessionName } from "./tmux/session";
 import { TmuxTopologyTracker } from "./tmux/topology";
 import { CommandEngine } from "./command/engine";
 import { loadCommands } from "./command/persistence";
+import { LaunchRegistry } from "./launch/registry";
+import { loadLaunches, saveLaunches } from "./launch/persistence";
+import { startLaunchCorrelator } from "./launch/correlator";
+import { recoverLaunches } from "./launch/recovery";
+import { registerLaunchHandlers } from "./ipc/launch-handlers";
 import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
 import { registerTmuxTopologyHandlers } from "./ipc/tmux-topology-handlers";
 import { TmuxOutputRouter } from "./tmux/output-router";
@@ -117,6 +122,13 @@ const tmuxOutputRouter = new TmuxOutputRouter({
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   getClient: () => tmuxControl.client,
 });
+
+// [LAW:one-source-of-truth] Sole authoritative source of launch identity.
+// Module-scope so subsystems wired below (proxy client-identity in 77e.4,
+// topology subscriptions in later 77e.3 slices) can reference it without
+// passing handles through every constructor. Initialized inside whenReady
+// after persisted rows are loaded — until then the variable is null.
+let launchRegistry: LaunchRegistry | null = null;
 
 // [LAW:locality-or-seam] CommandEngine consumes tmux through three method
 // surfaces; this adapter is the seam between the engine and the singleton
@@ -279,12 +291,54 @@ app.whenReady().then(async () => {
   // Initialize subsystems
   registerProvider(geminiAdapter);
   registerProvider(claudeAdapter);
+
+  // Launch registry: load persisted rows, construct the registry, register
+  // IPC handlers. The proxy starts further down — it needs the registry to
+  // exist so header-based attribution (77e.4) can consult it on the first
+  // request. [LAW:one-source-of-truth]
+  const persistedLaunches = await loadLaunches();
+  launchRegistry = new LaunchRegistry({
+    initial: persistedLaunches,
+    save: saveLaunches,
+  });
+  // [LAW:single-enforcer] Bridge tmux observation → registry mutation.
+  // Snapshots feed pid correlation and exit detection (pane-cmd revert,
+  // pane vanish); window-close / unlinked-window-close events feed the
+  // direct exit signal. Recovery-on-restart runs separately just below.
+  startLaunchCorrelator({
+    registry: launchRegistry,
+    onTopologySnapshot: (listener) => tmuxTopology.onSnapshot(listener),
+    getTopologySnapshot: () => tmuxTopology.snapshot(),
+    onTmuxEvent: (event, handler) => tmuxControl.on(event, handler),
+    onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
+  });
+  registerLaunchHandlers({
+    registry: launchRegistry,
+    spawn: {
+      topology: tmuxTopology,
+      getClient: () => tmuxControl.client,
+      // [LAW:one-source-of-truth] Proxy port comes from the proxy manager
+      // at call time — settings are the canonical input but the actual
+      // listening port can differ (e.g. when the configured port was
+      // already in use and the proxy fell back).
+      getProxyPort: () => proxyManager.status().port,
+    },
+  });
+
+  // [LAW:single-enforcer] Reconcile persisted launch rows against the OS
+  // process table. Tools still alive keep their identity; tools that
+  // exited while promptctl was down get marked exited. Fire-and-forget:
+  // takes a beat to walk N processes, no point gating the rest of
+  // startup on it (the registry's mutations broadcast as they land).
+  void recoverLaunches({ registry: launchRegistry }).catch((err) => {
+    console.error("[launch] recovery failed:", err);
+  });
+
   registerTmuxControlHandlers(tmuxControl);
   registerTmuxTopologyHandlers(tmuxTopology);
   registerTmuxOutputHandlers(tmuxOutputRouter);
   registerTmuxPaneHandlers({
     getSnapshot: () => tmuxTopology.snapshot(),
-    getClient: () => tmuxControl.client,
   });
   registerCommandHandlers(commandEngine);
   registerSessionHandlers();
@@ -302,6 +356,11 @@ app.whenReady().then(async () => {
       port: settings.proxyPort,
       upstreamTarget: settings.proxyTarget,
       recordingsDir: settings.proxyRecordingsDir,
+      // Header-based attribution: launches we spawned carry
+      // `X-Promptctl-Launch: <id>`; the proxy reads that, hands the
+      // id to the registry, and gets a deterministic ClientInfo.
+      // [LAW:single-enforcer] one identity source per direction.
+      resolveLaunch: (id) => launchRegistry?.get(id) ?? null,
     });
     console.log(
       `[proxy] listening on 127.0.0.1:${proxyManager.status().port} -> ${settings.proxyTarget}`,

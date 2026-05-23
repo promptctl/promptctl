@@ -2,6 +2,7 @@ import { useEffect, useState } from "react";
 import { PaneTerminal } from "@promptctl/pane-terminal/react";
 import "@xterm/xterm/css/xterm.css";
 import { usePaneSelectionStore } from "../store/pane-selection";
+import { useLaunchStore } from "../store/launches";
 import { useTopology, usePaneStream } from "../tmux/proxy";
 import type { ToolKind, PaneProcesses, PaneId } from "../../shared/types";
 
@@ -82,6 +83,21 @@ export function PaneViewer() {
   const selectedPaneId = usePaneSelectionStore((s) => s.selectedPaneId);
   const topology = useTopology();
   const pane = topology.panes.find((p) => p.id === selectedPaneId);
+  // [LAW:one-source-of-truth] The launch row is looked up by paneId from
+  // the registry-backed store. The badge is presence-driven — non-null
+  // means promptctl spawned this pane and the launch is still alive.
+  //
+  // Subscribe to the *result* (not the lookup function), so Zustand
+  // re-renders this component when the underlying `launches` array
+  // changes. Selecting `s.byPane` alone would memoize a stable
+  // function reference and miss every registry update.
+  const launch = useLaunchStore((s) =>
+    pane
+      ? s.launches.find(
+          (l) => l.paneId === pane.id && l.status !== "exited",
+        )
+      : undefined,
+  );
   // [LAW:dataflow-not-control-flow] Stream is keyed on the *valid* pane — if
   // selection points to a gone pane, we drop to null and the terminal unmounts.
   // The selection store is untouched (user keeps their intent); when the pane
@@ -108,6 +124,15 @@ export function PaneViewer() {
               className={`rounded-full border px-2 py-0.5 text-xs font-medium ${TOOL_COLORS[pane.toolKind]}`}
             >
               {pane.toolKind}
+            </span>
+          )}
+          {launch && (
+            <span
+              data-testid="loops-launch-badge"
+              title={`launchId: ${launch.launchId}`}
+              className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 font-mono text-[10px] text-violet-300"
+            >
+              ↳ launch {launch.launchId.slice(0, 8)}
             </span>
           )}
           <span className="ml-auto text-xs text-neutral-500">

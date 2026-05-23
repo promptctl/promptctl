@@ -3,10 +3,12 @@
 import { execFile } from "node:child_process";
 import { basename } from "node:path";
 import type net from "node:net";
+import type http from "node:http";
 import { platform } from "node:os";
 import { readFile, readlink, readdir } from "node:fs/promises";
 
 import type { ClientInfo } from "../../shared/proxy-events";
+import type { Launch, LaunchId } from "../../shared/types";
 
 // [LAW:one-source-of-truth] Identity is derived from kernel state (peer pid)
 // and a deterministic walk to a stable ancestor — same logical process always
@@ -73,6 +75,83 @@ export async function resolveClientId(socket: net.Socket): Promise<ClientInfo> {
   ]);
 }
 
+// Builds a ClientInfo from a launch row. Used by the request-time
+// resolver when the proxy header tags a launch we know about — gives
+// O(1), deterministic identity attribution and short-circuits the
+// socket→pid walk entirely.
+//
+// [LAW:one-source-of-truth] The launch is the canonical identity for
+// traffic from a tool we spawned. The socket walk is the fallback for
+// untagged traffic (a user runs a stray `claude` outside promptctl).
+export function clientInfoFromLaunch(launch: Launch): ClientInfo {
+  const shortCwd = basename(launch.cwd) || launch.cwd || "unknown cwd";
+  const pid =
+    launch.status === "running" || launch.status === "exited"
+      ? launch.pid
+      : null;
+  return {
+    clientId: `launch-${launch.launchId}`,
+    pid,
+    rootPid: pid,
+    displayName: `${launch.toolKind} @ ${shortCwd}`,
+    command: launch.toolKind,
+    cwd: launch.cwd,
+    lastSeenNs: nowNs(),
+    launchId: launch.launchId,
+  };
+}
+
+// Resolves the client identity for an HTTP request. Header-based
+// attribution comes first — when the request carries
+// `X-Promptctl-Launch: <id>` and that id maps to a known launch row,
+// we return that row's ClientInfo. Otherwise we fall back to the
+// existing socket→pid walk and add `launchId: null` to the result.
+//
+// [LAW:dataflow-not-control-flow] Same shape returned on every path —
+// the variability is in which input was authoritative, not in whether
+// the resolver produced output.
+//
+// The `socketFallback` parameter is injectable so unit tests can drive
+// the fallback path without invoking the real socket walk (which does
+// real lsof/ps and is slow / environment-sensitive). Production omits
+// it and the default points at `resolveClientId`.
+export async function resolveRequestClient(
+  req: http.IncomingMessage,
+  socket: net.Socket,
+  resolveLaunch: (id: LaunchId) => Launch | null,
+  socketFallback: (socket: net.Socket) => Promise<ClientInfo> = resolveClientId,
+): Promise<ClientInfo> {
+  const header = readLaunchHeader(req);
+  if (header !== null) {
+    const launch = resolveLaunch(header);
+    if (launch !== null) {
+      return clientInfoFromLaunch(launch);
+    }
+    // Header was present but doesn't match a known launch — e.g. the
+    // launch row was evicted, or the user reproduced the env var
+    // outside our control. Fall back to the socket walk rather than
+    // synthesizing a phantom row from header data we can't verify.
+  }
+  return socketFallback(socket);
+}
+
+// Exported for unit testing. Returns the launchId from the request's
+// `X-Promptctl-Launch` header, or null if absent / malformed. When the
+// header repeats, scan for the first non-empty value (rather than
+// blindly using index 0, which may itself be empty whitespace and
+// would discard a real id later in the list).
+export function readLaunchHeader(req: http.IncomingMessage): LaunchId | null {
+  const raw = req.headers["x-promptctl-launch"];
+  if (raw === undefined) return null;
+  const values = Array.isArray(raw) ? raw : [raw];
+  for (const value of values) {
+    if (typeof value !== "string") continue;
+    const trimmed = value.trim();
+    if (trimmed.length > 0) return trimmed as LaunchId;
+  }
+  return null;
+}
+
 async function resolveClientInfo(socket: net.Socket): Promise<ClientInfo> {
   const pid = await findSocketPidWithRetry(socket);
   const cached = await consumeCacheHit(pid);
@@ -90,6 +169,7 @@ async function resolveClientInfo(socket: net.Socket): Promise<ClientInfo> {
     command,
     cwd,
     lastSeenNs: nowNs(),
+    launchId: null,
   };
   peerCache.set(pid, { info, peerComm: await readComm(pid) });
   return info;
@@ -319,6 +399,7 @@ function fallbackClient(socket: net.Socket): ClientInfo {
     command: null,
     cwd: null,
     lastSeenNs: nowNs(),
+    launchId: null,
   };
 }
 
