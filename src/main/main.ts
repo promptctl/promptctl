@@ -299,7 +299,18 @@ app.whenReady().then(async () => {
     initial: persistedLaunches,
     save: saveLaunches,
   });
-  registerLaunchHandlers(launchRegistry);
+  registerLaunchHandlers({
+    registry: launchRegistry,
+    spawn: {
+      topology: tmuxTopology,
+      getClient: () => tmuxControl.client,
+      // [LAW:one-source-of-truth] Proxy port comes from the proxy manager
+      // at call time — settings are the canonical input but the actual
+      // listening port can differ (e.g. when the configured port was
+      // already in use and the proxy fell back).
+      getProxyPort: () => proxyManager.status().port,
+    },
+  });
 
   registerTmuxControlHandlers(tmuxControl);
   registerTmuxTopologyHandlers(tmuxTopology);

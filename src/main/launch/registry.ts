@@ -63,12 +63,19 @@ export interface LaunchAttachFields {
 // Concrete fields the registry needs to record a created launch.
 // paneId/sessionId/windowId are resolved by the spawn flow after
 // new-session; env is the exact set of vars we injected.
+//
+// launchId is optional: the spawn flow generates the ID up front
+// (because it has to embed it in the env block before new-session
+// runs), so it supplies the ID at create time. Callers that don't
+// need the ID early can omit it and the registry mints one via
+// the injected newId() factory.
 export interface LaunchCreateInputs {
   readonly spec: LaunchSpec;
   readonly paneId: PaneId;
   readonly sessionId: SessionId;
   readonly windowId: WindowId;
   readonly env: Readonly<Record<string, string>>;
+  readonly launchId?: LaunchId;
 }
 
 export class LaunchRegistry {
@@ -120,7 +127,7 @@ export class LaunchRegistry {
   // before calling markRunning.
   create(inputs: LaunchCreateInputs): LaunchPending {
     const row: LaunchPending = {
-      launchId: this.newId(),
+      launchId: inputs.launchId ?? this.newId(),
       toolKind: inputs.spec.toolKind,
       paneId: inputs.paneId,
       sessionId: inputs.sessionId,

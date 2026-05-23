@@ -7,10 +7,25 @@
 // caching at the IPC boundary. The handler is a thin pass-through.
 
 import { ipcMain, type WebContents } from "electron";
-import type { Launch, LaunchEvent, LaunchId } from "../../shared/types";
+import type {
+  Launch,
+  LaunchEvent,
+  LaunchId,
+  LaunchSpec,
+} from "../../shared/types";
 import type { LaunchRegistry } from "../launch/registry";
+import { spawnLaunch, type SpawnDeps } from "../launch/spawn";
 
-export function registerLaunchHandlers(registry: LaunchRegistry): () => void {
+export interface LaunchHandlerDeps {
+  readonly registry: LaunchRegistry;
+  // The spawn flow's other dependencies (tmux client, topology, proxy
+  // port). The handler hands them through verbatim — it has no opinions
+  // beyond plumbing.
+  readonly spawn: Omit<SpawnDeps, "registry">;
+}
+
+export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
+  const { registry } = deps;
   const subscribers = new Set<WebContents>();
 
   ipcMain.on("launch:subscribe", (event) => {
@@ -27,6 +42,14 @@ export function registerLaunchHandlers(registry: LaunchRegistry): () => void {
   ipcMain.handle(
     "launch:get",
     (_e, launchId: LaunchId): Launch | null => registry.get(launchId),
+  );
+
+  // [LAW:single-enforcer] One IPC entry to spawn a tagged launch. The
+  // renderer's LaunchToolDialog calls this; nothing else creates rows.
+  ipcMain.handle(
+    "launch:create",
+    (_e, spec: LaunchSpec): Promise<Launch> =>
+      spawnLaunch({ registry, ...deps.spawn }, spec),
   );
 
   const unsubRegistry = registry.on((evt: LaunchEvent) => {
@@ -46,6 +69,7 @@ export function registerLaunchHandlers(registry: LaunchRegistry): () => void {
     ipcMain.removeAllListeners("launch:subscribe");
     ipcMain.removeHandler("launch:list");
     ipcMain.removeHandler("launch:get");
+    ipcMain.removeHandler("launch:create");
     subscribers.clear();
   };
 }

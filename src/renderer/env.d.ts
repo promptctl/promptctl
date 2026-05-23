@@ -25,6 +25,7 @@ import type {
   Launch,
   LaunchEvent,
   LaunchId,
+  LaunchSpec,
 } from "../shared/types";
 import type {
   ClientInfo,
@@ -60,12 +61,6 @@ export interface ElectronAPI {
 
   invoke(channel: "tmux:topology:get"): Promise<TmuxSnapshot>;
   invoke(channel: "tmux:pane-processes", paneId: PaneId): Promise<PaneProcesses>;
-  invoke(
-    channel: "tmux:launch-tool",
-    kind: string,
-    sessionName: string,
-    cwd: string,
-  ): Promise<PaneId>;
   invoke(channel: "command:list"): Promise<Command[]>;
   invoke(channel: "command:add", command: Command): Promise<void>;
   invoke(channel: "command:remove" | "command:fire", id: string): Promise<void>;
@@ -168,6 +163,7 @@ export interface ElectronAPI {
   invoke(channel: "task:cancel", taskId: string): Promise<boolean>;
   invoke(channel: "launch:list"): Promise<Launch[]>;
   invoke(channel: "launch:get", launchId: LaunchId): Promise<Launch | null>;
+  invoke(channel: "launch:create", spec: LaunchSpec): Promise<Launch>;
   invoke(channel: "proxy:status"): Promise<ProxyStatus>;
   invoke(channel: "proxy:list-clients"): Promise<ClientInfo[]>;
   invoke(channel: "proxy:load-har", filePath: string): Promise<ProxyStatus>;
