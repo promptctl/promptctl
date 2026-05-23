@@ -266,7 +266,18 @@ function ClientTabs({
             }`}
             title={client.command ?? client.cwd ?? client.clientId}
           >
-            {client.displayName}
+            <span className="inline-flex items-center gap-1.5">
+              {client.launchId && (
+                <span
+                  data-testid="live-launch-marker"
+                  className="font-mono text-[9px] text-violet-300"
+                  title={`launchId: ${client.launchId}`}
+                >
+                  ↳
+                </span>
+              )}
+              {client.displayName}
+            </span>
           </button>
         );
       })}

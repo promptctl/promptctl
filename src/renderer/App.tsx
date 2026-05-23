@@ -19,6 +19,7 @@ import { TmuxTree } from "./components/TmuxTree";
 import { CommandBar } from "./components/CommandBar";
 import { LaunchToolDialog } from "./components/LaunchToolDialog";
 import { initCommandSubscription } from "./store/command";
+import { initLaunchSubscription } from "./store/launches";
 import { initProxySubscription } from "./store/proxy";
 
 function TopTab({
@@ -174,14 +175,19 @@ export function App() {
   useEffect(() => {
     const unsubProxy = initProxySubscription();
     let unsubCommand: (() => void) | undefined;
+    let unsubLaunch: (() => void) | undefined;
 
     initCommandSubscription().then((unsub) => {
       unsubCommand = unsub;
+    });
+    initLaunchSubscription().then((unsub) => {
+      unsubLaunch = unsub;
     });
 
     return () => {
       unsubProxy();
       unsubCommand?.();
+      unsubLaunch?.();
     };
   }, []);
 
