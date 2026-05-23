@@ -59,6 +59,13 @@ function harness(opts: { initialPanes?: TmuxPane[] } = {}) {
     registry,
     getTopologySnapshot: () => currentSnapshot,
     onTopologySnapshot: (listener) => {
+      // Mirror TmuxTopologyTracker.onSnapshot: fire the current
+      // snapshot synchronously on attach. Tests that don't pre-seed
+      // currentSnapshot get the default empty snapshot here; tests
+      // that DO pre-seed exercise the same initial-reconcile path
+      // production hits when the correlator boots against a tracker
+      // that already has panes.
+      listener(currentSnapshot);
       snapshotListeners.push(listener);
       return () => {
         const i = snapshotListeners.indexOf(listener);

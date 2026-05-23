@@ -122,6 +122,27 @@ describe("Live", () => {
     expect(screen.getByText("turn 2 user")).toBeInTheDocument();
     expect(screen.queryByText("turn 1 user")).toBeNull();
   });
+
+  it("renders the launch marker only for clients with a launchId", () => {
+    const state = useProxyStore.getState();
+    state.upsertClient(client("untagged", "Untagged client"));
+    const tagged: ClientInfo = {
+      ...client("launch-XYZ", "Tagged client"),
+      launchId: "XYZ" as ClientInfo["launchId"],
+    };
+    state.upsertClient(tagged);
+
+    render(<Live />);
+
+    const markers = screen.queryAllByTestId("live-launch-marker");
+    // One marker, attached to the tagged client's tab.
+    expect(markers).toHaveLength(1);
+    const taggedButton = screen.getByRole("button", { name: /Tagged client/ });
+    expect(within(taggedButton).getByTestId("live-launch-marker")).toBeTruthy();
+    // The untagged client renders without a marker.
+    const untaggedButton = screen.getByRole("button", { name: /Untagged client/ });
+    expect(within(untaggedButton).queryByTestId("live-launch-marker")).toBeNull();
+  });
 });
 
 function chainEvents(): ProxyEvent[] {

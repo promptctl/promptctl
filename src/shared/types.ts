@@ -20,9 +20,11 @@ export type ToolKind = "claude" | "codex" | "gemini" | "unknown";
 // branches on "do we know this yet" — they switch on status and let the
 // type narrow the available fields.
 //
-// `env` records only the env vars promptctl injected at spawn time
-// (PROMPTCTL_LAUNCH_ID, ANTHROPIC_BASE_URL, ANTHROPIC_CUSTOM_HEADERS). We
-// do not capture the child's full env — that could leak secrets.
+// `env` records only the env vars promptctl injected at spawn time —
+// PROMPTCTL_LAUNCH_ID, PROMPTCTL_LAUNCH_TOOL, ANTHROPIC_BASE_URL, and
+// ANTHROPIC_CUSTOM_HEADERS. We do not capture the child's full env;
+// that could leak secrets, and the four we set are the only ones the
+// registry and proxy attribution need.
 
 export type ToolLaunchKind = Exclude<ToolKind, "unknown">;
 
