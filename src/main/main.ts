@@ -8,6 +8,9 @@ import { ownedSessionName } from "./tmux/session";
 import { TmuxTopologyTracker } from "./tmux/topology";
 import { CommandEngine } from "./command/engine";
 import { loadCommands } from "./command/persistence";
+import { LaunchRegistry } from "./launch/registry";
+import { loadLaunches, saveLaunches } from "./launch/persistence";
+import { registerLaunchHandlers } from "./ipc/launch-handlers";
 import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
 import { registerTmuxTopologyHandlers } from "./ipc/tmux-topology-handlers";
 import { TmuxOutputRouter } from "./tmux/output-router";
@@ -117,6 +120,13 @@ const tmuxOutputRouter = new TmuxOutputRouter({
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   getClient: () => tmuxControl.client,
 });
+
+// [LAW:one-source-of-truth] Sole authoritative source of launch identity.
+// Module-scope so subsystems wired below (proxy client-identity in 77e.4,
+// topology subscriptions in later 77e.3 slices) can reference it without
+// passing handles through every constructor. Initialized inside whenReady
+// after persisted rows are loaded — until then the variable is null.
+let launchRegistry: LaunchRegistry | null = null;
 
 // [LAW:locality-or-seam] CommandEngine consumes tmux through three method
 // surfaces; this adapter is the seam between the engine and the singleton
@@ -279,6 +289,18 @@ app.whenReady().then(async () => {
   // Initialize subsystems
   registerProvider(geminiAdapter);
   registerProvider(claudeAdapter);
+
+  // Launch registry: load persisted rows, construct the registry, register
+  // IPC handlers. The proxy starts further down — it needs the registry to
+  // exist so header-based attribution (77e.4) can consult it on the first
+  // request. [LAW:one-source-of-truth]
+  const persistedLaunches = await loadLaunches();
+  launchRegistry = new LaunchRegistry({
+    initial: persistedLaunches,
+    save: saveLaunches,
+  });
+  registerLaunchHandlers(launchRegistry);
+
   registerTmuxControlHandlers(tmuxControl);
   registerTmuxTopologyHandlers(tmuxTopology);
   registerTmuxOutputHandlers(tmuxOutputRouter);
