@@ -227,6 +227,17 @@ export function shellSingleQuote(value: string): string {
 }
 
 // Exported for unit testing.
+//
+// NOTE [LAW:locality-or-seam]: This predicate compares pane.toolKind
+// (derived from `pane_current_command` via detectToolKind) to the
+// expected toolKind. In tmux configurations where `default-command` or
+// `default-shell` wraps shell-command in an interactive shell (e.g.
+// `/bin/zsh -l`), pane_current_command reports the wrapping shell, not
+// the launched binary — `waitForToolInPane` then times out even though
+// the binary is running as a child. The correlator's exit-detection
+// inherits the same coupling. Tracked as a follow-up; the production
+// fix likely sets `default-command ""` on launches we spawn, or
+// switches detection to a pid-change signal.
 export async function waitForToolInPane(
   topology: SpawnTopology,
   paneId: PaneId,

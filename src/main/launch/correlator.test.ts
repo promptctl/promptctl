@@ -40,12 +40,21 @@ function makePane(overrides: Partial<TmuxPane> = {}): TmuxPane {
   };
 }
 
-function harness() {
+function harness(opts: { initialPanes?: TmuxPane[] } = {}) {
   const registry = new LaunchRegistry({ save: async () => undefined });
   const snapshotListeners: ((s: TmuxSnapshot) => void)[] = [];
   const tmuxEventListeners = new Map<keyof TmuxEventMap, ((ev: unknown) => void)[]>();
   const connStateListeners: ((s: ConnectionStateEvent) => void)[] = [];
-  let currentSnapshot: TmuxSnapshot = { timestamp: 0, panes: [] };
+  // Default initial snapshot contains the canonical launch's pane with
+  // an unset pid (0) so makeRunningLaunch doesn't immediately exit
+  // (pane is present, toolKind matches) and doesn't immediately attach
+  // a pid (the reconcile skips pid<=0). Tests that exercise the "pane
+  // missing" case pass `initialPanes: []`. Tests can also pass a fully
+  // populated pane to drive the registry-edge attach.
+  let currentSnapshot: TmuxSnapshot = {
+    timestamp: 0,
+    panes: opts.initialPanes ?? [makePane({ pid: 0 })],
+  };
   const dispose = startLaunchCorrelator({
     registry,
     getTopologySnapshot: () => currentSnapshot,
@@ -86,6 +95,10 @@ function harness() {
     setCurrentSnapshot(panes: TmuxPane[]) {
       currentSnapshot = { timestamp: Date.now(), panes };
     },
+    fireTmuxEvent<K extends keyof TmuxEventMap>(event: K, payload: unknown) {
+      const arr = tmuxEventListeners.get(event) ?? [];
+      for (const handler of [...arr]) handler(payload);
+    },
   };
 }
 
@@ -119,7 +132,8 @@ describe("LaunchCorrelator pid correlation", () => {
     const h = harness();
     const id = makeRunningLaunch(h.registry);
     h.pushSnapshot([
-      makePane({ id: "%99" as PaneId, pid: 9999 }),
+      // First pane is unrelated; second is the launch's pane.
+      makePane({ id: "%99" as PaneId, pid: 9999, toolKind: "claude" }),
       makePane({ pid: 4242 }),
     ]);
     const after = h.registry.get(id);
@@ -185,5 +199,83 @@ describe("LaunchCorrelator pid correlation", () => {
     // value set by the last live snapshot (here: never set).
     const after = h.registry.get(id);
     if (after?.status === "running") expect(after.pid).toBeNull();
+  });
+});
+
+describe("LaunchCorrelator exit detection", () => {
+  it("marks the launch exited when the pane reverts to a shell", () => {
+    const h = harness();
+    const id = makeRunningLaunch(h.registry);
+    // Same pane id, but toolKind is now "unknown" — the tool quit and
+    // the shell took over the foreground.
+    h.pushSnapshot([
+      makePane({ currentCommand: "zsh", toolKind: "unknown" }),
+    ]);
+    const after = h.registry.get(id);
+    expect(after?.status).toBe("exited");
+    if (after?.status === "exited") expect(after.exitReason).toBe("tool exited");
+    h.dispose();
+  });
+
+  it("marks the launch exited when the pane vanishes from the snapshot", () => {
+    const h = harness();
+    const id = makeRunningLaunch(h.registry);
+    expect(h.registry.get(id)?.status).toBe("running");
+    h.pushSnapshot([]); // pane disappeared
+    const after = h.registry.get(id);
+    expect(after?.status).toBe("exited");
+    if (after?.status === "exited") expect(after.exitReason).toBe("pane gone");
+    h.dispose();
+  });
+
+  it("marks the launch exited on window-close for its window id", () => {
+    const h = harness();
+    const id = makeRunningLaunch(h.registry);
+    // Find a window-close listener and fire it.
+    // The launch's windowId is "@5" — tmux emits the numeric form 5.
+    h.fireTmuxEvent("window-close", { windowId: 5 });
+    const after = h.registry.get(id);
+    expect(after?.status).toBe("exited");
+    if (after?.status === "exited") expect(after.exitReason).toBe("window closed");
+    h.dispose();
+  });
+
+  it("does not mark exited when window-close fires for a different window", () => {
+    const h = harness();
+    const id = makeRunningLaunch(h.registry);
+    h.fireTmuxEvent("window-close", { windowId: 999 });
+    const after = h.registry.get(id);
+    expect(after?.status).toBe("running");
+    h.dispose();
+  });
+
+  it("unlinked-window-close behaves like window-close", () => {
+    const h = harness();
+    const id = makeRunningLaunch(h.registry);
+    h.fireTmuxEvent("unlinked-window-close", { windowId: 5 });
+    const after = h.registry.get(id);
+    expect(after?.status).toBe("exited");
+    h.dispose();
+  });
+
+  it("markExited is idempotent across triggers", () => {
+    const h = harness();
+    const id = makeRunningLaunch(h.registry);
+    // Window-close first.
+    h.fireTmuxEvent("window-close", { windowId: 5 });
+    const afterFirst = h.registry.get(id);
+    expect(afterFirst?.status).toBe("exited");
+    const firstReason =
+      afterFirst?.status === "exited" ? afterFirst.exitReason : null;
+    // Then a snapshot showing pane reverted. The launch is already
+    // exited; the trigger should be a no-op.
+    h.pushSnapshot([makePane({ toolKind: "unknown" })]);
+    const afterSecond = h.registry.get(id);
+    expect(afterSecond?.status).toBe("exited");
+    if (afterSecond?.status === "exited") {
+      // Reason preserved — first exit wins.
+      expect(afterSecond.exitReason).toBe(firstReason);
+    }
+    h.dispose();
   });
 });
