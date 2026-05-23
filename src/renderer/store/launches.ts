@@ -38,7 +38,12 @@ export const useLaunchStore = create<LaunchStore>((set, get) => ({
 }));
 
 export async function initLaunchSubscription(): Promise<() => void> {
-  // Eager fetch so the store is populated before any consumer renders.
+  // Seed the store with the current registry snapshot before attaching
+  // the push listeners — eliminates an "empty → populated" repaint
+  // when launches are already present at boot. (Note: this still runs
+  // from App's useEffect, so the very first render happens with an
+  // empty store; consumers that mount before this resolves see the
+  // launches on the next render once setLaunches lands.)
   const initial = (await window.electronAPI.invoke("launch:list")) as Launch[];
   useLaunchStore.getState().setLaunches(initial);
 

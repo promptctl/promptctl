@@ -15,7 +15,11 @@ import type {
 } from "../../shared/proxy-events";
 import type { Launch, LaunchId } from "../../shared/types";
 import { ResponseAssembler } from "./assembler";
-import { resolveRequestClient } from "./client-identity";
+import {
+  clientInfoFromLaunch,
+  readLaunchHeader,
+  resolveClientId,
+} from "./client-identity";
 import { makeEnvelope, newRequestId } from "./envelope";
 import { proxyEventBus } from "./events";
 import { parseSseFrame } from "./sse-parser";
@@ -177,26 +181,37 @@ async function handleRequest(
   resolveLaunch: (id: LaunchId) => Launch | null,
 ): Promise<void> {
   const requestId = newRequestId();
-  // [LAW:dataflow-not-control-flow] One resolver. The header path wins
-  // when present and known; the socket walk is the fallback. Cache on
-  // the socket so a keep-alive connection's later requests skip the
-  // resolution — but refresh `lastSeenNs` per request so the recency
-  // signal driving the Live tab's active-client list (and the
-  // proxyEventBus.listClients() ordering) tracks the current request,
-  // not the connection's first request. The cached identity is reused;
-  // the timestamp is the only field that varies per request.
+  // [LAW:dataflow-not-control-flow] Two inputs, one ClientInfo. The
+  // X-Promptctl-Launch header is read on EVERY request — cheap, and
+  // it's the only input that can change between requests on a keep-
+  // alive connection (a connection that starts untagged can be tagged
+  // by a later request, or vice versa). Only the expensive socket→pid
+  // walk gets cached on the socket; we fall through to it when the
+  // header is absent or doesn't match a known launch.
+  //
+  // `lastSeenNs` refreshes per request so the Live tab's active-client
+  // signal tracks the current request, not the connection's first.
   const socket = req.socket as ClientSocket;
-  const cached = socket[CLIENT_INFO];
-  const resolved = await (cached ?? (() => {
-    const promise = resolveRequestClient(req, req.socket, resolveLaunch);
-    socket[CLIENT_INFO] = promise;
-    return promise;
-  })());
+  const header = readLaunchHeader(req);
+  let resolved: ClientInfo | null = null;
+  if (header !== null) {
+    const launch = resolveLaunch(header);
+    if (launch !== null) {
+      resolved = clientInfoFromLaunch(launch);
+    }
+  }
+  if (resolved === null) {
+    const cached = socket[CLIENT_INFO];
+    resolved = await (cached ?? (() => {
+      const promise = resolveClientId(req.socket);
+      socket[CLIENT_INFO] = promise;
+      return promise;
+    })());
+  }
   const clientInfo: ClientInfo = {
     ...resolved,
     lastSeenNs: Number(process.hrtime.bigint()),
   };
-  socket[CLIENT_INFO] = Promise.resolve(clientInfo);
   proxyEventBus.publishClient(clientInfo);
   const envelope = () => makeEnvelope(requestId, clientInfo.clientId);
   const startedAt = Date.now();
