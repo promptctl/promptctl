@@ -47,11 +47,11 @@ export async function initLaunchSubscription(): Promise<() => void> {
   const initial = (await window.electronAPI.invoke("launch:list")) as Launch[];
   useLaunchStore.getState().setLaunches(initial);
 
-  const unsubList = window.electronAPI.on("launch:list", (...args) => {
-    useLaunchStore.getState().setLaunches(args[0] as Launch[]);
+  const unsubList = window.electronAPI.on("launch:list", (launches) => {
+    useLaunchStore.getState().setLaunches(launches);
   });
-  const unsubEvents = window.electronAPI.on("launch:event", (...args) => {
-    useLaunchStore.getState().setLastEvent(args[0] as LaunchEvent);
+  const unsubEvents = window.electronAPI.on("launch:event", (event) => {
+    useLaunchStore.getState().setLastEvent(event);
   });
 
   window.electronAPI.send("launch:subscribe");
