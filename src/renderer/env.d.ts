@@ -54,6 +54,7 @@ export interface ElectronAPI {
     channel:
       | "command:subscribe"
       | "launch:subscribe"
+      | "launch:unsubscribe"
       | "proxy:subscribe"
       | "proxy:unsubscribe",
   ): void;

@@ -39,6 +39,16 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
     event.sender.once("destroyed", () => subscribers.delete(event.sender));
   });
 
+  // Explicit unsubscribe so the renderer's `initLaunchSubscription`
+  // cleanup actually stops main-side pushes. Without this the WebContents
+  // would only fall out of the set on destruction — fine for an app-
+  // wide subscription but misleading when the React tree mounts/unmounts
+  // the subscriber (e.g. under HMR). [LAW:single-enforcer] one ipcMain
+  // listener per direction.
+  ipcMain.on("launch:unsubscribe", (event) => {
+    subscribers.delete(event.sender);
+  });
+
   ipcMain.handle("launch:list", () => registry.list());
 
   ipcMain.handle(
@@ -69,6 +79,7 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
   return () => {
     unsubRegistry();
     ipcMain.removeAllListeners("launch:subscribe");
+    ipcMain.removeAllListeners("launch:unsubscribe");
     ipcMain.removeHandler("launch:list");
     ipcMain.removeHandler("launch:get");
     ipcMain.removeHandler("launch:create");

@@ -54,5 +54,11 @@ export async function initLaunchSubscription(): Promise<() => void> {
   return () => {
     unsubList();
     unsubEvents();
+    // Detach on the main side too so the WebContents stops receiving
+    // launch:list / launch:event pushes. Without this the cleanup only
+    // removes renderer-side listeners and main keeps sending — fine for
+    // a single app-wide subscriber that lives for the WebContents'
+    // lifetime, misleading when the subscription is mounted/unmounted.
+    window.electronAPI.send("launch:unsubscribe");
   };
 }
