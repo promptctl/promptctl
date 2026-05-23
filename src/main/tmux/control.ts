@@ -4,15 +4,22 @@
 // TmuxClient has been replaced after a reconnect.
 //
 // [LAW:single-enforcer] Connect / reconnect / close transitions go through this
-// class — and so does the attached session. tmux delivers %output only for the
-// session the control client is attached to, so "which session is attached" is
-// a cross-cutting invariant: it gates what the output router, command engine,
-// and renderer pane streams can observe. watchSession() is its only writer.
+// class. tmux delivers %output only for the session each control client is
+// attached to, so coverage across sessions is the cross-cutting invariant: a
+// mesh of one client per *observed* session is what keeps %output and output-
+// pattern matching from silently going dark when the UI navigates between
+// sessions. observeSessions() is its only writer.
 //
-// [LAW:dataflow-not-control-flow] connect() runs the same sequence every
-// invocation: setStatus("connecting") → spawn → register listeners → setFlags
-// → setStatus("ready"). Failures flow into setStatus("closed", reason) and a
-// scheduled reconnect — there is no branch that "skips" the lifecycle.
+// [LAW:dataflow-not-control-flow] connect() and spawnFollower() run the same
+// sequence every invocation: setStatus("connecting") → spawn → register
+// listeners → setFlags → setStatus("ready"). Failures flow into setStatus
+// ("closed", reason) and a scheduled reconnect — there is no branch that
+// "skips" the lifecycle.
+//
+// [LAW:one-type-per-behavior] Each registered listener carries an event-type
+// classification — server-scoped (attaches to primary only) or session-scoped
+// (attaches to every client). The set of session-scoped events is fixed below
+// and is the only place callers' fan-out behavior can change.
 
 import {
   TmuxClient,
@@ -20,7 +27,7 @@ import {
   type TmuxEventMap,
   type TmuxTransport,
 } from "tmux-control-mode-js";
-import { tmuxEscape } from "tmux-control-mode-js/protocol";
+import { PaneAction } from "tmux-control-mode-js/protocol";
 import type { SessionId } from "../../shared/types";
 import { ensureSession } from "./session";
 
@@ -37,49 +44,80 @@ export interface ConnectionStateEvent {
 
 export interface TmuxControlConnectionOptions {
   // Promptctl-owned session name. The connection bootstraps this session
-  // (creates if missing, attaches if it exists) before the control client
+  // (creates if missing, attaches if it exists) before the primary client
   // attaches. Required — every connection is scoped to a named session.
   readonly sessionName: string;
-  // Transport factory — overridable for tests. Default spawns the control
-  // client with `attach-session -t <sessionName>` baked in so tmux never
-  // has the chance to create an anonymous session.
-  readonly transportFactory?: () => TmuxTransport;
+  // Transport factory — overridable for tests. Receives a tmux target (a
+  // session name for the primary, a `$N` session id for followers). The
+  // default spawns the control client with `attach-session -t <target>`
+  // baked in so tmux never has the chance to create an anonymous session.
+  readonly transportFactory?: (target: string) => TmuxTransport;
   // Bootstrap step: ensure the session exists. Default probes with
   // `tmux has-session -t =<name>` and creates with `tmux new-session -d
   // -s <name>` only if missing. Overridable for tests so unit suites
   // don't need a real tmux binary on PATH.
   readonly bootstrap?: () => Promise<void>;
-  // Backoff between reconnect attempts.
+  // Backoff between reconnect attempts (primary client only — followers
+  // are respawned by the next observeSessions() reconciliation).
   readonly reconnectDelayMs?: number;
 }
 
 type StateListener = (event: ConnectionStateEvent) => void;
 
-// [LAW:dataflow-not-control-flow] Each subscription is stored as a
-// `(client) => void` thunk pair. The generic `K` is captured at registration
-// time inside the closure, so re-attaching after a reconnect doesn't need to
-// reconstruct the type relationship between event name and handler signature.
-interface PendingClientListener {
-  readonly attach: (client: TmuxClient) => void;
-  readonly detach: (client: TmuxClient) => void;
+// [LAW:one-source-of-truth] §2.1 of docs/tmux-integration-plan.md — the
+// canonical set of events tmux scopes to a single attached client. These fan
+// to every client (primary + followers) so multi-session coverage doesn't
+// silently drop. Anything not in this set is server-wide and attaches to
+// primary only to avoid duplicate delivery.
+const SESSION_SCOPED_EVENTS: ReadonlySet<keyof TmuxEventMap> = new Set([
+  "output",
+  "extended-output",
+  "pause",
+  "continue",
+]);
+
+type EventKey = keyof TmuxEventMap;
+
+// [LAW:dataflow-not-control-flow] A registered listener is data — event name,
+// handler, and the fan-out scope derived from the event name. The (re)attach
+// loop reads `scope` to decide whether a particular client gets this handler;
+// there is no branch in the loop itself.
+interface RegisteredListener {
+  readonly event: EventKey;
+  readonly handler: (ev: TmuxEventMap[EventKey]) => void;
+  readonly scope: "primary" | "all";
+}
+
+// A follower owns its transport, its client, and the disposers for the
+// listeners attached to it. Teardown is the inverse — drop every listener,
+// then close the transport. The map below is the entire state of "which
+// sessions are currently observed."
+interface FollowerClient {
+  readonly sessionId: SessionId;
+  readonly client: TmuxClient;
+  readonly transport: TmuxTransport;
+  readonly listenerDisposers: (() => void)[];
+  // True once we've issued the teardown (or the transport dropped on its own)
+  // so the auto-respawn-on-exit path doesn't double-act.
+  shuttingDown: boolean;
 }
 
 export class TmuxControlConnection {
   private static instance: TmuxControlConnection | null = null;
 
   private readonly sessionName: string;
-  private readonly transportFactory: () => TmuxTransport;
+  private readonly transportFactory: (target: string) => TmuxTransport;
   private readonly bootstrap: () => Promise<void>;
   private readonly reconnectDelayMs: number;
   private readonly stateListeners = new Set<StateListener>();
-  private readonly clientListeners: PendingClientListener[] = [];
+  private readonly listeners: RegisteredListener[] = [];
 
-  private currentClient: TmuxClient | null = null;
-  // [LAW:one-source-of-truth] The session the control client should be attached
-  // to. `null` means the owned session (the bootstrap default). Re-applied on
-  // every (re)connect so a transport drop never silently strands the client on
-  // the owned session while the UI still believes it is watching another.
-  private watchedSession: SessionId | null = null;
+  private primaryClient: TmuxClient | null = null;
+  private readonly followers = new Map<SessionId, FollowerClient>();
+  // Last-observed session set. observeSessions() is idempotent; this guards
+  // a transient transport drop from racing the next reconcile.
+  private observed: ReadonlySet<SessionId> = new Set();
+
   private status: ConnectionStatus = "connecting";
   private statusReason: string | undefined;
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
@@ -99,11 +137,11 @@ export class TmuxControlConnection {
     this.sessionName = sessionName;
     this.transportFactory =
       options.transportFactory ??
-      (() => {
+      ((target) => {
         // [LAW:single-enforcer] All transport spawns route through here so
-        // the `attach-session -t <name>` argv is never bypassed — that's
+        // the `attach-session -t <target>` argv is never bypassed — that's
         // what prevents tmux from inventing an anonymous session.
-        const args = ["attach-session", "-t", sessionName];
+        const args = ["attach-session", "-t", target];
         return envSocket === null
           ? spawnTmux(args)
           : spawnTmux(args, { socketPath: envSocket });
@@ -140,55 +178,34 @@ export class TmuxControlConnection {
     return this._ready;
   }
 
+  // The primary client — attached to the owned session, owns every write and
+  // every server-wide subscription. Followers are an implementation detail of
+  // the mesh and are not exposed.
   get client(): TmuxClient | null {
-    return this.currentClient;
+    return this.primaryClient;
   }
 
-  // [LAW:single-enforcer] The only writer of the attached session. Loops and
-  // the debug surface express intent ("watch this pane's session"); this method
-  // records it and switches the live client. `null` reverts to the owned
-  // session. The intent survives reconnects because connect() re-applies it on
-  // ready — the renderer cannot do this itself since it never sees the drop.
-  async watchSession(sessionId: SessionId | null): Promise<void> {
-    this.watchedSession = sessionId;
-    const client = this.currentClient;
-    // [LAW:no-defensive-null-guards] currentClient is genuinely optional while
-    // (re)connecting; the intent is recorded above and connect() applies it on
-    // ready, so an early return here defers the work — it never drops it.
-    if (client === null) return;
-    await this.applyWatchedSession(client);
-  }
-
-  // [LAW:dataflow-not-control-flow] Always switches to the resolved target
-  // (watched session, else owned). On first connect that target is the owned
-  // session the argv already attached to — an idempotent no-op — so the same
-  // line runs on every ready transition without a "did the user pick a session"
-  // branch.
+  // [LAW:single-enforcer] The only writer of the follower set. main.ts wires
+  // this to the topology snapshot — any session promptctl sees in the pane
+  // list becomes an observation, and a follower spawns to deliver its
+  // %output. Idempotent — calls with the same set are no-ops.
   //
-  // [LAW:no-silent-fallbacks] A failed switch to a foreign watched session
-  // (killed while we were detached) reverts to the owned session, which the
-  // bootstrap guarantees exists — but the fallback's success is checked. A
-  // swallowed failure would let connect() reach `ready` with the client
-  // unattached, silently killing %output delivery; instead it throws so connect
-  // routes through the reconnect path. When the target already WAS the owned
-  // session there is no fallback, so the failure surfaces directly.
-  private async applyWatchedSession(client: TmuxClient): Promise<void> {
-    const target = this.watchedSession ?? this.sessionName;
-    const resp = await client.execute(`switch-client -t ${tmuxEscape(target)}`);
-    if (resp.success) return;
-    if (this.watchedSession === null) {
-      throw new Error(
-        `switch-client to owned session ${target} failed: ${resp.output.join("\n")}`,
-      );
+  // [LAW:dataflow-not-control-flow] Reconcile reads the observed set as data
+  // and runs the same add/remove loops every invocation; the variability is
+  // which session ids are new vs gone, not which branch fires.
+  observeSessions(sessions: ReadonlySet<SessionId>): void {
+    this.observed = new Set(sessions);
+    if (this.closed) return;
+    // Add followers for newly-observed sessions. Skip if we already have one
+    // — observation is a set, not a queue.
+    for (const sessionId of sessions) {
+      if (this.followers.has(sessionId)) continue;
+      this.spawnFollower(sessionId);
     }
-    this.watchedSession = null;
-    const owned = await client.execute(
-      `switch-client -t ${tmuxEscape(this.sessionName)}`,
-    );
-    if (!owned.success) {
-      throw new Error(
-        `switch-client to owned session ${this.sessionName} failed: ${owned.output.join("\n")}`,
-      );
+    // Tear down followers that are no longer observed.
+    for (const [sessionId, follower] of [...this.followers]) {
+      if (sessions.has(sessionId)) continue;
+      this.tearDownFollower(sessionId, follower);
     }
   }
 
@@ -206,23 +223,47 @@ export class TmuxControlConnection {
     return () => this.stateListeners.delete(listener);
   }
 
-  // Subscribe to a TmuxClient event in a reconnect-safe way. The handler is
-  // re-registered on every new client instance, so callers don't need to
-  // re-subscribe themselves after a transport drop.
+  // [LAW:one-type-per-behavior] Subscribe to a TmuxClient event in a
+  // reconnect-safe, mesh-aware way. The event's classification (session-scoped
+  // vs server-scoped, see SESSION_SCOPED_EVENTS) decides whether the handler
+  // is attached to every client or just the primary. Callers do not branch
+  // on this themselves — the connection owns the rule so the consumer surface
+  // stays uniform across the mesh.
   on<K extends keyof TmuxEventMap>(
     event: K,
     handler: (ev: TmuxEventMap[K]) => void,
   ): () => void {
-    const entry: PendingClientListener = {
-      attach: (client) => client.on(event, handler),
-      detach: (client) => client.off(event, handler),
+    const scope: "primary" | "all" = SESSION_SCOPED_EVENTS.has(event)
+      ? "all"
+      : "primary";
+    const entry: RegisteredListener = {
+      event,
+      handler: handler as RegisteredListener["handler"],
+      scope,
     };
-    this.clientListeners.push(entry);
-    if (this.currentClient !== null) entry.attach(this.currentClient);
+    this.listeners.push(entry);
+    if (this.primaryClient !== null) {
+      this.primaryClient.on(event, handler);
+    }
+    if (scope === "all") {
+      for (const follower of this.followers.values()) {
+        follower.client.on(event, handler);
+        follower.listenerDisposers.push(() =>
+          follower.client.off(event, handler),
+        );
+      }
+    }
     return () => {
-      const idx = this.clientListeners.indexOf(entry);
-      if (idx >= 0) this.clientListeners.splice(idx, 1);
-      if (this.currentClient !== null) entry.detach(this.currentClient);
+      const idx = this.listeners.indexOf(entry);
+      if (idx >= 0) this.listeners.splice(idx, 1);
+      if (this.primaryClient !== null) {
+        this.primaryClient.off(event, handler);
+      }
+      if (scope === "all") {
+        for (const follower of this.followers.values()) {
+          follower.client.off(event, handler);
+        }
+      }
     };
   }
 
@@ -232,8 +273,11 @@ export class TmuxControlConnection {
       clearTimeout(this.reconnectTimer);
       this.reconnectTimer = null;
     }
-    const client = this.currentClient;
-    this.currentClient = null;
+    for (const [sessionId, follower] of [...this.followers]) {
+      this.tearDownFollower(sessionId, follower);
+    }
+    const client = this.primaryClient;
+    this.primaryClient = null;
     client?.close();
     this.setStatus("closed", "explicit close");
   }
@@ -250,7 +294,7 @@ export class TmuxControlConnection {
       return;
     }
 
-    const client = this.spawnClient();
+    const client = this.spawnPrimaryClient();
     if (client === null) {
       // spawn already routed the failure to setStatus + reconnect.
       return;
@@ -263,9 +307,8 @@ export class TmuxControlConnection {
 
     try {
       await client.setFlags(["pause-after=2"]);
-      await this.applyWatchedSession(client);
     } catch (err) {
-      this.handleClientFailure(client, errorMessage(err));
+      this.handlePrimaryFailure(client, errorMessage(err));
       return;
     }
 
@@ -292,10 +335,10 @@ export class TmuxControlConnection {
     }
   }
 
-  private spawnClient(): TmuxClient | null {
+  private spawnPrimaryClient(): TmuxClient | null {
     let transport: TmuxTransport;
     try {
-      transport = this.transportFactory();
+      transport = this.transportFactory(this.sessionName);
     } catch (err) {
       this.setStatus("closed", errorMessage(err));
       this.scheduleReconnect();
@@ -303,19 +346,23 @@ export class TmuxControlConnection {
     }
 
     const client = new TmuxClient(transport);
-    this.currentClient = client;
-    for (const entry of this.clientListeners) {
-      entry.attach(client);
+    this.primaryClient = client;
+    for (const lst of this.listeners) {
+      // Primary receives every registered listener — server-scoped events
+      // come only from here, and session-scoped events come from here too
+      // (the primary's attached session is observed like any other).
+      client.on(lst.event, lst.handler);
     }
+    this.installPauseAutoResume(client, "primary");
     client.on("exit", (ev) =>
-      this.handleClientFailure(client, ev.reason ?? "transport closed"),
+      this.handlePrimaryFailure(client, ev.reason ?? "transport closed"),
     );
     return client;
   }
 
-  private handleClientFailure(client: TmuxClient, reason: string): void {
-    if (this.currentClient !== client) return; // stale event from a prior client
-    this.currentClient = null;
+  private handlePrimaryFailure(client: TmuxClient, reason: string): void {
+    if (this.primaryClient !== client) return; // stale event from a prior client
+    this.primaryClient = null;
     client.close();
     if (this.closed) return;
     this.setStatus("closed", reason);
@@ -338,6 +385,96 @@ export class TmuxControlConnection {
     for (const listener of this.stateListeners) {
       listener(event);
     }
+  }
+
+  // [LAW:dataflow-not-control-flow] Same spawn sequence for every follower —
+  // create transport → wire listeners → set flags → set up self-cleanup on
+  // transport exit. The session id is data; the path is fixed.
+  private spawnFollower(sessionId: SessionId): void {
+    let transport: TmuxTransport;
+    try {
+      transport = this.transportFactory(sessionId);
+    } catch (err) {
+      console.error(
+        `[tmux-control] follower(${sessionId}) transport spawn failed: ${errorMessage(err)}`,
+      );
+      return;
+    }
+
+    const client = new TmuxClient(transport);
+    const follower: FollowerClient = {
+      sessionId,
+      client,
+      transport,
+      listenerDisposers: [],
+      shuttingDown: false,
+    };
+    this.followers.set(sessionId, follower);
+
+    // Attach every session-scoped listener that's currently registered.
+    for (const lst of this.listeners) {
+      if (lst.scope !== "all") continue;
+      client.on(lst.event, lst.handler);
+      follower.listenerDisposers.push(() =>
+        client.off(lst.event, lst.handler),
+      );
+    }
+
+    this.installPauseAutoResume(client, `follower(${sessionId})`);
+
+    // Transport drops drop the follower from the map. The next
+    // observeSessions() call (driven by the topology snapshot) respawns it
+    // if the session still exists.
+    client.on("exit", (ev) => {
+      if (follower.shuttingDown) return;
+      console.warn(
+        `[tmux-control] follower(${sessionId}) exited unexpectedly: ${ev.reason ?? "transport closed"}`,
+      );
+      this.followers.delete(sessionId);
+      for (const dispose of follower.listenerDisposers) dispose();
+      follower.listenerDisposers.length = 0;
+    });
+
+    // Same backpressure policy as primary so per-burst output pauses, then
+    // self-resumes via the pause handler above.
+    void client.setFlags(["pause-after=2"]).catch((err: unknown) => {
+      console.error(
+        `[tmux-control] follower(${sessionId}) setFlags failed:`,
+        err,
+      );
+      this.tearDownFollower(sessionId, follower);
+    });
+  }
+
+  // [LAW:single-enforcer] Every client (primary + followers) auto-resumes its
+  // own paused panes so downstream consumers never need to know which client
+  // emitted a pause — the wakeup happens at the source. Without this on the
+  // primary the OutputRouter would have to plumb per-event source through to
+  // call setPaneAction on the right client, and the consumer surface would
+  // grow to absorb a concern that belongs here.
+  private installPauseAutoResume(client: TmuxClient, label: string): void {
+    client.on("pause", (msg) => {
+      void client
+        .setPaneAction(msg.paneId, PaneAction.Continue)
+        .catch((err: unknown) => {
+          console.error(
+            `[tmux-control] ${label} auto-resume for pane %${msg.paneId} failed:`,
+            err,
+          );
+        });
+    });
+  }
+
+  private tearDownFollower(
+    sessionId: SessionId,
+    follower: FollowerClient,
+  ): void {
+    if (follower.shuttingDown) return;
+    follower.shuttingDown = true;
+    for (const dispose of follower.listenerDisposers) dispose();
+    follower.listenerDisposers.length = 0;
+    follower.client.close();
+    this.followers.delete(sessionId);
   }
 }
 

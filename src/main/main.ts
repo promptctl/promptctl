@@ -19,7 +19,7 @@ import { TmuxOutputRouter } from "./tmux/output-router";
 import { registerTmuxOutputHandlers } from "./ipc/tmux-output-handlers";
 import { registerTmuxPaneHandlers } from "./ipc/tmux-pane-handlers";
 import { registerCommandHandlers } from "./ipc/command-handlers";
-import type { PaneId } from "../shared/types";
+import type { PaneId, SessionId } from "../shared/types";
 import { registerSessionHandlers } from "./ipc/session-handlers";
 import { registerPromptHandlers } from "./ipc/prompt-handlers";
 import { registerSettingsHandlers } from "./ipc/settings-handlers";
@@ -121,6 +121,17 @@ const tmuxOutputRouter = new TmuxOutputRouter({
   onEvent: (event, handler) => tmuxControl.on(event, handler),
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   getClient: () => tmuxControl.client,
+});
+
+// [LAW:single-enforcer] The connection's follower mesh is a projection of
+// the topology: any session promptctl sees in the pane list becomes an
+// observation, and a per-session control client spawns to deliver its
+// %output. Without this, only the owned-session pane stream is live and
+// CommandEngine output-pattern triggers in foreign sessions silently pause.
+tmuxTopology.onSnapshot((snapshot) => {
+  const sessions = new Set<SessionId>();
+  for (const pane of snapshot.panes) sessions.add(pane.sessionId);
+  tmuxControl.observeSessions(sessions);
 });
 
 // [LAW:one-source-of-truth] Sole authoritative source of launch identity.

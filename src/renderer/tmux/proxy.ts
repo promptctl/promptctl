@@ -90,10 +90,10 @@ export function useTopology(): TmuxSnapshot {
 // state unrepresentable at the call boundary.
 //
 // [LAW:single-enforcer] One stream per (pane, mount); the prior stream is
-// disposed before a fresh one is constructed. The attached session is NOT this
-// hook's to drive — tmux delivers %output only for the attached session, so the
-// renderer sends that intent to main (the lone owner across reconnects) and
-// constructs the stream; it never issues switch-client itself.
+// disposed before a fresh one is constructed. The attached session is not this
+// hook's concern — the main-process control connection runs a mesh of one
+// client per observed session, so %output for every session is live regardless
+// of which pane the UI is showing.
 //
 // [LAW:types-are-the-program] The stream is created in an effect, so the `stream`
 // state lags the render that changed `paneId` by one tick. Pairing the stream
@@ -103,23 +103,10 @@ export function useTopology(): TmuxSnapshot {
 // during a fast switch. The matched-pane gate makes that mismatch unrepresentable.
 export function usePaneStream(pane: TmuxPane | null): PaneStream | null {
   const paneId = pane?.id ?? null;
-  const sessionId = pane?.sessionId ?? null;
   const [active, setActive] = useState<{
     paneId: PaneId;
     stream: PaneStream;
   } | null>(null);
-
-  // [LAW:dataflow-not-control-flow] The watch intent's only input is the
-  // session, so it fires only when the session changes — switching panes within
-  // one session never re-issues switch-client. The rejection is handled
-  // deliberately (not swallowed): main owns attach-failure recovery via reconnect
-  // and the control-state broadcast, so the renderer's sole duty is to keep a
-  // rejected intent from becoming an unhandled promise rejection.
-  useEffect(() => {
-    window.electronAPI
-      .invoke("tmux:watch-session", sessionId)
-      .catch((err) => console.error("tmux:watch-session rejected", err));
-  }, [sessionId]);
 
   useEffect(() => {
     if (paneId === null) {

@@ -15,7 +15,7 @@
 //   - WebContents destroyed during subscription cleans up.
 //   - Connection-state transitions broadcast disconnected / re-capture.
 
-import { describe, expect, it, vi } from "vitest";
+import { describe, expect, it } from "vitest";
 import type { TmuxEventMap } from "tmux-control-mode-js";
 import type { CommandResponse } from "tmux-control-mode-js/protocol";
 import type { ConnectionStateEvent } from "./control";
@@ -70,10 +70,7 @@ interface Harness {
   ) => void;
   client: {
     executeCalls: string[];
-    setPaneActionCalls: [number, string][];
-    setPaneActionError: Error | null;
     execute(command: string): Promise<CommandResponse>;
-    setPaneAction(paneId: number, action: string): Promise<CommandResponse>;
   };
   setCaptureOutput: (lines: string[]) => void;
   makeWc: () => FakeWebContents;
@@ -86,24 +83,12 @@ function makeHarness(): Harness {
 
   const client = {
     executeCalls: [] as string[],
-    setPaneActionCalls: [] as [number, string][],
-    setPaneActionError: null as Error | null,
     async execute(command: string): Promise<CommandResponse> {
       client.executeCalls.push(command);
       return {
         commandNumber: client.executeCalls.length,
         timestamp: 0,
         output: state.captureOutput,
-        success: true,
-      };
-    },
-    async setPaneAction(paneId: number, action: string): Promise<CommandResponse> {
-      client.setPaneActionCalls.push([paneId, action]);
-      if (client.setPaneActionError !== null) throw client.setPaneActionError;
-      return {
-        commandNumber: 0,
-        timestamp: 0,
-        output: [],
         success: true,
       };
     },
@@ -245,7 +230,7 @@ describe("TmuxOutputRouter", () => {
     expect((wc.sent[0].payload as { data: string }).data).toBe("extended data");
   });
 
-  it("auto-resumes and sends paused state on pause event", async () => {
+  it("projects paused state on pause event (auto-resume is the connection's job)", async () => {
     const h = makeHarness();
     h.fireConnState({ status: "ready", reconnectAttempts: 0 });
     h.setCaptureOutput([]);
@@ -256,38 +241,10 @@ describe("TmuxOutputRouter", () => {
 
     h.fireEvent("pause", { type: "pause", paneId: 3 });
 
-    // State marker sent.
+    // State marker is what the router contributes — the brief flash users see.
     const states = wc.sent.filter((s) => s.channel === "tmux:output:state");
     expect(states).toHaveLength(1);
     expect((states[0].payload as { state: string }).state).toBe("paused");
-
-    // Auto-resume command issued.
-    expect(h.client.setPaneActionCalls).toHaveLength(1);
-    expect(h.client.setPaneActionCalls[0]).toEqual([3, "continue"]);
-  });
-
-  it("logs an error when auto-resume rejects", async () => {
-    const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
-    h.setCaptureOutput([]);
-    const wc = h.makeWc();
-    h.router.subscribe("%7" as PaneId, wc as unknown as WebContentsLike);
-    await flush();
-    wc.sent.length = 0;
-
-    h.client.setPaneActionError = new Error("pane gone");
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
-
-    h.fireEvent("pause", { type: "pause", paneId: 7 });
-    await flush();
-
-    expect(errSpy).toHaveBeenCalledTimes(1);
-    const [msg, err] = errSpy.mock.calls[0];
-    expect(String(msg)).toContain("auto-resume failed");
-    expect(String(msg)).toContain("%7");
-    expect((err as Error).message).toBe("pane gone");
-
-    errSpy.mockRestore();
   });
 
   it("sends streaming state on continue event", async () => {

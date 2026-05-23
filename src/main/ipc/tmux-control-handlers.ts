@@ -13,22 +13,12 @@ import type {
   ConnectionStateEvent,
   TmuxControlConnection,
 } from "../tmux/control";
-import type { SessionId } from "../../shared/types";
 
 export function registerTmuxControlHandlers(
   connection: TmuxControlConnection,
 ): () => void {
   ipcMain.handle("tmux:control-state:get", (): ConnectionStateEvent =>
     connection.getState(),
-  );
-
-  // [LAW:single-enforcer] Renderer intent ("watch this pane's session") reaches
-  // the connection's lone attached-session writer here. The renderer never
-  // drives switch-client directly — main owns the attachment across reconnects.
-  ipcMain.handle(
-    "tmux:watch-session",
-    (_e, sessionId: SessionId | null): Promise<void> =>
-      connection.watchSession(sessionId),
   );
 
   const off = connection.onConnectionState((event) => {
@@ -40,7 +30,6 @@ export function registerTmuxControlHandlers(
 
   return () => {
     ipcMain.removeHandler("tmux:control-state:get");
-    ipcMain.removeHandler("tmux:watch-session");
     off();
   };
 }

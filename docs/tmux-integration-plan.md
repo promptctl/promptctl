@@ -50,18 +50,40 @@ them; nothing else owns mutable state.
 
 ### 2.1 `TmuxControlConnection` (singleton)
 
-One `TmuxClient` per tmux server, configured `pause-after=2` on connect.
+A mesh of `TmuxClient` instances per tmux server — one **primary** attached
+to the promptctl-owned session, plus one **follower** per *observed* foreign
+session. Every client is configured `pause-after=2` and auto-resumes its
+own paused panes internally. `%output` arrives only from the session each
+client is attached to (tmux behavior — verified empirically), so coverage
+across sessions is what gates multi-session live output and output-pattern
+matching.
 
 ```
-spawnTmux([])  →  TmuxClient
-                    │
-                    ├── on("output")  → pane bytes (Uint8Array)
-                    ├── on("subscription-changed") → format-driven state
-                    ├── on("window-add"/"window-close"/...) → topology
-                    └── on("exit") → reconnect or surface failure
+                       TmuxControlConnection
+                       │
+   spawnTmux(t=<owned>) ├──→ primary  TmuxClient  ── %output / topology
+                       │
+   spawnTmux(t=$5)    ──┤──→ follower TmuxClient  ── %output (session $5)
+   spawnTmux(t=$8)    ──┤──→ follower TmuxClient  ── %output (session $8)
+                       …
 ```
 
-Subscriptions registered at startup:
+`on(event, handler)` classifies per event type:
+
+- **Session-scoped** (`output`, `extended-output`, `pause`, `continue`) —
+  attached to *every* client; events fan in from each follower's attached
+  session.
+- **Server-scoped** (topology events, `subscription-changed`, lifecycle) —
+  attached to *primary only* so consumers see each event exactly once.
+
+The follower set is a projection of the topology snapshot: `main.ts` wires
+`topology.onSnapshot → conn.observeSessions(<session ids from panes>)`,
+making "which sessions are observed" data on every snapshot rather than an
+imperative `switch-client` call. Sessions appearing in the snapshot spawn
+followers; sessions disappearing tear them down. A follower whose transport
+drops unexpectedly is removed from the map; the next snapshot respawns it.
+
+Subscriptions registered at startup (on the primary only):
 
 | Name              | What  | Format                                               | Drives               |
 |-------------------|-------|------------------------------------------------------|----------------------|

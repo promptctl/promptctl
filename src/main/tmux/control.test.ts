@@ -4,6 +4,13 @@
 // that lets the test drive both directions of the protocol — outbound
 // commands captured for assertion, inbound %begin/%end framing scripted
 // to resolve the library's pending-promise machinery deterministically.
+//
+// The connection's mesh shape (one client per observed session) means tests
+// often spawn multiple transports keyed by target. `FakeTransportRegistry`
+// below is the test-side companion to the factory's `(target) => transport`
+// signature — it builds the next transport on demand for any target the
+// connection requests, so test setup describes *what sessions are observed*
+// rather than juggling transport pools manually.
 
 import { afterEach, describe, expect, it } from "vitest";
 import {
@@ -50,112 +57,101 @@ class FakeTransport implements TmuxTransport {
   }
 }
 
+// [LAW:single-enforcer] FIFO queue of transports built per target. Each
+// `waitFor(target)` call consumes one entry — the *next* transport the
+// connection spawns for that target, not whichever one is currently latest.
+// That makes reconnect tests describable as a sequence of "now expect a
+// fresh transport" calls without bookkeeping local variables that race
+// against the underlying spawn.
+class FakeTransportRegistry {
+  private readonly available = new Map<string, FakeTransport[]>();
+  private readonly waiters = new Map<string, ((t: FakeTransport) => void)[]>();
+  // Cumulative count of builds per target — used by tests to assert a
+  // session was NOT respawned (e.g. idempotent observeSessions).
+  readonly buildCounts = new Map<string, number>();
+
+  // Called by the connection (via factory) — returns a fresh transport so
+  // reconnects get a new instance per attempt.
+  build(target: string): FakeTransport {
+    this.buildCounts.set(target, (this.buildCounts.get(target) ?? 0) + 1);
+    const fresh = new FakeTransport();
+    const w = this.waiters.get(target);
+    if (w !== undefined && w.length > 0) {
+      const resolve = w.shift();
+      if (w.length === 0) this.waiters.delete(target);
+      resolve?.(fresh);
+      return fresh;
+    }
+    const queue = this.available.get(target) ?? [];
+    queue.push(fresh);
+    this.available.set(target, queue);
+    return fresh;
+  }
+
+  // Consume the next transport built for `target`, waiting for it to appear
+  // if necessary. Each call returns a distinct transport — calling twice
+  // pairs naturally with reconnect ("initial, then after-drop").
+  waitFor(target: string, timeoutMs = 500): Promise<FakeTransport> {
+    const queue = this.available.get(target);
+    if (queue !== undefined && queue.length > 0) {
+      const t = queue.shift();
+      if (queue.length === 0) this.available.delete(target);
+      if (t !== undefined) return Promise.resolve(t);
+    }
+    return new Promise<FakeTransport>((resolve, reject) => {
+      const timer = setTimeout(() => {
+        const w = this.waiters.get(target);
+        if (w !== undefined) {
+          const idx = w.indexOf(wrapped);
+          if (idx >= 0) w.splice(idx, 1);
+        }
+        reject(new Error(`waitFor(${target}) timed out after ${timeoutMs}ms`));
+      }, timeoutMs);
+      const wrapped = (t: FakeTransport): void => {
+        clearTimeout(timer);
+        resolve(t);
+      };
+      const list = this.waiters.get(target) ?? [];
+      list.push(wrapped);
+      this.waiters.set(target, list);
+    });
+  }
+}
+
 afterEach(() => {
   TmuxControlConnection.__resetForTesting();
 });
 
 describe("TmuxControlConnection", () => {
-  it("enters ready after server probe + setFlags + attach resolve", async () => {
-    const transport = new FakeTransport();
+  it("enters ready after server probe + setFlags resolve (attach is via argv)", async () => {
+    const registry = new FakeTransportRegistry();
     const states: ConnectionStateEvent[] = [];
 
     const conn = TmuxControlConnection.start({
-      transportFactory: () => transport,
+      transportFactory: (target) => registry.build(target),
       sessionName: "promptctl-test",
       bootstrap: async () => undefined,
       reconnectDelayMs: 50,
     });
     conn.onConnectionState((ev) => states.push(ev));
 
-    await waitFor(() => transport.sent.length > 0);
-    expect(transport.sent[0]).toBe("refresh-client -f pause-after=2\n");
+    const primary = await registry.waitFor("promptctl-test");
+    await waitFor(() => primary.sent.length > 0);
+    expect(primary.sent[0]).toBe("refresh-client -f pause-after=2\n");
 
-    transport.ack(1);
-    // applyWatchedSession attaches the client to the owned session after
-    // setFlags; readiness waits on this so the attachment is established first.
-    await waitFor(() => transport.sent.length > 1);
-    expect(transport.sent[1]).toBe("switch-client -t 'promptctl-test'\n");
-
-    transport.ack(2);
+    primary.ack(1);
     await conn.ready;
 
     expect(conn.getState().status).toBe("ready");
     expect(states.map((s) => s.status)).toContain("ready");
-  });
-
-  it("watchSession switches the live client to the requested session", async () => {
-    const transport = new FakeTransport();
-    const conn = TmuxControlConnection.start({
-      transportFactory: () => transport,
-      sessionName: "promptctl-test",
-      bootstrap: async () => undefined,
-      reconnectDelayMs: 50,
-    });
-
-    await waitFor(() => transport.sent.length > 0);
-    transport.ack(1); // setFlags
-    await waitFor(() => transport.sent.length > 1);
-    transport.ack(2); // initial attach to the owned session
-    await conn.ready;
-
-    const before = transport.sent.length;
-    const watching = conn.watchSession("$3" as SessionId);
-    await waitFor(() => transport.sent.length > before);
-    expect(transport.sent[before]).toBe("switch-client -t '$3'\n");
-    transport.ack(3);
-    await watching;
-  });
-
-  it("re-applies the watched session after a reconnect", async () => {
-    const t1 = new FakeTransport();
-    const t2 = new FakeTransport();
-    const transports = [t1, t2];
-
-    const conn = TmuxControlConnection.start({
-      transportFactory: () => {
-        const next = transports.shift();
-        if (!next) throw new Error("test exhausted transport pool");
-        return next;
-      },
-      sessionName: "promptctl-test",
-      bootstrap: async () => undefined,
-      reconnectDelayMs: 10,
-    });
-
-    await waitFor(() => t1.sent.length > 0);
-    t1.ack(1);
-    await waitFor(() => t1.sent.length > 1);
-    t1.ack(2);
-    await conn.ready;
-
-    const watching = conn.watchSession("$5" as SessionId);
-    await waitFor(() => t1.sent.length > 2);
-    t1.ack(3);
-    await watching;
-
-    t1.externalDrop();
-
-    await waitFor(() => t2.sent.length > 0, 1000);
-    t2.ack(1); // setFlags on the fresh client
-    // The new client must re-attach to the WATCHED session, not the owned one —
-    // the renderer never sees the drop, so only the connection can restore it.
-    await waitFor(() => t2.sent.length > 1, 1000);
-    expect(t2.sent[1]).toBe("switch-client -t '$5'\n");
-    t2.ack(2);
-    await waitFor(() => conn.getState().status === "ready");
+    // No switch-client — primary's attach-session is in the argv.
+    expect(primary.sent.length).toBe(1);
   });
 
   it("re-registers subscriptions on reconnect", async () => {
-    const t1 = new FakeTransport();
-    const t2 = new FakeTransport();
-    const transports = [t1, t2];
-
+    const registry = new FakeTransportRegistry();
     const conn = TmuxControlConnection.start({
-      transportFactory: () => {
-        const next = transports.shift();
-        if (!next) throw new Error("test exhausted transport pool");
-        return next;
-      },
+      transportFactory: (target) => registry.build(target),
       sessionName: "promptctl-test",
       bootstrap: async () => undefined,
       reconnectDelayMs: 10,
@@ -164,10 +160,9 @@ describe("TmuxControlConnection", () => {
     const events: number[] = [];
     conn.on("window-add", (ev) => events.push(ev.windowId));
 
+    const t1 = await registry.waitFor("promptctl-test");
     await waitFor(() => t1.sent.length > 0);
     t1.ack(1);
-    await waitFor(() => t1.sent.length > 1);
-    t1.ack(2);
     await conn.ready;
 
     t1.feed("%window-add @42\n");
@@ -175,10 +170,9 @@ describe("TmuxControlConnection", () => {
 
     t1.externalDrop();
 
+    const t2 = await registry.waitFor("promptctl-test", 1000);
     await waitFor(() => t2.sent.length > 0, 1000);
     t2.ack(1);
-    await waitFor(() => t2.sent.length > 1, 1000);
-    t2.ack(2);
     await waitFor(() => conn.getState().status === "ready");
 
     t2.feed("%window-add @99\n");
@@ -187,10 +181,10 @@ describe("TmuxControlConnection", () => {
 
   it("schedules reconnect when bootstrap fails on the first attempt", async () => {
     let bootstraps = 0;
-    const transport = new FakeTransport();
+    const registry = new FakeTransportRegistry();
     const conn = TmuxControlConnection.start({
       sessionName: "promptctl-test",
-      transportFactory: () => transport,
+      transportFactory: (target) => registry.build(target),
       bootstrap: async () => {
         bootstraps += 1;
         if (bootstraps < 2) throw new Error("no tmux");
@@ -199,12 +193,11 @@ describe("TmuxControlConnection", () => {
     });
 
     await waitFor(() => bootstraps >= 2, 1000);
+    const transport = await registry.waitFor("promptctl-test", 1000);
     await waitFor(() => transport.sent.length > 0, 1000);
     expect(conn.getState().status).toBe("connecting");
 
     transport.ack(1);
-    await waitFor(() => transport.sent.length > 1, 1000);
-    transport.ack(2);
     await conn.ready;
     expect(conn.getState().status).toBe("ready");
   });
@@ -229,16 +222,9 @@ describe("TmuxControlConnection", () => {
   });
 
   it("unsubscribe removes the listener from re-registration set", async () => {
-    const t1 = new FakeTransport();
-    const t2 = new FakeTransport();
-    const transports = [t1, t2];
-
+    const registry = new FakeTransportRegistry();
     const conn = TmuxControlConnection.start({
-      transportFactory: () => {
-        const next = transports.shift();
-        if (!next) throw new Error("test exhausted transport pool");
-        return next;
-      },
+      transportFactory: (target) => registry.build(target),
       sessionName: "promptctl-test",
       bootstrap: async () => undefined,
       reconnectDelayMs: 10,
@@ -247,23 +233,254 @@ describe("TmuxControlConnection", () => {
     const seen: number[] = [];
     const off = conn.on("window-add", (ev) => seen.push(ev.windowId));
 
+    const t1 = await registry.waitFor("promptctl-test");
     await waitFor(() => t1.sent.length > 0);
     t1.ack(1);
-    await waitFor(() => t1.sent.length > 1);
-    t1.ack(2);
     await conn.ready;
 
     off();
     t1.externalDrop();
 
+    const t2 = await registry.waitFor("promptctl-test", 1000);
     await waitFor(() => t2.sent.length > 0, 1000);
     t2.ack(1);
-    await waitFor(() => t2.sent.length > 1, 1000);
-    t2.ack(2);
     await waitFor(() => conn.getState().status === "ready");
 
     t2.feed("%window-add @7\n");
     expect(seen).toEqual([]);
+  });
+
+  describe("observeSessions (follower mesh)", () => {
+    it("spawns a follower per observed session attached by id", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      conn.observeSessions(
+        new Set<SessionId>(["$3", "$5"] as SessionId[]),
+      );
+
+      const follower3 = await registry.waitFor("$3");
+      const follower5 = await registry.waitFor("$5");
+
+      // Each follower's first outbound command is setFlags pause-after=2 —
+      // the spawn is otherwise self-driven (attach is via argv).
+      await waitFor(() => follower3.sent.length > 0);
+      await waitFor(() => follower5.sent.length > 0);
+      expect(follower3.sent[0]).toBe("refresh-client -f pause-after=2\n");
+      expect(follower5.sent[0]).toBe("refresh-client -f pause-after=2\n");
+    });
+
+    it("is idempotent — same set of observations does not respawn", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      const target = new Set<SessionId>(["$7"] as SessionId[]);
+      conn.observeSessions(target);
+      const follower7a = await registry.waitFor("$7");
+      await waitFor(() => follower7a.sent.length > 0);
+      follower7a.ack(1);
+
+      // Same set again — no new transport built.
+      conn.observeSessions(target);
+      await delay(20);
+      expect(registry.buildCounts.get("$7")).toBe(1);
+    });
+
+    it("tears down a follower when its session leaves the observation set", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      conn.observeSessions(new Set<SessionId>(["$9"] as SessionId[]));
+      const follower = await registry.waitFor("$9");
+      await waitFor(() => follower.sent.length > 0);
+      follower.ack(1);
+      expect(follower.closed).toBe(false);
+
+      // Empty observation set — the follower must close.
+      conn.observeSessions(new Set<SessionId>());
+      await waitFor(() => follower.closed === true, 500);
+    });
+
+    it("fans session-scoped events from followers to registered handlers", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      const seen: number[] = [];
+      conn.on("output", (ev) => seen.push(ev.paneId));
+
+      conn.observeSessions(new Set<SessionId>(["$11"] as SessionId[]));
+      const follower = await registry.waitFor("$11");
+      await waitFor(() => follower.sent.length > 0);
+      follower.ack(1);
+
+      // %output from the follower for a pane in its session must reach the handler.
+      follower.feed("%output %42 hello\n");
+      expect(seen).toEqual([42]);
+
+      // %output from primary for a pane in the owned session also reaches it.
+      primary.feed("%output %7 world\n");
+      expect(seen).toEqual([42, 7]);
+    });
+
+    it("does NOT fan server-scoped events from followers (only primary emits)", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      const seen: number[] = [];
+      conn.on("window-add", (ev) => seen.push(ev.windowId));
+
+      conn.observeSessions(new Set<SessionId>(["$13"] as SessionId[]));
+      const follower = await registry.waitFor("$13");
+      await waitFor(() => follower.sent.length > 0);
+      follower.ack(1);
+
+      // Follower emits a topology event — it must NOT reach the handler
+      // (followers are session-scoped only; topology comes from primary).
+      follower.feed("%window-add @100\n");
+      expect(seen).toEqual([]);
+
+      // Primary's event reaches the handler exactly once.
+      primary.feed("%window-add @101\n");
+      expect(seen).toEqual([101]);
+    });
+
+    it("auto-resumes a follower's paused pane via set-pane-action continue", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      conn.observeSessions(new Set<SessionId>(["$15"] as SessionId[]));
+      const follower = await registry.waitFor("$15");
+      await waitFor(() => follower.sent.length > 0);
+      follower.ack(1); // setFlags ack
+
+      const beforePause = follower.sent.length;
+      follower.feed("%pause %88\n");
+
+      // Auto-resume: a set-pane-action continue should be sent on the
+      // SAME follower client, not on primary.
+      await waitFor(() => follower.sent.length > beforePause, 500);
+      expect(follower.sent[beforePause]).toContain("88");
+      expect(follower.sent[beforePause]).toContain("continue");
+    });
+
+    it("attaches listeners registered before observe to subsequently-spawned followers", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      const seen: number[] = [];
+      // Register handler BEFORE observing any foreign session — the spawn
+      // path must replay listeners onto the new follower.
+      conn.on("output", (ev) => seen.push(ev.paneId));
+
+      conn.observeSessions(new Set<SessionId>(["$17"] as SessionId[]));
+      const follower = await registry.waitFor("$17");
+      await waitFor(() => follower.sent.length > 0);
+      follower.ack(1);
+
+      follower.feed("%output %33 late\n");
+      expect(seen).toEqual([33]);
+    });
+
+    it("close() tears down primary and every follower", async () => {
+      const registry = new FakeTransportRegistry();
+      const conn = TmuxControlConnection.start({
+        transportFactory: (target) => registry.build(target),
+        sessionName: "promptctl-test",
+        bootstrap: async () => undefined,
+        reconnectDelayMs: 50,
+      });
+
+      const primary = await registry.waitFor("promptctl-test");
+      await waitFor(() => primary.sent.length > 0);
+      primary.ack(1);
+      await conn.ready;
+
+      conn.observeSessions(
+        new Set<SessionId>(["$19", "$21"] as SessionId[]),
+      );
+      const f1 = await registry.waitFor("$19");
+      const f2 = await registry.waitFor("$21");
+      await waitFor(() => f1.sent.length > 0);
+      await waitFor(() => f2.sent.length > 0);
+      f1.ack(1);
+      f2.ack(1);
+
+      conn.close();
+
+      expect(primary.closed).toBe(true);
+      expect(f1.closed).toBe(true);
+      expect(f2.closed).toBe(true);
+    });
   });
 });
 

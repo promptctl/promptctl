@@ -15,7 +15,6 @@
 
 import type { TmuxEventMap } from "tmux-control-mode-js";
 import type { CommandResponse } from "tmux-control-mode-js/protocol";
-import { PaneAction } from "tmux-control-mode-js/protocol";
 import type { ConnectionStateEvent } from "./control";
 import type { PaneId } from "../../shared/types";
 
@@ -28,7 +27,6 @@ export interface WebContentsLike {
 
 export interface OutputRouterClient {
   execute(command: string): Promise<CommandResponse>;
-  setPaneAction(paneId: number, action: PaneAction): Promise<CommandResponse>;
 }
 
 export interface OutputRouterDeps {
@@ -119,20 +117,12 @@ export class TmuxOutputRouter {
     });
   }
 
+  // [LAW:single-enforcer] Auto-resume lives on the connection so the right
+  // client (whichever one emitted the pause) handles its own backpressure.
+  // Here we only project the transient state to renderer subscribers.
   private handlePause = (msg: { paneId: number }): void => {
     const paneId = `%${msg.paneId}` as PaneId;
     this.sendState(paneId, "paused");
-    // Auto-resume: the debug surface doesn't need backpressure.
-    // pause-after=2 requires a continue command to resume output.
-    const client = this.deps.getClient();
-    if (client !== null) {
-      void client.setPaneAction(msg.paneId, PaneAction.Continue).catch((err) => {
-        console.error(
-          `[output-router] auto-resume failed for pane %${msg.paneId}:`,
-          err,
-        );
-      });
-    }
   };
 
   private handleContinue = (msg: { paneId: number }): void => {
