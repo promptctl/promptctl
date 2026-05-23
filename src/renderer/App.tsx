@@ -176,15 +176,25 @@ export function App() {
     const unsubProxy = initProxySubscription();
     let unsubCommand: (() => void) | undefined;
     let unsubLaunch: (() => void) | undefined;
+    // [LAW:no-silent-fallbacks] If the App unmounts before either
+    // async init resolves, the cleanup runs without the eventual
+    // unsubscribe handle. Without this flag, the late-arriving handle
+    // would land in a closed-over variable and never be called,
+    // leaking the IPC subscription. The flag closes the race: any
+    // unsub that resolves after dispose is invoked immediately.
+    let disposed = false;
 
     initCommandSubscription().then((unsub) => {
-      unsubCommand = unsub;
+      if (disposed) unsub();
+      else unsubCommand = unsub;
     });
     initLaunchSubscription().then((unsub) => {
-      unsubLaunch = unsub;
+      if (disposed) unsub();
+      else unsubLaunch = unsub;
     });
 
     return () => {
+      disposed = true;
       unsubProxy();
       unsubCommand?.();
       unsubLaunch?.();

@@ -4,6 +4,7 @@
 // "is this an Anthropic call" branch. Provider-aware logic (when added) will
 // dispatch off URL via a registry, not inline branches here.
 import http from "node:http";
+import type net from "node:net";
 import { URL } from "node:url";
 
 import type {
@@ -16,9 +17,8 @@ import type {
 import type { Launch, LaunchId } from "../../shared/types";
 import { ResponseAssembler } from "./assembler";
 import {
-  clientInfoFromLaunch,
-  readLaunchHeader,
   resolveClientId,
+  resolveRequestClient,
 } from "./client-identity";
 import { makeEnvelope, newRequestId } from "./envelope";
 import { proxyEventBus } from "./events";
@@ -136,12 +136,13 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
       }
     }),
   );
-  // Per-connection ClientInfo cache lives in the socket's symbol slot.
-  // The first request on a socket resolves identity (header-first;
-  // socket-walk fallback) and caches the result; subsequent requests
-  // on the same keep-alive connection reuse it. The header is stable
-  // across a connection's lifetime — the launching tool sets the
-  // ANTHROPIC_CUSTOM_HEADERS env once.
+  // Per-socket cache for the *fallback* ClientInfo (the socket→pid
+  // walk result). Identity itself is resolved per request:
+  // resolveRequestClient reads the X-Promptctl-Launch header every
+  // time and consults the launch registry; only when the header is
+  // absent or unknown do we drop to this cached walk. That way a
+  // connection that starts untagged can be tagged by a later request,
+  // and vice versa — the header is the authority.
   // [LAW:single-enforcer] One identity-resolution site per request.
 
   await new Promise<void>((resolve, reject) => {
@@ -181,33 +182,29 @@ async function handleRequest(
   resolveLaunch: (id: LaunchId) => Launch | null,
 ): Promise<void> {
   const requestId = newRequestId();
-  // [LAW:dataflow-not-control-flow] Two inputs, one ClientInfo. The
-  // X-Promptctl-Launch header is read on EVERY request — cheap, and
-  // it's the only input that can change between requests on a keep-
-  // alive connection (a connection that starts untagged can be tagged
-  // by a later request, or vice versa). Only the expensive socket→pid
-  // walk gets cached on the socket; we fall through to it when the
-  // header is absent or doesn't match a known launch.
+  // [LAW:single-enforcer] resolveRequestClient owns the header-or-
+  // fallback decision; we inject a cached fallback closure so the
+  // expensive socket→pid walk runs at most once per connection. The
+  // header path doesn't touch the cache — when it wins, the cache
+  // stays untouched and a header-less follow-up request still gets
+  // resolved correctly.
   //
   // `lastSeenNs` refreshes per request so the Live tab's active-client
   // signal tracks the current request, not the connection's first.
   const socket = req.socket as ClientSocket;
-  const header = readLaunchHeader(req);
-  let resolved: ClientInfo | null = null;
-  if (header !== null) {
-    const launch = resolveLaunch(header);
-    if (launch !== null) {
-      resolved = clientInfoFromLaunch(launch);
-    }
-  }
-  if (resolved === null) {
-    const cached = socket[CLIENT_INFO];
-    resolved = await (cached ?? (() => {
-      const promise = resolveClientId(req.socket);
-      socket[CLIENT_INFO] = promise;
-      return promise;
-    })());
-  }
+  const cachedFallback = (sock: net.Socket): Promise<ClientInfo> => {
+    const existing = socket[CLIENT_INFO];
+    if (existing) return existing;
+    const promise = resolveClientId(sock);
+    socket[CLIENT_INFO] = promise;
+    return promise;
+  };
+  const resolved = await resolveRequestClient(
+    req,
+    req.socket,
+    resolveLaunch,
+    cachedFallback,
+  );
   const clientInfo: ClientInfo = {
     ...resolved,
     lastSeenNs: Number(process.hrtime.bigint()),
