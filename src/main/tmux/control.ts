@@ -1012,15 +1012,33 @@ function aggregateMeshResponses(
 // (the mesh is alive but no traffic is observable to consumers) — this is
 // the closest semantic the library exposes; the richer promptctl status is
 // available via onConnectionState().
+//
+// The library's `closed` reason is a 3-value union (exit | transport-error
+// | disposed). Map our richer `statusReason` string onto the union so the
+// bridge consumer can distinguish explicit-close (disposed) from a fatal
+// underlying failure (transport-error). The full reason string remains
+// available to promptctl-aware consumers via onConnectionState().
 function projectConnectionState(
   status: ConnectionStatus,
   reason: string | undefined,
 ): ConnectionState {
   if (status === "ready") return { status: "ready" };
   if (status === "closed") {
-    return { status: "closed", reason: "disposed" };
+    return { status: "closed", reason: mapCloseReason(reason) };
   }
   // connecting | no-sessions — surface as "connecting" with no traffic yet.
-  void reason;
   return { status: "connecting" };
+}
+
+// [LAW:dataflow-not-control-flow] The mapping is data: our internal close
+// reasons are a small set of well-known strings emitted from the two
+// closing paths (explicit close() and fatal enumerate failure). Each maps
+// to the library's nearest semantic. Unknown reasons default to
+// transport-error, the broadest "something went wrong externally" bucket.
+function mapCloseReason(
+  reason: string | undefined,
+): "exit" | "transport-error" | "disposed" {
+  if (reason === undefined) return "disposed";
+  if (reason === "explicit close") return "disposed";
+  return "transport-error";
 }
