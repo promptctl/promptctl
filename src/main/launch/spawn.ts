@@ -1,13 +1,25 @@
 // [LAW:single-enforcer] Sole site that creates a tagged launch. The spawn
 // flow assembles the env block (which embeds the launchId), runs
 // `new-session` through the control connection, registers the launch row,
-// and waits for the pane-cmd subscription to confirm the tool started.
-// No other code path constructs a launch — that's the registry's invariant.
+// and markRunning the moment tmux acknowledges the session. No other code
+// path constructs a launch — that's the registry's invariant.
 //
-// [LAW:dataflow-not-control-flow] One sequence every time: build env →
-// run new-session → resolve pane → register → wait for confirmation →
-// markRunning OR markExited. Variability lives in the spec (toolKind,
-// cwd, sessionName), never in branches that choose which steps to run.
+// [LAW:dataflow-not-control-flow] One fixed sequence every spawn: build
+// env → run new-session → resolve pane → register → markRunning. There
+// is no "did the tool appear yet" branch. The launch's running-ness is
+// derived from tmux's new-session ack; exit detection lives entirely in
+// the correlator (pane vanish / window-close).
+//
+// [LAW:types-are-the-program] The previous shape gated `pending → running`
+// on `pane.toolKind === expected`, a name-match predicate that is FALSE
+// under tmux default-shell wrapping (pane_current_command reports the
+// wrapping shell or wrapper-script interpreter, not the launched binary).
+// Empirically pane_pid does not transition either — under a wrapper that
+// forks its child, pane_pid stays at the wrapper's pid for the wrapper's
+// whole life. The strongest *true* theorem about "the launch is running"
+// is "new-session succeeded and tmux assigned a pane"; everything else
+// was inference over a signal we cannot trust uniformly across tmux
+// configurations. The body shrinks because the type carries less fiction.
 
 import { tmuxEscape } from "tmux-control-mode-js/protocol";
 import type { CommandResponse } from "tmux-control-mode-js/protocol";
@@ -18,7 +30,6 @@ import type {
   PaneId,
   SessionId,
   ToolLaunchKind,
-  TmuxSnapshot,
   WindowId,
 } from "../../shared/types";
 import { launchEnvBlock } from "./registry";
@@ -34,13 +45,6 @@ export const DEFAULT_TOOL_BINARIES: Record<ToolLaunchKind, string> = {
   gemini: "gemini",
 };
 
-// Topology dependency narrowed to the two methods we touch — keeps the
-// unit tests from needing to mock the full tracker.
-export interface SpawnTopology {
-  snapshot(): TmuxSnapshot;
-  onSnapshot(listener: (snapshot: TmuxSnapshot) => void): () => void;
-}
-
 // [LAW:locality-or-seam] The spawn flow consumes tmux through one method:
 // execute(). The connection's mesh routes the request to any ready client
 // and rejects loudly when the mesh is empty (no-sessions). No "is the
@@ -48,7 +52,6 @@ export interface SpawnTopology {
 // error handling, not in this module's control flow.
 export interface SpawnDeps {
   readonly registry: LaunchRegistry;
-  readonly topology: SpawnTopology;
   // Run a tmux command. Rejects when the mesh is empty (no sessions
   // observed yet) — the caller surfaces that as a user-visible "try again
   // in a moment" message.
@@ -57,8 +60,6 @@ export interface SpawnDeps {
   // tool at the loopback proxy. Resolved at call time so a proxy restart
   // (changed port) doesn't strand pre-baked env blocks.
   readonly getProxyPort: () => number;
-  // Caps the wait for the tool to appear in pane-cmd. Default 5s.
-  readonly toolStartTimeoutMs?: number;
   // Test seam for the launchId. Default crypto.randomUUID().
   readonly newLaunchId?: () => LaunchId;
   // Test seam for the toolKind → binary mapping. Default
@@ -67,8 +68,6 @@ export interface SpawnDeps {
   // never sets it.
   readonly toolBinaries?: Record<ToolLaunchKind, string>;
 }
-
-const DEFAULT_TIMEOUT_MS = 5000;
 
 export async function spawnLaunch(
   deps: SpawnDeps,
@@ -143,8 +142,6 @@ export async function spawnLaunch(
   const sessionId = sessionRaw as SessionId;
   const windowId = windowRaw as WindowId;
 
-  // Register the row now so consumers (Live, future subscriptions) can
-  // see it even before the tool is confirmed to have started.
   const pending = deps.registry.create({
     launchId,
     spec,
@@ -154,25 +151,13 @@ export async function spawnLaunch(
     env,
   });
 
-  // [LAW:dataflow-not-control-flow] Confirmation arrives as a data flip on
-  // the pane's currentCommand (matched against toolKind). The waiter
-  // resolves the moment a snapshot shows the match, or times out — same
-  // code path for every spawn.
-  const confirmed = await waitForToolInPane(
-    deps.topology,
-    paneId,
-    spec.toolKind,
-    deps.toolStartTimeoutMs ?? DEFAULT_TIMEOUT_MS,
-  );
-  if (!confirmed) {
-    deps.registry.markExited(pending.launchId, "tool failed to start");
-    throw new Error(
-      `Tool ${binary} did not start in "${spec.sessionName}" within ${
-        deps.toolStartTimeoutMs ?? DEFAULT_TIMEOUT_MS
-      }ms`,
-    );
-  }
-
+  // [LAW:dataflow-not-control-flow] new-session's success IS the running
+  // signal. Trying to derive "running" from a downstream observation
+  // (pane_current_command, pane_pid) is what the prior shape did, and it
+  // was wrong under every shell-wrap configuration we observed. The
+  // correlator owns exit detection (pane-gone, window-close), so the
+  // worst case here — the binary fails immediately — surfaces as a
+  // transient running row that the next correlator pass marks exited.
   const running = deps.registry.markRunning(pending.launchId);
   if (running === null) {
     // The row vanished between create and markRunning — only possible
@@ -239,65 +224,4 @@ export function composeShellCommand(
 // + escape + reopen with the `'\''` idiom.
 export function shellSingleQuote(value: string): string {
   return `'${value.replace(/'/g, "'\\''")}'`;
-}
-
-// Exported for unit testing.
-//
-// NOTE [LAW:locality-or-seam]: This predicate compares pane.toolKind
-// (derived from `pane_current_command` via detectToolKind) to the
-// expected toolKind. In tmux configurations where `default-command` or
-// `default-shell` wraps shell-command in an interactive shell (e.g.
-// `/bin/zsh -l`), pane_current_command reports the wrapping shell, not
-// the launched binary — `waitForToolInPane` then times out even though
-// the binary is running as a child. The correlator's exit-detection
-// inherits the same coupling. Tracked as a follow-up; the production
-// fix likely sets `default-command ""` on launches we spawn, or
-// switches detection to a pid-change signal.
-export async function waitForToolInPane(
-  topology: SpawnTopology,
-  paneId: PaneId,
-  toolKind: ToolLaunchKind,
-  timeoutMs: number,
-): Promise<boolean> {
-  // Race: the snapshot stream against a deadline. The listener calls
-  // back synchronously with the current snapshot on attach (topology's
-  // onSnapshot contract), so a tool that already started by the time
-  // we ask is detected immediately.
-  //
-  // Subscription-leak hazard: when the sync first call settles the
-  // promise, `unsubscribe` hasn't been assigned yet — but the topology
-  // tracker still adds the listener to its set AFTER returning from
-  // the sync call. If we don't run the unsubscribe handle once it
-  // exists, the listener stays in the set forever (one leak per
-  // spawn). The `unsubAfterAttach` flag records the intent so we can
-  // honor it the moment the handle becomes available.
-  return new Promise<boolean>((resolve) => {
-    let settled = false;
-    let unsubscribe: (() => void) | null = null;
-    let unsubAfterAttach = false;
-    const stop = () => {
-      if (unsubscribe !== null) unsubscribe();
-      else unsubAfterAttach = true;
-    };
-    const timer = setTimeout(() => {
-      if (settled) return;
-      settled = true;
-      stop();
-      resolve(false);
-    }, timeoutMs);
-    unsubscribe = topology.onSnapshot((snapshot) => {
-      if (settled) return;
-      const pane = snapshot.panes.find((p) => p.id === paneId);
-      // [LAW:no-defensive-null-guards] pane absence is a real state
-      // (new-session result hasn't propagated through subscriptions yet),
-      // not a bug — we keep waiting for the next snapshot.
-      if (pane && pane.toolKind === toolKind) {
-        settled = true;
-        clearTimeout(timer);
-        stop();
-        resolve(true);
-      }
-    });
-    if (unsubAfterAttach) unsubscribe();
-  });
 }

@@ -293,7 +293,6 @@ app.whenReady().then(async () => {
   registerLaunchHandlers({
     registry: launchRegistry,
     spawn: {
-      topology: tmuxTopology,
       execute: (cmd) => tmuxControl.execute(cmd),
       // [LAW:one-source-of-truth] Proxy port comes from the proxy manager
       // at call time — settings are the canonical input but the actual

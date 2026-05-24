@@ -213,27 +213,53 @@ describe("LaunchCorrelator pid correlation", () => {
 });
 
 describe("LaunchCorrelator exit detection", () => {
-  it("marks the launch exited when the pane reverts to a shell", () => {
+  it("does NOT mark exited when pane.toolKind reads as a wrapping shell", () => {
+    // [LAW:types-are-the-program] Under tmux default-shell wrapping or
+    // wrapper-script binaries, pane_current_command reports the shell
+    // (toolKind: "unknown") even while the launched binary is alive as a
+    // child. The prior toolKind-match exit predicate phantom-killed
+    // every wrapped launch on the first snapshot. The correlator now
+    // exits only on pane-gone / window-close — both of which are
+    // observable signals tmux emits uniformly across configurations.
     const h = harness();
     const id = makeRunningLaunch(h.registry);
-    // Same pane id, but toolKind is now "unknown" — the tool quit and
-    // the shell took over the foreground.
     h.pushSnapshot([makePane({ currentCommand: "zsh", toolKind: "unknown" })]);
     const after = h.registry.get(id);
-    expect(after?.status).toBe("exited");
-    if (after?.status === "exited")
-      expect(after.exitReason).toBe("tool exited");
+    expect(after?.status).toBe("running");
     h.dispose();
   });
 
-  it("marks the launch exited when the pane vanishes from the snapshot", () => {
+  it("marks the launch exited when a previously-observed pane vanishes from the snapshot", () => {
     const h = harness();
     const id = makeRunningLaunch(h.registry);
+    // First snapshot brings the pane into view with a pid — this is the
+    // "previously observed" gate the correlator uses to distinguish
+    // "real exit" from "stale snapshot that pre-dates the launch."
+    h.pushSnapshot([makePane({ pid: 4242 })]);
     expect(h.registry.get(id)?.status).toBe("running");
     h.pushSnapshot([]); // pane disappeared
     const after = h.registry.get(id);
     expect(after?.status).toBe("exited");
     if (after?.status === "exited") expect(after.exitReason).toBe("pane gone");
+    h.dispose();
+  });
+
+  it("does NOT mark exited when an unobserved pane is absent from the snapshot", () => {
+    // [LAW:types-are-the-program] A topology refresh that started
+    // before the launch's new-session was acknowledged can broadcast
+    // after markRunning with the new pane legitimately absent. The
+    // gate (`pid === null` → skip) treats that case as "snapshot
+    // predates the launch", not as a real exit. Pid attaches happen
+    // only when a snapshot contains the pane, so `pid === null` is
+    // the precise discriminator for "never observed."
+    const h = harness();
+    const id = makeRunningLaunch(h.registry);
+    // pid is null (no prior observation). An empty snapshot must NOT
+    // mark exit — the launch's pane simply hasn't surfaced yet in any
+    // topology refresh we've received.
+    h.pushSnapshot([]);
+    const after = h.registry.get(id);
+    expect(after?.status).toBe("running");
     h.dispose();
   });
 
@@ -277,9 +303,10 @@ describe("LaunchCorrelator exit detection", () => {
     expect(afterFirst?.status).toBe("exited");
     const firstReason =
       afterFirst?.status === "exited" ? afterFirst.exitReason : null;
-    // Then a snapshot showing pane reverted. The launch is already
-    // exited; the trigger should be a no-op.
-    h.pushSnapshot([makePane({ toolKind: "unknown" })]);
+    // Then a snapshot in which the pane is gone — another real exit
+    // trigger that would mark the launch exited if it were still
+    // running. The launch is already exited; the trigger is a no-op.
+    h.pushSnapshot([]);
     const afterSecond = h.registry.get(id);
     expect(afterSecond?.status).toBe("exited");
     if (afterSecond?.status === "exited") {

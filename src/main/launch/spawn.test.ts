@@ -1,23 +1,14 @@
-// Unit tests for the spawn flow. The TmuxClient and topology tracker are
-// stubbed — real-tmux integration coverage lives in
-// spawn.integration.test.ts (slice B integration).
+// Unit tests for the spawn flow. The TmuxClient is stubbed — real-tmux
+// integration coverage lives in spawn.integration.test.ts.
 
 import { describe, expect, it, vi } from "vitest";
-import {
-  spawnLaunch,
-  composeShellCommand,
-  shellSingleQuote,
-  waitForToolInPane,
-  type SpawnTopology,
-} from "./spawn";
+import { spawnLaunch, composeShellCommand, shellSingleQuote } from "./spawn";
 import { LaunchRegistry, launchEnvBlock } from "./registry";
 import type {
   LaunchId,
   LaunchSpec,
   PaneId,
   SessionId,
-  TmuxPane,
-  TmuxSnapshot,
   ToolLaunchKind,
   WindowId,
 } from "../../shared/types";
@@ -72,37 +63,6 @@ function fakeClient(responses: Record<string, StubResp>) {
   return { client, calls };
 }
 
-function fakeTopology(panes: TmuxPane[]): SpawnTopology {
-  const snapshot: TmuxSnapshot = { timestamp: 0, panes };
-  return {
-    snapshot: () => snapshot,
-    onSnapshot: (listener) => {
-      listener(snapshot);
-      return () => undefined;
-    },
-  };
-}
-
-function makePane(overrides: Partial<TmuxPane> = {}): TmuxPane {
-  return {
-    id: PANE,
-    sessionName: "feature-x",
-    sessionId: SESS,
-    windowName: "win",
-    windowId: WIN,
-    windowIndex: 0,
-    paneIndex: 0,
-    pid: 42,
-    currentCommand: "claude",
-    currentPath: "/repo",
-    width: 80,
-    height: 24,
-    active: true,
-    toolKind: "claude",
-    ...overrides,
-  };
-}
-
 describe("shellSingleQuote", () => {
   it("wraps plain values in single quotes", () => {
     expect(shellSingleQuote("hello")).toBe("'hello'");
@@ -131,70 +91,6 @@ describe("composeShellCommand", () => {
   });
 });
 
-describe("waitForToolInPane", () => {
-  it("resolves true when the snapshot already shows the expected tool", async () => {
-    const topology = fakeTopology([makePane({ toolKind: "claude" })]);
-    expect(await waitForToolInPane(topology, PANE, "claude", 1000)).toBe(true);
-  });
-
-  it("resolves false on timeout when the pane never shows the tool", async () => {
-    const topology = fakeTopology([makePane({ toolKind: "unknown" })]);
-    expect(await waitForToolInPane(topology, PANE, "claude", 30)).toBe(false);
-  });
-
-  it("ignores other panes", async () => {
-    const topology = fakeTopology([
-      makePane({ id: "%99" as PaneId, toolKind: "claude" }),
-    ]);
-    expect(await waitForToolInPane(topology, PANE, "claude", 30)).toBe(false);
-  });
-
-  it("unsubscribes after a synchronous initial match (no listener leak)", async () => {
-    // Production hazard: topology.onSnapshot calls the listener
-    // synchronously THEN adds it to its set. If we settle on the sync
-    // call, the unsubscribe handle returned from onSnapshot must
-    // still run — otherwise the listener stays in the set forever.
-    const listeners = new Set<(s: TmuxSnapshot) => void>();
-    const snapshot: TmuxSnapshot = {
-      timestamp: 0,
-      panes: [makePane({ toolKind: "claude" })],
-    };
-    const topology: SpawnTopology = {
-      snapshot: () => snapshot,
-      onSnapshot: (listener) => {
-        listener(snapshot); // sync call (may settle)
-        listeners.add(listener); // then add to set
-        return () => {
-          listeners.delete(listener);
-        };
-      },
-    };
-    expect(await waitForToolInPane(topology, PANE, "claude", 1000)).toBe(true);
-    expect(listeners.size).toBe(0); // no leak
-  });
-
-  it("flips to true on a later snapshot", async () => {
-    let listener: ((s: TmuxSnapshot) => void) | null = null;
-    const topology: SpawnTopology = {
-      snapshot: () => ({
-        timestamp: 0,
-        panes: [makePane({ toolKind: "unknown" })],
-      }),
-      onSnapshot: (l) => {
-        listener = l;
-        l({ timestamp: 0, panes: [makePane({ toolKind: "unknown" })] });
-        return () => undefined;
-      },
-    };
-    const waiter = waitForToolInPane(topology, PANE, "claude", 500);
-    // Push a snapshot with the tool present.
-    setTimeout(() => {
-      listener?.({ timestamp: 1, panes: [makePane({ toolKind: "claude" })] });
-    }, 10);
-    expect(await waiter).toBe(true);
-  });
-});
-
 describe("spawnLaunch", () => {
   function commonSpec(): LaunchSpec {
     return {
@@ -218,11 +114,9 @@ describe("spawnLaunch", () => {
       "list-panes": { success: true, output: [`${PANE}|${SESS}|${WIN}`] },
     });
     const registry = makeRegistry();
-    const topology = fakeTopology([makePane({ toolKind: "claude" })]);
     const result = await spawnLaunch(
       {
         registry,
-        topology,
         execute: (cmd: string) => client.execute(cmd),
         getProxyPort: () => 53991,
         newLaunchId: () => "L-1" as LaunchId,
@@ -256,7 +150,6 @@ describe("spawnLaunch", () => {
       spawnLaunch(
         {
           registry,
-          topology: fakeTopology([]),
           execute: (cmd: string) => client.execute(cmd),
           getProxyPort: () => 53991,
         },
@@ -281,7 +174,6 @@ describe("spawnLaunch", () => {
       spawnLaunch(
         {
           registry: makeRegistry(),
-          topology: fakeTopology([]),
           execute: () =>
             Promise.reject(
               new Error("tmux control mesh is empty — no sessions observed"),
@@ -293,33 +185,30 @@ describe("spawnLaunch", () => {
     ).rejects.toThrow(/mesh is empty/);
   });
 
-  it("marks the row exited when the tool does not appear within the timeout", async () => {
+  it("marks running without inspecting pane.toolKind — works under shell-wrap", async () => {
+    // [LAW:types-are-the-program] The prior shape gated running on
+    // pane.toolKind === expected, which is false under default-shell
+    // wrapping. spawnLaunch no longer asks; new-session's ack is the
+    // signal. This test pins that property: the spawn does NOT consult
+    // any topology snapshot, so even a "wrapped" pane (toolKind unknown,
+    // currentCommand reporting the wrapper) cannot prevent the
+    // transition.
     const { client } = fakeClient({
       "has-session": { throws: "can't find session: feature-x" },
       "new-session": { success: true, output: [] },
       "list-panes": { success: true, output: [`${PANE}|${SESS}|${WIN}`] },
     });
-    const registry = makeRegistry();
-    const topology = fakeTopology([makePane({ toolKind: "unknown" })]);
-    await expect(
-      spawnLaunch(
-        {
-          registry,
-          topology,
-          execute: (cmd: string) => client.execute(cmd),
-          getProxyPort: () => 53991,
-          toolStartTimeoutMs: 20,
-          newLaunchId: () => "L-2" as LaunchId,
-        },
-        commonSpec(),
-      ),
-    ).rejects.toThrow(/did not start/);
-    const list = registry.list();
-    expect(list).toHaveLength(1);
-    expect(list[0].status).toBe("exited");
-    if (list[0].status === "exited") {
-      expect(list[0].exitReason).toBe("tool failed to start");
-    }
+    const result = await spawnLaunch(
+      {
+        registry: makeRegistry(),
+        execute: (cmd: string) => client.execute(cmd),
+        getProxyPort: () => 53991,
+        newLaunchId: () => "L-wrap" as LaunchId,
+      },
+      commonSpec(),
+    );
+    expect(result.status).toBe("running");
+    expect(result.launchId).toBe("L-wrap");
   });
 
   it("builds the env block consistent with the launchEnvBlock helper", () => {

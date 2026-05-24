@@ -23,13 +23,21 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
+import { mkdtempSync, writeFileSync, chmodSync, rmSync } from "node:fs";
+import { join } from "node:path";
+import { tmpdir } from "node:os";
 import { spawnTmux, type TmuxTransport } from "tmux-control-mode-js";
 import { tmuxEscape } from "tmux-control-mode-js/protocol";
 import { TmuxControlConnection } from "../tmux/control";
 import { TmuxTopologyTracker } from "../tmux/topology";
 import { TmuxError, tmuxExec } from "../tmux/exec";
-import { composeShellCommand, sessionExistsForTesting } from "./spawn";
-import { launchEnvBlock } from "./registry";
+import {
+  composeShellCommand,
+  sessionExistsForTesting,
+  spawnLaunch,
+} from "./spawn";
+import { LaunchRegistry, launchEnvBlock } from "./registry";
+import { startLaunchCorrelator } from "./correlator";
 import type { LaunchId, SessionId } from "../../shared/types";
 
 const SEED_SESSION = "launch-seed";
@@ -238,6 +246,216 @@ describe("launch identity env propagation (real tmux mesh)", () => {
       );
       await conn.execute(`kill-session -t ${tmuxEscape(TARGET)}`);
       topology.dispose();
+    },
+  );
+
+  it(
+    // Copilot's round-3 concern: if a binary crashes between spawn's
+    // list-panes returning and the launch being added to the registry,
+    // window-close might fire before the correlator sees the row, and
+    // the row stays in `running` indefinitely. This test reproduces the
+    // fast-exit scenario with a stub binary that immediately `exit 1`s
+    // — under correct behavior, the launch reaches running briefly
+    // and then transitions to exited via window-close before the
+    // assertion 500ms later.
+    "fast-exiting binary: launch is marked exited via window-close",
+    { timeout: 15000 },
+    async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), "promptctl-spawn-fast-"));
+      try {
+        const stubBinary = join(tmpRoot, "stub-crash");
+        writeFileSync(
+          stubBinary,
+          ["#!/bin/sh", "exit 1", ""].join("\n"),
+        );
+        chmodSync(stubBinary, 0o755);
+
+        const conn = TmuxControlConnection.start({
+          socketPath: socket,
+          ...meshDepsFor(socket),
+          reconcileIntervalMs: 200,
+        });
+        await conn.ready;
+
+        const topology = new TmuxTopologyTracker({
+          onEvent: (event, handler) => conn.on(event, handler),
+          onConnectionState: (listener) => conn.onConnectionState(listener),
+          execute: (cmd) => conn.execute(cmd),
+          subscribeRaw: (name, what, format) =>
+            conn.subscribeRaw(name, what, format),
+        });
+        await waitFor(
+          () => topology.snapshot().panes.length > 0,
+          5000,
+          "initial topology populated",
+        );
+
+        const registry = new LaunchRegistry({ save: async () => undefined });
+        const disposeCorrelator = startLaunchCorrelator({
+          registry,
+          onTopologySnapshot: (listener) => topology.onSnapshot(listener),
+          getTopologySnapshot: () => topology.snapshot(),
+          onTmuxEvent: (event, handler) => conn.on(event, handler),
+          onConnectionState: (listener) => conn.onConnectionState(listener),
+        });
+
+        const targetSession = `fast-target-${Date.now()}`;
+        const launch = await spawnLaunch(
+          {
+            registry,
+            execute: (cmd) => conn.execute(cmd),
+            getProxyPort: () => 53991,
+            toolBinaries: {
+              claude: stubBinary,
+              codex: stubBinary,
+              gemini: stubBinary,
+            },
+            newLaunchId: () => "L-crash" as LaunchId,
+          },
+          {
+            toolKind: "claude",
+            cwd: tmpRoot,
+            sessionName: targetSession,
+          },
+        );
+        expect(launch.status).toBe("running");
+
+        // Wait for window-close to propagate through tmux events.
+        await waitFor(
+          () => registry.get(launch.launchId)?.status === "exited",
+          5000,
+          "fast-exiting binary marked exited",
+        );
+
+        disposeCorrelator();
+        topology.dispose();
+      } finally {
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
+    // Empirically: under a wrapper-script binary (a zsh script that
+    // forks a child without exec'ing), tmux's pane_current_command
+    // reports the wrapper's shell ("zsh") rather than the launched tool,
+    // and pane_pid stays at the wrapper's pid for the wrapper's entire
+    // life. Under the prior shape, the correlator's toolKind-match
+    // exit predicate would have phantom-killed the launch on the first
+    // snapshot after markRunning. This test pins the new behavior:
+    // spawnLaunch lands `running`, the correlator runs for ~500ms
+    // observing the wrapped pane (toolKind == "unknown"), and the
+    // launch remains `running`.
+    "wrapped binary: launch reaches running and stays running",
+    { timeout: 15000 },
+    async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), "promptctl-spawn-wrap-"));
+      try {
+        // Stub "binary" that mirrors the bug case: a shell script that
+        // forks `sleep` as a child instead of exec'ing into it. tmux
+        // sees the parent shell process and never the child. `/bin/sh`
+        // is the most portable shebang — POSIX sh's fork-then-wait
+        // semantics are the same as zsh's for this script shape, and
+        // `/bin/sh` is present on every POSIX target (CI runners
+        // included) without requiring zsh to be provisioned.
+        const stubBinary = join(tmpRoot, "stub-wrapper");
+        writeFileSync(
+          stubBinary,
+          // Use printf-and-wait pattern: the wrapper writes a marker
+          // so we know it's alive, then forks sleep and waits.
+          [
+            "#!/bin/sh",
+            "printf 'wrapper-started\\n'",
+            "sleep 30 &",
+            "wait $!",
+            "",
+          ].join("\n"),
+        );
+        chmodSync(stubBinary, 0o755);
+
+        const conn = TmuxControlConnection.start({
+          socketPath: socket,
+          ...meshDepsFor(socket),
+          reconcileIntervalMs: 200,
+        });
+        await conn.ready;
+
+        // Spin up topology + correlator just like main.ts wires them.
+        const topology = new TmuxTopologyTracker({
+          onEvent: (event, handler) => conn.on(event, handler),
+          onConnectionState: (listener) => conn.onConnectionState(listener),
+          execute: (cmd) => conn.execute(cmd),
+          subscribeRaw: (name, what, format) =>
+            conn.subscribeRaw(name, what, format),
+        });
+        await waitFor(
+          () => topology.snapshot().panes.length > 0,
+          5000,
+          "initial topology populated",
+        );
+
+        const registry = new LaunchRegistry({ save: async () => undefined });
+        const disposeCorrelator = startLaunchCorrelator({
+          registry,
+          onTopologySnapshot: (listener) => topology.onSnapshot(listener),
+          getTopologySnapshot: () => topology.snapshot(),
+          onTmuxEvent: (event, handler) => conn.on(event, handler),
+          onConnectionState: (listener) => conn.onConnectionState(listener),
+        });
+
+        const targetSession = `wrap-target-${Date.now()}`;
+        const launch = await spawnLaunch(
+          {
+            registry,
+            execute: (cmd) => conn.execute(cmd),
+            getProxyPort: () => 53991,
+            // The stub script stands in for the user's tool binary.
+            toolBinaries: {
+              claude: stubBinary,
+              codex: stubBinary,
+              gemini: stubBinary,
+            },
+            newLaunchId: () => "L-wrap" as LaunchId,
+          },
+          {
+            toolKind: "claude",
+            cwd: tmpRoot,
+            sessionName: targetSession,
+          },
+        );
+        expect(launch.status).toBe("running");
+        expect(launch.launchId).toBe("L-wrap");
+
+        // Wait for the wrapped pane to show up in the topology and for
+        // pane_current_command to settle on the wrapper's shell name.
+        // This is the snapshot edge that would have triggered the old
+        // toolKind-match exit predicate.
+        await waitFor(
+          () =>
+            topology
+              .snapshot()
+              .panes.some(
+                (p) =>
+                  p.sessionName === targetSession && p.toolKind === "unknown",
+              ),
+          5000,
+          "wrapped pane visible with toolKind=unknown",
+        );
+
+        // Drive several reconcile passes by emitting topology refreshes
+        // — anything that would have killed the launch under the old
+        // predicate has fired by now.
+        await delay(500);
+
+        const after = registry.get(launch.launchId);
+        expect(after?.status).toBe("running");
+
+        disposeCorrelator();
+        topology.dispose();
+        await conn.execute(`kill-session -t ${tmuxEscape(targetSession)}`);
+      } finally {
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
     },
   );
 });
