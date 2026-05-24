@@ -520,10 +520,16 @@ function ToolJumpLink({
   );
 }
 
-// CSS.escape is in every Electron / modern browser; the fallback is
-// defensive against very old test environments. We do the minimum
-// escape (`"` → `\"`, `\` → `\\`) which is sufficient for the values
-// in a `[attr="..."]` selector.
+// CSS.escape is present in Electron and every modern browser (and
+// modern jsdom), so the fallback below is essentially dead code in
+// the deployment target. It exists as a defensive last resort for
+// any environment that lacks it. The fallback handles ONLY the two
+// characters that realistically appear in Anthropic tool_use_id
+// payloads (`"` and `\`) — full CSS string-escape rules also cover
+// newlines, NUL, control chars, etc., which we don't expect from
+// well-formed ids. Combined with the surrounding try/catch in the
+// click handler, anything the fallback misses degrades to a no-op
+// click rather than a UI crash.
 function cssEscape(value: string): string {
   if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
     return CSS.escape(value);

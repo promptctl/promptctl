@@ -391,19 +391,25 @@ export function contentHash(value: unknown): string {
 // independent of stableJson's JSON-quoting behavior.
 export { fnv1a64Hex };
 
-// FNV-1a 64-bit. Synchronous, deterministic, no external dependency.
-// Adequate collision resistance for the conversation/prompt/tools
-// content we'll feed it — far below the birthday-bound risk for any
-// realistic session size.
+// FNV-1a 64-bit over UTF-8 bytes. Synchronous, deterministic, no
+// external dependency. Adequate collision resistance for the
+// conversation/prompt/tools content we'll feed it — far below the
+// birthday-bound risk for any realistic session size.
+//
+// Hashes UTF-8 bytes (via TextEncoder) rather than UTF-16 code units.
+// This is what the canonical FNV-1a spec is defined over, so the
+// implementation produces canonical output for ALL Unicode inputs
+// (not just ASCII). ASCII strings still match the published reference
+// vectors because their UTF-8 encoding is byte-for-byte the same as
+// the code units the spec was originally defined against.
 //
 // Implemented with BigInt rather than split 32-bit limbs. The earlier
-// limb-based version had a subtle prime-multiplication bug (double-
-// counting the `<< 8` term). BigInt makes the math literally the
-// algorithm. The 16-char hex result is canonical FNV-1a output.
+// limb-based version had a subtle prime-multiplication bug; BigInt
+// makes the math literally the algorithm.
 //
 // Reference test vectors — directly asserted in
-// `fnv1a64Hex produces the canonical FNV-1a-64 reference vectors`
-// in conversation.test.ts:
+// `fnv1a64Hex (canonical FNV-1a-64 reference vectors)` in
+// conversation.test.ts:
 //   ""       → cbf29ce484222325   (the offset basis)
 //   "a"      → af63dc4c8601ec8c
 //   "foobar" → 85944171f73967e8
@@ -412,9 +418,14 @@ function fnv1a64Hex(str: string): string {
   const PRIME = 0x100000001b3n;
   const MASK = 0xffffffffffffffffn;
   let hash = OFFSET;
-  for (let i = 0; i < str.length; i += 1) {
-    hash = (hash ^ BigInt(str.charCodeAt(i))) & MASK;
+  for (const byte of UTF8.encode(str)) {
+    hash = (hash ^ BigInt(byte)) & MASK;
     hash = (hash * PRIME) & MASK;
   }
   return hash.toString(16).padStart(16, "0");
 }
+
+// One shared TextEncoder — instantiation is cheap but not free, and
+// the encoder is stateless so reuse is safe across all calls.
+// [LAW:single-enforcer] One UTF-8 encoder for the module.
+const UTF8 = new TextEncoder();
