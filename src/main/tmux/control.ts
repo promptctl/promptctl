@@ -467,26 +467,36 @@ export class TmuxControlConnection {
       // state, no fallback to a privileged client.
       return syntheticOk();
     }
-    // Fire on every client; return the first response. The clients respond
-    // independently; semantically the subscription is established for the
-    // mesh once any client acks.
-    const results = await Promise.all(
-      [...this.clients.values()].map((client) =>
-        client.subscribeRaw(name, what, format).catch(() => null),
+    // Fire on every client; aggregate the response. Successful subscribes
+    // on ANY client mean the subscription is live (events will fire from
+    // that client's session scope). If every client failed — whether by
+    // throwing OR by replying with {success: false} — the subscription is
+    // effectively dead, and we report that honestly so callers (notably
+    // the topology tracker's subscriptionsRegistered one-shot) keep
+    // retrying. syntheticOk() is only for the empty-mesh "recorded but
+    // not yet applied" case; it never papers over a real failure.
+    return aggregateMeshResponses(
+      await Promise.all(
+        [...this.clients.values()].map((client) =>
+          client.subscribeRaw(name, what, format).catch(meshErrorResponse),
+        ),
       ),
     );
-    return results.find((r) => r !== null) ?? syntheticOk();
   }
 
   async unsubscribe(name: string): Promise<CommandResponse> {
     this.subscriptions.delete(name);
     if (this.clients.size === 0) return syntheticOk();
-    const results = await Promise.all(
-      [...this.clients.values()].map((client) =>
-        client.unsubscribe(name).catch(() => null),
+    // Same aggregation as subscribeRaw: report honestly when every client
+    // failed to process the unsubscribe so callers can retry instead of
+    // silently leaving stale subscriptions active.
+    return aggregateMeshResponses(
+      await Promise.all(
+        [...this.clients.values()].map((client) =>
+          client.unsubscribe(name).catch(meshErrorResponse),
+        ),
       ),
     );
-    return results.find((r) => r !== null) ?? syntheticOk();
   }
 
   // Library compatibility: detach() asks tmux to disconnect each client
@@ -943,13 +953,55 @@ function clientOff(client: TmuxClient, entry: RegisteredListener): void {
 }
 
 // Synthetic CommandResponse for paths where the operation is recorded but
-// not yet executed against tmux (subscribeRaw/unsubscribe before a topology
-// source is elected). Carries non-conflicting placeholder values so it
-// satisfies CommandResponse without colliding with real tmux replies.
+// not yet executed against tmux (subscribeRaw/unsubscribe before any clients
+// exist). Carries non-conflicting placeholder values so it satisfies
+// CommandResponse without colliding with real tmux replies.
 function syntheticOk(): CommandResponse {
   return {
     success: true,
     output: [],
+    commandNumber: 0,
+    timestamp: Date.now(),
+  };
+}
+
+// Converts a thrown client-side error (transport drop mid-call, library
+// exception) into a CommandResponse-shaped failure. Used by the mesh-wide
+// subscribeRaw/unsubscribe aggregation so a throw and a {success: false}
+// reply collapse to the same shape for the aggregator to reason over.
+function meshErrorResponse(err: unknown): CommandResponse {
+  const message = err instanceof Error ? err.message : String(err);
+  return {
+    success: false,
+    output: [message],
+    commandNumber: 0,
+    timestamp: Date.now(),
+  };
+}
+
+// [LAW:no-defensive-null-guards] Aggregate per-client responses honestly:
+//   - any success → return the first success (subscription is live on that
+//     client; mesh-wide intent achieved)
+//   - all failed  → return the first failure (caller sees success:false and
+//     can retry)
+//   - empty input → unreachable here (callers gate on clients.size first)
+//
+// This is the load-bearing distinction the prior implementation missed:
+// returning syntheticOk() when every client failed papered over the failure
+// and broke the topology tracker's retry loop.
+function aggregateMeshResponses(
+  results: readonly CommandResponse[],
+): CommandResponse {
+  const success = results.find((r) => r.success);
+  if (success !== undefined) return success;
+  const failure = results[0];
+  if (failure !== undefined) return failure;
+  // Defensive — every caller currently gates on this.clients.size > 0
+  // before reaching the aggregator, so an empty results array means the
+  // mesh raced empty mid-call. Honest failure response.
+  return {
+    success: false,
+    output: ["mesh empty during dispatch"],
     commandNumber: 0,
     timestamp: Date.now(),
   };
