@@ -1,0 +1,458 @@
+// [LAW:dataflow-not-control-flow] Same code path for every chain shape:
+// project → render. An in-flight tail, a single-request chain, and a 10-
+// request chain all flow through buildTimeline → list-map. Variability
+// lives in TimelineEntry's discriminated `kind`, not in branching that
+// chooses which component runs.
+//
+// [LAW:single-enforcer] Block-level rendering goes through `renderBlock`
+// (blocks.tsx); the conversation view does not hand-roll its own block
+// dispatch. role badges, attribution chips, and tool-pair scroll anchors
+// live here.
+//
+// [LAW:one-source-of-truth] No timeline cache. useMemo keyed on the
+// joined requestIds re-derives when the chain shape changes; incoming
+// SSE deltas to an existing record's events array do not force a rebuild
+// because the chain shape is the same, but a state transition to
+// `complete` flips the chain reference in Live.tsx (via the buildChain
+// callsite) and the memo re-runs.
+
+import { useEffect, useMemo, useRef } from "react";
+import type { RequestRecord } from "../../../shared/proxy-events";
+import { blockKey, renderBlock } from "./blocks";
+import {
+  buildTimeline,
+  buildToolPairings,
+  type TimelineEntry,
+} from "./conversation";
+import { stopReasonStyle } from "./stop-reason";
+
+export function ConversationTab({
+  chain,
+  selectedRequestId,
+  onSelectRequest,
+}: {
+  chain: RequestRecord[] | null;
+  selectedRequestId: string;
+  onSelectRequest?: (requestId: string) => void;
+}) {
+  // Memo key is the joined request ids — same shape across renders means
+  // the projection is reused; a new request appended or removed forces a
+  // rebuild. We deliberately do NOT key on the record references; the
+  // SSE event arrays mutate on every chunk and we don't want a rebuild
+  // for that.
+  const safeChain = chain ?? [];
+  const memoKey = safeChain.map((r) => r.requestId).join("|");
+  // [LAW:one-source-of-truth] Memoization key is the joined request ids
+  // (chain SHAPE), not the chain reference — the chain array is rebuilt
+  // upstream on every store update (SSE event arrival) but the
+  // dedup-result only changes when the request set changes. This avoids
+  // rebuilding the timeline on every event tick. Repo doesn't run
+  // react-hooks/exhaustive-deps so the "missing safeChain" warning is
+  // not enforced; the dependency on memoKey is intentional.
+  const timeline = useMemo(() => buildTimeline(safeChain), [memoKey]);
+  const pairings = useMemo(
+    () => buildToolPairings(timeline),
+    [timeline],
+  );
+
+  // Auto-scroll selected request's assistant_response into view.
+  // [LAW:dataflow-not-control-flow] The effect runs for every chain
+  // shape and every selection change — we resolve the anchor element
+  // by data attribute, not by tracking refs per entry.
+  const containerRef = useRef<HTMLDivElement | null>(null);
+  useEffect(() => {
+    const container = containerRef.current;
+    if (container === null) return;
+    const anchor = container.querySelector<HTMLElement>(
+      `[data-selected-anchor="true"]`,
+    );
+    // jsdom (test runner) doesn't implement scrollIntoView. Guarding
+    // the method's existence is correct for the prod path too — older
+    // browsers without the API just no-op the auto-scroll.
+    if (anchor && typeof anchor.scrollIntoView === "function") {
+      anchor.scrollIntoView({ block: "nearest", behavior: "auto" });
+    }
+  }, [selectedRequestId, memoKey]);
+
+  return (
+    <div
+      ref={containerRef}
+      className="flex flex-col gap-2 p-4"
+      data-testid="conversation-timeline"
+    >
+      {timeline.length === 0 ? (
+        <div className="text-sm text-neutral-500">No messages.</div>
+      ) : (
+        timeline.map((entry, idx) => (
+          <TimelineRow
+            key={timelineRowKey(entry, idx)}
+            entry={entry}
+            entryIndex={idx}
+            selectedRequestId={selectedRequestId}
+            pairings={pairings}
+            onSelectRequest={onSelectRequest}
+          />
+        ))
+      )}
+    </div>
+  );
+}
+
+function timelineRowKey(entry: TimelineEntry, index: number): string {
+  if (entry.kind === "message") return `m:${entry.identity}`;
+  if (entry.kind === "assistant_response") return `a:${entry.identity}`;
+  return `b:${entry.requestId}-${index}`;
+}
+
+function TimelineRow({
+  entry,
+  entryIndex,
+  selectedRequestId,
+  pairings,
+  onSelectRequest,
+}: {
+  entry: TimelineEntry;
+  entryIndex: number;
+  selectedRequestId: string;
+  pairings: ReturnType<typeof buildToolPairings>;
+  onSelectRequest?: (requestId: string) => void;
+}) {
+  if (entry.kind === "request_boundary") {
+    return (
+      <BoundaryRow
+        entry={entry}
+        active={entry.requestId === selectedRequestId}
+        onSelectRequest={onSelectRequest}
+      />
+    );
+  }
+  if (entry.kind === "message") {
+    return (
+      <MessageRow
+        entry={entry}
+        entryIndex={entryIndex}
+        selectedRequestId={selectedRequestId}
+        pairings={pairings}
+        onSelectRequest={onSelectRequest}
+      />
+    );
+  }
+  return (
+    <AssistantResponseRow
+      entry={entry}
+      entryIndex={entryIndex}
+      selectedRequestId={selectedRequestId}
+      pairings={pairings}
+      onSelectRequest={onSelectRequest}
+    />
+  );
+}
+
+// ─── Boundary row ─────────────────────────────────────────────────────────
+
+function BoundaryRow({
+  entry,
+  active,
+  onSelectRequest,
+}: {
+  entry: Extract<TimelineEntry, { kind: "request_boundary" }>;
+  active: boolean;
+  onSelectRequest?: (requestId: string) => void;
+}) {
+  const style = stopReasonStyle(entry.stopReason);
+  const ttfbMs = entry.ttfbNs !== null ? msFromNs(entry.ttfbNs) : null;
+  const durMs = entry.durationNs !== null ? msFromNs(entry.durationNs) : null;
+  const usageTotal = entry.usage
+    ? entry.usage.input_tokens + entry.usage.output_tokens
+    : null;
+  return (
+    <div
+      data-testid="conversation-boundary"
+      data-request-id={entry.requestId}
+      data-active={active ? "true" : "false"}
+      className={`sticky top-0 z-10 flex items-center gap-3 rounded border px-3 py-1.5 font-mono text-[11px] ${
+        active
+          ? "border-neutral-600 bg-neutral-900"
+          : "border-neutral-800 bg-neutral-950"
+      }`}
+    >
+      <span
+        className={`inline-flex items-center rounded border px-2 py-0.5 ${style.className}`}
+      >
+        {style.label}
+      </span>
+      <button
+        type="button"
+        onClick={() => onSelectRequest?.(entry.requestId)}
+        className="text-neutral-400 underline-offset-2 hover:underline"
+        data-testid="conversation-boundary-request-link"
+      >
+        {entry.requestId.slice(0, 8)}
+      </button>
+      {ttfbMs !== null ? (
+        <span className="text-neutral-500" data-testid="conversation-boundary-ttfb">
+          TTFB {ttfbMs}ms
+        </span>
+      ) : null}
+      {durMs !== null ? (
+        <span className="text-neutral-500" data-testid="conversation-boundary-duration">
+          Δ {durMs}ms
+        </span>
+      ) : null}
+      {usageTotal !== null ? (
+        <span className="text-neutral-500" data-testid="conversation-boundary-tokens">
+          {entry.usage?.input_tokens ?? 0}↓ {entry.usage?.output_tokens ?? 0}↑ tok
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+// ─── Message row ──────────────────────────────────────────────────────────
+
+function MessageRow({
+  entry,
+  entryIndex,
+  selectedRequestId,
+  pairings,
+  onSelectRequest,
+}: {
+  entry: Extract<TimelineEntry, { kind: "message" }>;
+  entryIndex: number;
+  selectedRequestId: string;
+  pairings: ReturnType<typeof buildToolPairings>;
+  onSelectRequest?: (requestId: string) => void;
+}) {
+  const isSelected = entry.introducedByRequestId === selectedRequestId;
+  const blocks = Array.isArray(entry.content) ? entry.content : null;
+  return (
+    <EntryShell
+      role={entry.role}
+      introducedByRequestId={entry.introducedByRequestId}
+      isSelected={isSelected}
+      onSelectRequest={onSelectRequest}
+      testId="conversation-message"
+      entryIndex={entryIndex}
+    >
+      {blocks !== null ? (
+        <div className="space-y-2 p-3">
+          {blocks.map((block, blockIndex) => (
+            <BlockWithToolLink
+              key={blockKey(block, blockIndex)}
+              block={block}
+              blockIndex={blockIndex}
+              pairings={pairings}
+            />
+          ))}
+        </div>
+      ) : (
+        <div className="p-3">
+          {renderBlock(
+            { type: "text", text: stringifyContent(entry.content) },
+            { index: 0 },
+          )}
+        </div>
+      )}
+    </EntryShell>
+  );
+}
+
+// ─── Assistant response row ───────────────────────────────────────────────
+
+function AssistantResponseRow({
+  entry,
+  entryIndex,
+  selectedRequestId,
+  pairings,
+  onSelectRequest,
+}: {
+  entry: Extract<TimelineEntry, { kind: "assistant_response" }>;
+  entryIndex: number;
+  selectedRequestId: string;
+  pairings: ReturnType<typeof buildToolPairings>;
+  onSelectRequest?: (requestId: string) => void;
+}) {
+  const isSelected = entry.producedByRequestId === selectedRequestId;
+  return (
+    <EntryShell
+      role="assistant"
+      introducedByRequestId={entry.producedByRequestId}
+      isSelected={isSelected}
+      onSelectRequest={onSelectRequest}
+      testId="conversation-assistant-response"
+      entryIndex={entryIndex}
+      isAnchor={isSelected}
+    >
+      {entry.inFlight ? (
+        <div
+          data-testid="conversation-in-flight"
+          className="px-3 py-2 font-mono text-xs text-neutral-500"
+        >
+          (streaming…)
+        </div>
+      ) : (
+        <div className="space-y-2 p-3">
+          {entry.content.map((block, blockIndex) => (
+            <BlockWithToolLink
+              key={blockKey(block, blockIndex)}
+              block={block}
+              blockIndex={blockIndex}
+              pairings={pairings}
+            />
+          ))}
+        </div>
+      )}
+    </EntryShell>
+  );
+}
+
+// ─── Shared entry shell + tool-pair anchors ──────────────────────────────
+
+function EntryShell({
+  role,
+  introducedByRequestId,
+  isSelected,
+  isAnchor = false,
+  onSelectRequest,
+  testId,
+  entryIndex,
+  children,
+}: {
+  role: string;
+  introducedByRequestId: string;
+  isSelected: boolean;
+  isAnchor?: boolean;
+  onSelectRequest?: (requestId: string) => void;
+  testId: string;
+  entryIndex: number;
+  children: React.ReactNode;
+}) {
+  return (
+    <section
+      data-testid={testId}
+      data-role={role}
+      data-introduced-by={introducedByRequestId}
+      data-selected={isSelected ? "true" : "false"}
+      data-entry-index={entryIndex}
+      data-selected-anchor={isAnchor && isSelected ? "true" : undefined}
+      className={`rounded border bg-neutral-950 ${
+        isSelected
+          ? "border-l-4 border-l-cyan-500 border-y-neutral-800 border-r-neutral-800"
+          : "border-neutral-800"
+      }`}
+    >
+      <header className="flex items-center justify-between border-b border-neutral-900 px-3 py-2 text-xs">
+        <span className="rounded bg-neutral-800 px-2 py-0.5 text-neutral-300">
+          {role}
+        </span>
+        <button
+          type="button"
+          onClick={() => onSelectRequest?.(introducedByRequestId)}
+          className="text-[10px] text-neutral-500 underline-offset-2 hover:underline"
+          data-testid="conversation-attribution-chip"
+        >
+          {introducedByRequestId.slice(0, 8)}
+        </button>
+      </header>
+      <div>{children}</div>
+    </section>
+  );
+}
+
+// Wraps a block render with two pieces of conversation-only context:
+//   - A scroll anchor (data-tool-use-id / data-tool-result-id) so the
+//     paired-link buttons can `scrollIntoView` the matching block.
+//   - A "→ result" / "← input" jump link when a pair exists.
+// [LAW:single-enforcer] The block CONTENT still renders through
+// renderBlock; this wrapper only adds conversation-level navigation.
+function BlockWithToolLink({
+  block,
+  blockIndex,
+  pairings,
+}: {
+  block: unknown;
+  blockIndex: number;
+  pairings: ReturnType<typeof buildToolPairings>;
+}) {
+  const rec = asRecord(block);
+  const isToolUse = rec?.type === "tool_use" && typeof rec.id === "string";
+  const isToolResult =
+    rec?.type === "tool_result" && typeof rec.tool_use_id === "string";
+
+  const toolUseId = isToolUse ? (rec.id as string) : null;
+  const resultId = isToolResult ? (rec.tool_use_id as string) : null;
+  const hasResultLink =
+    toolUseId !== null && pairings.toolUseToResult.has(toolUseId);
+  const hasUseLink =
+    resultId !== null && pairings.toolResultToUse.has(resultId);
+
+  return (
+    <div
+      data-tool-use-id={toolUseId ?? undefined}
+      data-tool-result-id={resultId ?? undefined}
+    >
+      {renderBlock(block, { index: blockIndex })}
+      {hasResultLink ? (
+        <ToolJumpLink
+          target={`[data-tool-result-id="${toolUseId}"]`}
+          label="→ result"
+          testId="conversation-tool-use-jump"
+        />
+      ) : null}
+      {hasUseLink ? (
+        <ToolJumpLink
+          target={`[data-tool-use-id="${resultId}"]`}
+          label="← input"
+          testId="conversation-tool-result-jump"
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function ToolJumpLink({
+  target,
+  label,
+  testId,
+}: {
+  target: string;
+  label: string;
+  testId: string;
+}) {
+  return (
+    <button
+      type="button"
+      data-testid={testId}
+      data-jump-target={target}
+      onClick={() => {
+        const el = document.querySelector(target);
+        if (el instanceof HTMLElement && typeof el.scrollIntoView === "function") {
+          el.scrollIntoView({ block: "nearest", behavior: "auto" });
+        }
+      }}
+      className="mt-1 ml-1 text-[10px] text-cyan-400 underline-offset-2 hover:underline"
+    >
+      {label}
+    </button>
+  );
+}
+
+function msFromNs(ns: number): number {
+  return Math.round(ns / 1_000_000);
+}
+
+function stringifyContent(value: unknown): string {
+  if (typeof value === "string") return value;
+  if (value === null || value === undefined) return "";
+  try {
+    return JSON.stringify(value, null, 2);
+  } catch {
+    return String(value);
+  }
+}
+
+function asRecord(value: unknown): Record<string, unknown> | null {
+  return typeof value === "object" && value !== null && !Array.isArray(value)
+    ? (value as Record<string, unknown>)
+    : null;
+}
