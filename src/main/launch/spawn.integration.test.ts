@@ -265,16 +265,20 @@ describe("launch identity env propagation (real tmux mesh)", () => {
     async () => {
       const tmpRoot = mkdtempSync(join(tmpdir(), "promptctl-spawn-wrap-"));
       try {
-        // Stub "binary" that mirrors the bug case: a zsh script that
+        // Stub "binary" that mirrors the bug case: a shell script that
         // forks `sleep` as a child instead of exec'ing into it. tmux
-        // sees the parent (zsh) and never the child.
+        // sees the parent shell process and never the child. `/bin/sh`
+        // is the most portable shebang — POSIX sh's fork-then-wait
+        // semantics are the same as zsh's for this script shape, and
+        // `/bin/sh` is present on every POSIX target (CI runners
+        // included) without requiring zsh to be provisioned.
         const stubBinary = join(tmpRoot, "stub-wrapper");
         writeFileSync(
           stubBinary,
           // Use printf-and-wait pattern: the wrapper writes a marker
           // so we know it's alive, then forks sleep and waits.
           [
-            "#!/bin/zsh",
+            "#!/bin/sh",
             "printf 'wrapper-started\\n'",
             "sleep 30 &",
             "wait $!",
