@@ -305,28 +305,63 @@ function asRecord(value: unknown): Record<string, unknown> | null {
 }
 
 // Stable JSON serialization: object keys are sorted recursively so two
-// objects with identical content but different insertion order yield the
-// same string.
+// objects with identical content but different insertion order yield
+// the same string. Behavior matches JSON.stringify for the parts we
+// care about (so identity is stable across the inputs we hash):
+//
+//   - Object property whose value is `undefined`, a function, or a
+//     symbol → key is OMITTED entirely. [matches JSON.stringify]
+//   - Array element that is `undefined`, a function, or a symbol →
+//     serialized as `null`. [matches JSON.stringify, which substitutes
+//     null for non-JSON elements in arrays]
+//   - Top-level `undefined` / function / symbol → returns "null". This
+//     is the one divergence: JSON.stringify returns `undefined` at the
+//     top level, but we can't return undefined from a string function;
+//     "null" is the safe sentinel.
+//
+// We do NOT handle BigInt or Date — they don't appear in the content
+// we hash (Anthropic message blocks are plain JSON shapes). If a
+// future caller passes one, it falls through to "null" at the top
+// level or is dropped at the object level — predictable, just
+// shouldn't happen in practice.
 export function stableJson(value: unknown): string {
   if (value === null) return "null";
   if (typeof value === "number") return Number.isFinite(value) ? String(value) : "null";
   if (typeof value === "boolean") return value ? "true" : "false";
   if (typeof value === "string") return JSON.stringify(value);
   if (Array.isArray(value)) {
-    return "[" + value.map(stableJson).join(",") + "]";
+    // [LAW:dataflow-not-control-flow] Match JSON.stringify exactly: a
+    // non-JSON element in an array becomes `null`, not dropped.
+    return (
+      "[" +
+      value
+        .map((v) => (isNonJsonValue(v) ? "null" : stableJson(v)))
+        .join(",") +
+      "]"
+    );
   }
   if (typeof value === "object") {
     const keys = Object.keys(value as Record<string, unknown>).sort();
     const parts: string[] = [];
     for (const key of keys) {
       const v = (value as Record<string, unknown>)[key];
-      if (v === undefined) continue;
+      // [LAW:dataflow-not-control-flow] Match JSON.stringify exactly:
+      // an object property whose value is undefined / function /
+      // symbol is omitted entirely (NOT serialized as `null`).
+      if (isNonJsonValue(v)) continue;
       parts.push(JSON.stringify(key) + ":" + stableJson(v));
     }
     return "{" + parts.join(",") + "}";
   }
-  // undefined, function, symbol → omitted (matches JSON.stringify).
   return "null";
+}
+
+function isNonJsonValue(value: unknown): boolean {
+  return (
+    value === undefined ||
+    typeof value === "function" ||
+    typeof value === "symbol"
+  );
 }
 
 // Re-exported for cross-ticket consumers (ac1.6.5 system-prompt hash,

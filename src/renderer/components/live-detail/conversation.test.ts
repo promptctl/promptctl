@@ -79,6 +79,30 @@ describe("stableJson", () => {
   it("treats undefined values as omitted (matches JSON.stringify)", () => {
     expect(stableJson({ a: 1, b: undefined })).toBe(stableJson({ a: 1 }));
   });
+
+  it("omits function-valued object properties (matches JSON.stringify)", () => {
+    // JSON.stringify({a:1, b:()=>{}}) === '{"a":1}'. The prior
+    // implementation kept the key with a `null` value — diverged
+    // from the documented contract.
+    const noFn = stableJson({ a: 1 });
+    const withFn = stableJson({ a: 1, b: () => undefined });
+    expect(withFn).toBe(noFn);
+  });
+
+  it("omits symbol-valued object properties (matches JSON.stringify)", () => {
+    const noSym = stableJson({ a: 1 });
+    const withSym = stableJson({ a: 1, b: Symbol("x") });
+    expect(withSym).toBe(noSym);
+  });
+
+  it("substitutes null for non-JSON array elements (matches JSON.stringify)", () => {
+    // JSON.stringify([1, undefined, 2]) === '[1,null,2]'. Arrays
+    // can't omit elements without shifting indices, so the substitute
+    // is null.
+    expect(stableJson([1, undefined, 2])).toBe("[1,null,2]");
+    expect(stableJson([1, () => undefined, 2])).toBe("[1,null,2]");
+    expect(stableJson([1, Symbol("x"), 2])).toBe("[1,null,2]");
+  });
 });
 
 describe("messageIdentity", () => {
