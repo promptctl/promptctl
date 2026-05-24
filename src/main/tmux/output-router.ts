@@ -172,19 +172,19 @@ export class TmuxOutputRouter {
   }
 
   private async captureScrollback(paneId: PaneId): Promise<void> {
-    let resp;
-    try {
-      resp = await this.deps.execute(
-        `capture-pane -t ${paneId} -p -e -J -S -500`,
-      );
-    } catch (err) {
-      // The mesh is empty (no sessions yet) or the call raced a disconnect.
-      // Surface the rejection — the next ready transition or onSnapshot
-      // re-trigger will reissue the capture.
-      console.error(`[output-router] capture-pane for ${paneId} failed:`, err);
-      return;
-    }
-    if (!resp.success) return;
+    const resp = await this.deps
+      .execute(`capture-pane -t ${paneId} -p -e -J -S -500`)
+      .catch((err) => {
+        // The mesh is empty (no sessions yet) or the call raced a disconnect.
+        // Surface the rejection — the next ready transition or onSnapshot
+        // re-trigger will reissue the capture.
+        console.error(
+          `[output-router] capture-pane for ${paneId} failed:`,
+          err,
+        );
+        return null;
+      });
+    if (resp === null || !resp.success) return;
     const text = resp.output.join("\n");
     this.sendToPane(paneId, "tmux:output:chunk", { paneId, data: text });
     this.sendState(paneId, "streaming");
