@@ -83,10 +83,13 @@ export interface RequestMessageEntry {
 export interface AssistantResponseEntry {
   readonly kind: "assistant_response";
   readonly identity: string;
+  // `content` is the assistant's content blocks once the response is
+  // assembled. While the request is still in-flight, `content` is `[]`
+  // (an empty array, not null — the discriminated-union shape carries
+  // its own array invariant) and `inFlight` is true; consumers should
+  // gate rendering on `inFlight` rather than on `content.length`.
   readonly content: AnthropicContentBlock[];
   readonly producedByRequestId: string;
-  // null while the request is still in-flight; populated when the
-  // assembler has produced the full content.
   readonly inFlight: boolean;
 }
 
