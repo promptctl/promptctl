@@ -60,11 +60,17 @@ export interface ElectronAPI {
   send(channel: string, ...args: unknown[]): void;
 
   invoke(channel: "tmux:topology:get"): Promise<TmuxSnapshot>;
-  invoke(channel: "tmux:pane-processes", paneId: PaneId): Promise<PaneProcesses>;
+  invoke(
+    channel: "tmux:pane-processes",
+    paneId: PaneId,
+  ): Promise<PaneProcesses>;
   invoke(channel: "command:list"): Promise<Command[]>;
   invoke(channel: "command:add", command: Command): Promise<void>;
   invoke(channel: "command:remove" | "command:fire", id: string): Promise<void>;
-  invoke(channel: "tmux:output:subscribe" | "tmux:output:unsubscribe", paneId: PaneId): Promise<void>;
+  invoke(
+    channel: "tmux:output:subscribe" | "tmux:output:unsubscribe",
+    paneId: PaneId,
+  ): Promise<void>;
   invoke(
     channel: "command:update",
     id: string,
@@ -74,7 +80,9 @@ export interface ElectronAPI {
   invoke(channel: "prompt:save", prompt: Prompt): Promise<Prompt[]>;
   invoke(channel: "prompt:delete", filename: string): Promise<Prompt[]>;
   invoke(channel: "session:list-projects"): Promise<Project[]>;
-  invoke(channel: "session:provider-metadata"): Promise<Record<string, ProviderUIMetadata>>;
+  invoke(
+    channel: "session:provider-metadata",
+  ): Promise<Record<string, ProviderUIMetadata>>;
   invoke(
     channel: "session:list-sessions",
     provider: ProviderKind,
@@ -90,14 +98,8 @@ export interface ElectronAPI {
     provider: ProviderKind,
     sessionId: string,
   ): Promise<{ project: Project; session: SessionInfo } | null>;
-  invoke(
-    channel: "session:message-content",
-    index: number,
-  ): Promise<string>;
-  invoke(
-    channel: "session:message-raw",
-    index: number,
-  ): Promise<unknown>;
+  invoke(channel: "session:message-content", index: number): Promise<string>;
+  invoke(channel: "session:message-raw", index: number): Promise<unknown>;
   invoke(
     channel: "session:messages-content",
     indices: number[],
@@ -176,18 +178,12 @@ export interface ElectronAPI {
     channel: "tmux:topology",
     listener: (snapshot: TmuxSnapshot) => void,
   ): () => void;
-  on(
-    channel: "proxy:event",
-    listener: (event: ProxyEvent) => void,
-  ): () => void;
+  on(channel: "proxy:event", listener: (event: ProxyEvent) => void): () => void;
   on(
     channel: "proxy:status",
     listener: (status: ProxyStatus) => void,
   ): () => void;
-  on(
-    channel: "proxy:client",
-    listener: (info: ClientInfo) => void,
-  ): () => void;
+  on(channel: "proxy:client", listener: (info: ClientInfo) => void): () => void;
   on(
     channel: "proxy:clients",
     listener: (infos: ClientInfo[]) => void,
@@ -208,10 +204,7 @@ export interface ElectronAPI {
     channel: "launch:event",
     listener: (event: LaunchEvent) => void,
   ): () => void;
-  on(
-    channel: "task:event",
-    listener: (event: TaskEvent) => void,
-  ): () => void;
+  on(channel: "task:event", listener: (event: TaskEvent) => void): () => void;
   on(
     channel: "tmux:control-state",
     listener: (event: TmuxControlState) => void,
@@ -231,10 +224,7 @@ export interface ElectronAPI {
       results: SessionSearchResult[];
     }) => void,
   ): () => void;
-  on(
-    channel: string,
-    listener: (...args: unknown[]) => void,
-  ): () => void;
+  on(channel: string, listener: (...args: unknown[]) => void): () => void;
 }
 
 // Mirrors src/main/tmux/control.ts ConnectionStateEvent. Duplicated here so

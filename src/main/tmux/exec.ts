@@ -19,10 +19,7 @@ export class TmuxError extends Error {
   }
 }
 
-export function tmuxExec(
-  args: string[],
-  timeoutMs = 5000,
-): Promise<string> {
+export function tmuxExec(args: string[], timeoutMs = 5000): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile("tmux", args, { timeout: timeoutMs }, (error, stdout, stderr) => {
       if (error) {

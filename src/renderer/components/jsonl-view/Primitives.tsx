@@ -183,7 +183,10 @@ export function PrimitiveValue({ value }: { value: unknown }) {
 export function Signature({ value }: { value: string }) {
   const len = value?.length ?? 0;
   return (
-    <Tip tip={`signature (${len} chars)`} className={`${MONO} text-neutral-600`}>
+    <Tip
+      tip={`signature (${len} chars)`}
+      className={`${MONO} text-neutral-600`}
+    >
       ·sig ({len} ch)
     </Tip>
   );
@@ -243,9 +246,7 @@ export function ToolInput({
           <span className="ml-0.5 text-neutral-300">{fmtV(v)}</span>
         </span>
       ))}
-      {overflow > 0 && (
-        <span className="text-neutral-500">+{overflow}</span>
-      )}
+      {overflow > 0 && <span className="text-neutral-500">+{overflow}</span>}
     </Tip>
   );
 }

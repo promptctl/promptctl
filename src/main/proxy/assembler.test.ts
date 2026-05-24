@@ -24,9 +24,21 @@ function helloEvents(): SseEvent[] {
         },
       },
     },
-    { type: "content_block_start", index: 0, content_block: { type: "text", text: "" } },
-    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: "Hello" } },
-    { type: "content_block_delta", index: 0, delta: { type: "text_delta", text: ", world!" } },
+    {
+      type: "content_block_start",
+      index: 0,
+      content_block: { type: "text", text: "" },
+    },
+    {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: "Hello" },
+    },
+    {
+      type: "content_block_delta",
+      index: 0,
+      delta: { type: "text_delta", text: ", world!" },
+    },
     { type: "content_block_stop", index: 0 },
     {
       type: "message_delta",
@@ -87,7 +99,12 @@ describe("ResponseAssembler", () => {
     a.onEvent({
       type: "content_block_start",
       index: 1,
-      content_block: { type: "tool_use", id: "toolu_1", name: "get_weather", input: {} },
+      content_block: {
+        type: "tool_use",
+        id: "toolu_1",
+        name: "get_weather",
+        input: {},
+      },
     });
     a.onEvent({
       type: "content_block_delta",
@@ -111,7 +128,12 @@ describe("ResponseAssembler", () => {
     expect(msg.stop_reason).toBe("tool_use");
     expect(msg.content).toEqual([
       { type: "text", text: "Looking up the weather." },
-      { type: "tool_use", id: "toolu_1", name: "get_weather", input: { location: "NYC" } },
+      {
+        type: "tool_use",
+        id: "toolu_1",
+        name: "get_weather",
+        input: { location: "NYC" },
+      },
     ]);
   });
 
@@ -182,7 +204,11 @@ describe("ResponseAssembler", () => {
     a.onEvent({
       type: "content_block_start",
       index: 0,
-      content_block: { type: "thinking", thinking: "deliberating", signature: "abc" },
+      content_block: {
+        type: "thinking",
+        thinking: "deliberating",
+        signature: "abc",
+      },
     });
     a.onEvent({ type: "content_block_stop", index: 0 });
     a.onEvent({
@@ -193,7 +219,10 @@ describe("ResponseAssembler", () => {
     a.onEvent({ type: "message_stop" });
 
     const msg = a.complete();
-    expect(msg.content[0]).toMatchObject({ type: "thinking", thinking: "deliberating" });
+    expect(msg.content[0]).toMatchObject({
+      type: "thinking",
+      thinking: "deliberating",
+    });
   });
 
   it("throws if complete() is called before message_stop", () => {

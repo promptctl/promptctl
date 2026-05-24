@@ -78,12 +78,7 @@ export function registerSessionHandlers(): void {
 
   ipcMain.handle(
     "session:compress-tools",
-    (
-      _e,
-      taskId: string,
-      indices: number[],
-      options: CompressToolsOptions,
-    ) =>
+    (_e, taskId: string, indices: number[], options: CompressToolsOptions) =>
       runTask(
         taskId,
         {
@@ -101,22 +96,20 @@ export function registerSessionHandlers(): void {
   // Streams results incrementally on "session:search-batch" (per invoking
   // window only — no need to broadcast to every window) so the UI can render
   // results as enrichment completes instead of waiting for all 2k+ sessions.
-  ipcMain.handle(
-    "session:search",
-    (event, taskId: string, query: string) =>
-      runTask(
-        taskId,
-        { kind: "search", label: `Searching: "${query}"`, total: 0 },
-        (handle) =>
-          searchSessions(query, handle, (batch) => {
-            if (!event.sender.isDestroyed()) {
-              event.sender.send("session:search-batch", {
-                taskId,
-                results: batch,
-              });
-            }
-          }),
-      ),
+  ipcMain.handle("session:search", (event, taskId: string, query: string) =>
+    runTask(
+      taskId,
+      { kind: "search", label: `Searching: "${query}"`, total: 0 },
+      (handle) =>
+        searchSessions(query, handle, (batch) => {
+          if (!event.sender.isDestroyed()) {
+            event.sender.send("session:search-batch", {
+              taskId,
+              results: batch,
+            });
+          }
+        }),
+    ),
   );
 
   // Stateless peek — load a session's messages WITHOUT marking it as active.
@@ -135,7 +128,8 @@ export function registerSessionHandlers(): void {
   ipcMain.handle("session:restore-version", (_e, idx: number) =>
     restoreVersion(idx),
   );
-  ipcMain.handle("session:diff-versions", (_e, fromIdx: number, toIdx: number) =>
-    diffVersions(fromIdx, toIdx),
+  ipcMain.handle(
+    "session:diff-versions",
+    (_e, fromIdx: number, toIdx: number) => diffVersions(fromIdx, toIdx),
   );
 }

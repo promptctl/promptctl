@@ -31,7 +31,8 @@ export function computeLineage(
         if (candidate.clientId !== record.clientId) continue;
         if (getModel(candidate) !== model) continue;
         if (candidate.completedNs === null) continue;
-        if (record.startedNs - candidate.completedNs > LINEAGE_WINDOW_NS) continue;
+        if (record.startedNs - candidate.completedNs > LINEAGE_WINDOW_NS)
+          continue;
         const candidateMessages = getMessages(candidate);
         if (candidateMessages === null) continue;
         if (candidateMessages.length >= messages.length) continue;

@@ -10,10 +10,7 @@ import { ResponseTab } from "./ResponseTab";
 import { SseTimelineTab } from "./SseTimelineTab";
 import { ChainSparkline } from "./ChainSparkline";
 import { useLiveTickNs } from "./latency";
-import {
-  ChainStopReasonStrip,
-  StopReasonChip,
-} from "./stop-reason";
+import { ChainStopReasonStrip, StopReasonChip } from "./stop-reason";
 
 type TabId = "overview" | "request" | "diff" | "response" | "timeline" | "raw";
 
@@ -59,9 +56,7 @@ export function RequestDetail({
         {/* [LAW:dataflow-not-control-flow] chain strip always renders; an empty/single-entry chain is a stable rendered state. */}
         <div
           aria-hidden={chain === null || chain.length <= 1}
-          className={
-            chain === null || chain.length <= 1 ? "hidden" : "mb-3"
-          }
+          className={chain === null || chain.length <= 1 ? "hidden" : "mb-3"}
         >
           {chain !== null && chain.length > 1 && onSelectRequest ? (
             <div className="flex items-center gap-3">

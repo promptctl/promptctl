@@ -37,7 +37,8 @@ describe("truncateMiddle", () => {
   });
 
   it("truncates long text preserving head and tail", () => {
-    const text = "START_MARKER " + "filler content here ".repeat(500) + " END_MARKER";
+    const text =
+      "START_MARKER " + "filler content here ".repeat(500) + " END_MARKER";
     const result = truncateMiddle(text, 100);
 
     expect(result).toContain("START_MARKER");

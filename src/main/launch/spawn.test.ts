@@ -26,9 +26,7 @@ const PANE: PaneId = "%17" as PaneId;
 const SESS: SessionId = "$3" as SessionId;
 const WIN: WindowId = "@5" as WindowId;
 
-type StubResp =
-  | { success: boolean; output: string[] }
-  | { throws: string };
+type StubResp = { success: boolean; output: string[] } | { throws: string };
 
 // CommandResponse requires commandNumber + timestamp; the fakeClient fills
 // them in monotonically so tests don't have to.
@@ -178,7 +176,10 @@ describe("waitForToolInPane", () => {
   it("flips to true on a later snapshot", async () => {
     let listener: ((s: TmuxSnapshot) => void) | null = null;
     const topology: SpawnTopology = {
-      snapshot: () => ({ timestamp: 0, panes: [makePane({ toolKind: "unknown" })] }),
+      snapshot: () => ({
+        timestamp: 0,
+        panes: [makePane({ toolKind: "unknown" })],
+      }),
       onSnapshot: (l) => {
         listener = l;
         l({ timestamp: 0, panes: [makePane({ toolKind: "unknown" })] });
@@ -196,7 +197,11 @@ describe("waitForToolInPane", () => {
 
 describe("spawnLaunch", () => {
   function commonSpec(): LaunchSpec {
-    return { toolKind: "claude" as ToolLaunchKind, cwd: "/repo", sessionName: "feature-x" };
+    return {
+      toolKind: "claude" as ToolLaunchKind,
+      cwd: "/repo",
+      sessionName: "feature-x",
+    };
   }
 
   function makeRegistry() {

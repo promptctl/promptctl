@@ -9,7 +9,10 @@ export function nextGlobalSeq(): number {
   return _globalSeqCounter;
 }
 
-export function makeEnvelope(requestId: string, clientId: string): ProxyEventEnvelope {
+export function makeEnvelope(
+  requestId: string,
+  clientId: string,
+): ProxyEventEnvelope {
   return {
     requestId,
     clientId,

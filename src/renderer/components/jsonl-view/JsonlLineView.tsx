@@ -9,9 +9,7 @@ import { AnyValue, FieldGrid } from "./FieldRenderers";
 export function JsonlLineView({ raw }: { raw: unknown }) {
   if (raw === null || raw === undefined) {
     return (
-      <div className="p-4 text-sm text-neutral-600 italic">
-        No content.
-      </div>
+      <div className="p-4 text-sm text-neutral-600 italic">No content.</div>
     );
   }
   if (typeof raw !== "object" || Array.isArray(raw)) {

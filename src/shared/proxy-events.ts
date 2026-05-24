@@ -33,7 +33,12 @@ export interface AnthropicMessageInfo {
 // Content block start payloads — identified by `type` per Anthropic's schema.
 export type ContentBlockStart =
   | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | {
+      type: "tool_use";
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+    }
   // [LAW:dataflow-not-control-flow] Unknown block types pass through opaquely
   // (e.g. "thinking" — surfaces in newer model outputs). The assembler treats
   // them as inert: it never accumulates deltas into them in v1.
@@ -49,7 +54,11 @@ export type ContentBlockDelta =
 // wire format), so we can pass parsed event payloads through as-is.
 export type SseEvent =
   | { type: "message_start"; message: AnthropicMessageInfo }
-  | { type: "content_block_start"; index: number; content_block: ContentBlockStart }
+  | {
+      type: "content_block_start";
+      index: number;
+      content_block: ContentBlockStart;
+    }
   | { type: "content_block_delta"; index: number; delta: ContentBlockDelta }
   | { type: "content_block_stop"; index: number }
   | {
@@ -66,7 +75,12 @@ export type SseEvent =
 
 export type AnthropicContentBlock =
   | { type: "text"; text: string }
-  | { type: "tool_use"; id: string; name: string; input: Record<string, unknown> }
+  | {
+      type: "tool_use";
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+    }
   | { type: string; [key: string]: unknown };
 
 export interface AnthropicMessage {
@@ -131,7 +145,11 @@ export interface ClientInfo {
   launchId: LaunchId | null;
 }
 
-export type RequestRecordState = "in_flight" | "streaming" | "complete" | "errored";
+export type RequestRecordState =
+  | "in_flight"
+  | "streaming"
+  | "complete"
+  | "errored";
 
 export interface RequestRecord {
   requestId: string;

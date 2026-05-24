@@ -83,7 +83,10 @@ describe("diffContent", () => {
 
   it("added message produces an added entry", () => {
     const before = session(userMsg("u1", "hello"));
-    const after = session(userMsg("u1", "hello"), geminiMsg("g1", "new response"));
+    const after = session(
+      userMsg("u1", "hello"),
+      geminiMsg("g1", "new response"),
+    );
     const diff = geminiAdapter.diffContent(before, after);
 
     const added = diff.find((d) => d.kind === "added");

@@ -7,21 +7,11 @@
 // This is the canonical regression for the "Claude Code rejects edited session
 // on resume" class of bugs that originally motivated this work.
 
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-} from "vitest";
+import { describe, it, expect, beforeEach, afterEach } from "vitest";
 import { mkdtemp, rm, writeFile, readFile } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
-import {
-  loadSession,
-  saveSession,
-  _resetForTesting,
-} from "../editor";
+import { loadSession, saveSession, _resetForTesting } from "../editor";
 import { _setVersionsRootForTesting } from "../versioning";
 import { registerProvider } from "../registry";
 import { claudeAdapter } from "./adapter";
@@ -78,9 +68,7 @@ function userWithToolResult(
     timestamp: "2025-01-01T00:00:02Z",
     message: {
       role: "user",
-      content: [
-        { type: "tool_result", tool_use_id: toolUseId, content },
-      ],
+      content: [{ type: "tool_result", tool_use_id: toolUseId, content }],
     },
   };
   if (parentUuid) obj.parentUuid = parentUuid;

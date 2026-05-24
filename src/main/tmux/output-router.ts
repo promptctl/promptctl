@@ -37,9 +37,7 @@ export interface OutputRouterDeps {
     event: K,
     handler: (ev: TmuxEventMap[K]) => void,
   ): () => void;
-  onConnectionState(
-    listener: (s: ConnectionStateEvent) => void,
-  ): () => void;
+  onConnectionState(listener: (s: ConnectionStateEvent) => void): () => void;
   execute(command: string): Promise<CommandResponse>;
   setPaneAction(paneId: number, action: PaneAction): Promise<CommandResponse>;
 }
@@ -163,11 +161,7 @@ export class TmuxOutputRouter {
     this.sendToPane(paneId, "tmux:output:state", { paneId, state });
   }
 
-  private sendToPane(
-    paneId: PaneId,
-    channel: string,
-    payload: unknown,
-  ): void {
+  private sendToPane(paneId: PaneId, channel: string, payload: unknown): void {
     const entries = this.watchers.get(paneId);
     if (entries === undefined || entries.size === 0) return;
     for (const entry of entries) {
@@ -187,10 +181,7 @@ export class TmuxOutputRouter {
       // The mesh is empty (no sessions yet) or the call raced a disconnect.
       // Surface the rejection — the next ready transition or onSnapshot
       // re-trigger will reissue the capture.
-      console.error(
-        `[output-router] capture-pane for ${paneId} failed:`,
-        err,
-      );
+      console.error(`[output-router] capture-pane for ${paneId} failed:`, err);
       return;
     }
     if (!resp.success) return;

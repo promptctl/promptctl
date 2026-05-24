@@ -19,10 +19,23 @@ import type { Launch, LaunchId } from "../../shared/types";
 // in two tmux panes into one tab. The "topmost non-shell ancestor" is "the
 // program the user launched", which is the granularity we want.
 const SHELL_OR_LAUNCHER_COMMS = new Set([
-  "sh", "bash", "zsh", "fish", "dash", "ksh",
-  "tmux", "tmux-server", "screen",
-  "login", "sshd", "init", "launchd", "systemd",
-  "Terminal", "iTerm2", "WindowServer",
+  "sh",
+  "bash",
+  "zsh",
+  "fish",
+  "dash",
+  "ksh",
+  "tmux",
+  "tmux-server",
+  "screen",
+  "login",
+  "sshd",
+  "init",
+  "launchd",
+  "systemd",
+  "Terminal",
+  "iTerm2",
+  "WindowServer",
 ]);
 const RESOLVE_DEADLINE_MS = 3000;
 const PEER_LOOKUP_RETRIES = 6;
@@ -49,7 +62,11 @@ export interface ProcessRow {
   comm: string;
 }
 
-function exec(cmd: string, args: string[], timeout = PER_EXEC_TIMEOUT_MS): Promise<string> {
+function exec(
+  cmd: string,
+  args: string[],
+  timeout = PER_EXEC_TIMEOUT_MS,
+): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { timeout }, (error, stdout) => {
       if (error) {
@@ -160,7 +177,9 @@ async function resolveClientInfo(socket: net.Socket): Promise<ClientInfo> {
   const command = await readCommand(root.pid);
   const cwd = await readCwd(root.pid);
   const shortCwd = cwd ? basename(cwd) || cwd : "unknown cwd";
-  const binary = basename(root.comm || command?.split(/\s+/)[0] || `pid ${root.pid}`);
+  const binary = basename(
+    root.comm || command?.split(/\s+/)[0] || `pid ${root.pid}`,
+  );
   const info: ClientInfo = {
     clientId: String(root.pid),
     pid,
@@ -209,12 +228,15 @@ async function findSocketPidWithRetry(socket: net.Socket): Promise<number> {
       await new Promise((r) => setTimeout(r, PEER_LOOKUP_BACKOFF_MS));
     }
   }
-  throw lastErr instanceof Error ? lastErr : new Error("findSocketPid: unknown failure");
+  throw lastErr instanceof Error
+    ? lastErr
+    : new Error("findSocketPid: unknown failure");
 }
 
 async function findSocketPid(socket: net.Socket): Promise<number> {
   const remotePort = socket.remotePort;
-  if (remotePort === undefined) throw new Error("socket remotePort unavailable");
+  if (remotePort === undefined)
+    throw new Error("socket remotePort unavailable");
   if (platform() === "linux") return findLinuxSocketPid(socket);
   return findMacSocketPid(socket);
 }
@@ -233,12 +255,17 @@ async function findMacSocketPid(socket: net.Socket): Promise<number> {
     "-Fpn",
   ]);
   const entries = parseLsofEntries(stdout);
-  const peer = entries.find((entry) =>
-    entry.name.includes(`:${remotePort}->`) && entry.name.includes(`:${localPort}`),
+  const peer = entries.find(
+    (entry) =>
+      entry.name.includes(`:${remotePort}->`) &&
+      entry.name.includes(`:${localPort}`),
   );
   const candidates = entries.map((entry) => entry.pid);
   const pid =
-    peer?.pid ?? candidates.find((candidate) => candidate !== process.pid) ?? candidates[0] ?? null;
+    peer?.pid ??
+    candidates.find((candidate) => candidate !== process.pid) ??
+    candidates[0] ??
+    null;
   if (pid === null) throw new Error("no socket pid from lsof");
   return pid;
 }
@@ -286,7 +313,11 @@ async function findLinuxSocketInode(socket: net.Socket): Promise<string> {
       const local = cols[1] ?? "";
       const remote = cols[2] ?? "";
       const inode = cols[9] ?? "";
-      if (local.endsWith(`:${localHex}`) && remote.endsWith(`:${remoteHex}`) && inode) {
+      if (
+        local.endsWith(`:${localHex}`) &&
+        remote.endsWith(`:${remoteHex}`) &&
+        inode
+      ) {
         return inode;
       }
     }
@@ -306,7 +337,9 @@ export function parseLsofPids(stdout: string): number[] {
   return parseLsofEntries(stdout).map((entry) => entry.pid);
 }
 
-export function parseLsofEntries(stdout: string): { pid: number; name: string }[] {
+export function parseLsofEntries(
+  stdout: string,
+): { pid: number; name: string }[] {
   const entries: { pid: number; name: string }[] = [];
   let currentPid: number | null = null;
   for (const part of stdout.split("\n")) {
@@ -381,7 +414,14 @@ async function readCommand(pid: number): Promise<string | null> {
 async function readCwd(pid: number): Promise<string | null> {
   try {
     if (platform() === "linux") return await readlink(`/proc/${pid}/cwd`);
-    const stdout = await exec("lsof", ["-p", String(pid), "-a", "-d", "cwd", "-Fn"]);
+    const stdout = await exec("lsof", [
+      "-p",
+      String(pid),
+      "-a",
+      "-d",
+      "cwd",
+      "-Fn",
+    ]);
     const line = stdout.split("\n").find((part) => part.startsWith("n"));
     return line ? line.slice(1) : null;
   } catch {

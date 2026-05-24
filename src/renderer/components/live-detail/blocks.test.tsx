@@ -74,12 +74,7 @@ describe("renderBlock registry", () => {
 
   it("renders thinking blocks collapsed with char count", () => {
     render(
-      <>
-        {renderBlock(
-          { type: "thinking", thinking: "abcde" },
-          { index: 0 },
-        )}
-      </>,
+      <>{renderBlock({ type: "thinking", thinking: "abcde" }, { index: 0 })}</>,
     );
     const node = screen.getByTestId("block-thinking");
     expect(node).toHaveTextContent("thinking · 5 chars");
@@ -107,9 +102,9 @@ describe("blockKey", () => {
   });
 
   it("uses tool_use_id for tool_result blocks", () => {
-    expect(
-      blockKey({ type: "tool_result", tool_use_id: "tu1" }, 4),
-    ).toBe("tool_result-tu1");
+    expect(blockKey({ type: "tool_result", tool_use_id: "tu1" }, 4)).toBe(
+      "tool_result-tu1",
+    );
   });
 
   it("falls back to type+index", () => {

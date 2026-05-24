@@ -63,7 +63,9 @@ export function installElectronMock(): MockElectronAPI {
   if (!globalThis.window) {
     (globalThis as unknown as { window: Record<string, unknown> }).window = {};
   }
-  (globalThis.window as unknown as { electronAPI: MockElectronAPI }).electronAPI = mock;
+  (
+    globalThis.window as unknown as { electronAPI: MockElectronAPI }
+  ).electronAPI = mock;
 
   return mock;
 }

@@ -13,10 +13,7 @@
 //   - close() tears down ONLY ownedSessionIds — non-owned sessions survive
 
 import { afterEach, describe, expect, it } from "vitest";
-import {
-  TmuxControlConnection,
-  type ConnectionStateEvent,
-} from "./control";
+import { TmuxControlConnection, type ConnectionStateEvent } from "./control";
 import type { TmuxTransport } from "tmux-control-mode-js";
 import type { SessionId } from "../../shared/types";
 
@@ -108,9 +105,7 @@ describe("TmuxControlConnection: flat mesh", () => {
     expect(state.status).toBe("no-sessions");
     expect(state.observedSessions).toBe(0);
 
-    await expect(conn.execute("list-panes")).rejects.toThrow(
-      /mesh is empty/,
-    );
+    await expect(conn.execute("list-panes")).rejects.toThrow(/mesh is empty/);
     await expect(conn.sendKeys("%1", "x")).rejects.toThrow(/mesh is empty/);
   });
 
@@ -304,9 +299,7 @@ describe("TmuxControlConnection: flat mesh", () => {
     conn.onConnectionState((ev) => states.push(ev));
 
     latestTransport(transports, "$1" as SessionId).externalDrop();
-    await waitFor(() =>
-      states.some((s) => s.status === "no-sessions"),
-    );
+    await waitFor(() => states.some((s) => s.status === "no-sessions"));
   });
 });
 

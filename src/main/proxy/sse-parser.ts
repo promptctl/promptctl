@@ -48,7 +48,8 @@ function parseFrame(frame: string): ParsedFrame {
     let value = line.slice(colonIdx + 1);
     if (value.startsWith(" ")) value = value.slice(1);
     if (field === "event") out.event = value;
-    else if (field === "data") out.data = out.data === null ? value : `${out.data}\n${value}`;
+    else if (field === "data")
+      out.data = out.data === null ? value : `${out.data}\n${value}`;
   }
   return out;
 }
@@ -84,7 +85,11 @@ export class SseParser extends Transform {
     super({ readableObjectMode: true });
   }
 
-  _transform(chunk: Buffer | string, _enc: BufferEncoding, cb: TransformCallback): void {
+  _transform(
+    chunk: Buffer | string,
+    _enc: BufferEncoding,
+    cb: TransformCallback,
+  ): void {
     this.buffer += typeof chunk === "string" ? chunk : chunk.toString("utf8");
     // Frames are terminated by \n\n. Find each terminator and emit.
     let idx = this.buffer.indexOf("\n\n");

@@ -32,10 +32,7 @@ import { registerProvider } from "./sessions/registry";
 import { geminiAdapter } from "./sessions/gemini/adapter";
 import { claudeAdapter } from "./sessions/claude/adapter";
 import { findPromptctlUrlInArgv, promptctlUrlToHash } from "./deep-link";
-import {
-  startDeepLinkServer,
-  stopDeepLinkServer,
-} from "./deep-link-server";
+import { startDeepLinkServer, stopDeepLinkServer } from "./deep-link-server";
 import type { Server } from "node:http";
 
 // Handle Squirrel events for Windows installer
@@ -56,7 +53,9 @@ if (process.defaultApp) {
     const file = path.join(os.homedir(), ".promptctl", "cdp-port");
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, cdpPort, "utf-8");
-    console.log(`[deep-link] CDP enabled on port ${cdpPort} (port file: ${file})`);
+    console.log(
+      `[deep-link] CDP enabled on port ${cdpPort} (port file: ${file})`,
+    );
   } catch (err) {
     console.log(`[deep-link] CDP port file write failed: ${err}`);
   }
@@ -109,8 +108,7 @@ const tmuxOutputRouter = new TmuxOutputRouter({
   onEvent: (event, handler) => tmuxControl.on(event, handler),
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
   execute: (cmd) => tmuxControl.execute(cmd),
-  setPaneAction: (paneId, action) =>
-    tmuxControl.setPaneAction(paneId, action),
+  setPaneAction: (paneId, action) => tmuxControl.setPaneAction(paneId, action),
 });
 
 // [LAW:one-source-of-truth] Sole authoritative source of launch identity.
@@ -231,9 +229,7 @@ const createWindow = (): void => {
   // open-url event (macOS fired before whenReady).
   const argvUrl = findPromptctlUrlInArgv(process.argv);
   const initialHash =
-    pendingDeepLinkHash ??
-    (argvUrl ? promptctlUrlToHash(argvUrl) : null) ??
-    "";
+    pendingDeepLinkHash ?? (argvUrl ? promptctlUrlToHash(argvUrl) : null) ?? "";
   pendingDeepLinkHash = null;
   console.log(
     `[deep-link] createWindow argv=${JSON.stringify(process.argv)} initialHash=${JSON.stringify(initialHash)}`,

@@ -70,7 +70,10 @@ export interface SpawnDeps {
 
 const DEFAULT_TIMEOUT_MS = 5000;
 
-export async function spawnLaunch(deps: SpawnDeps, spec: LaunchSpec): Promise<Launch> {
+export async function spawnLaunch(
+  deps: SpawnDeps,
+  spec: LaunchSpec,
+): Promise<Launch> {
   // Reject collisions up front. tmux's `new-session -d -s NAME` in
   // control mode does NOT consistently raise `%error duplicate session`
   // when NAME exists — under some tmux versions it silently creates a
@@ -85,7 +88,9 @@ export async function spawnLaunch(deps: SpawnDeps, spec: LaunchSpec): Promise<La
 
   // Generate the launch ID up front — the env block embeds it, and the
   // env block is baked into the shell command before tmux runs.
-  const launchId = (deps.newLaunchId ?? (() => crypto.randomUUID() as LaunchId))();
+  const launchId = (
+    deps.newLaunchId ?? (() => crypto.randomUUID() as LaunchId)
+  )();
   const binaries = deps.toolBinaries ?? DEFAULT_TOOL_BINARIES;
   const binary = binaries[spec.toolKind];
   const env = launchEnvBlock({
@@ -205,7 +210,9 @@ async function sessionExists(
   } catch (err) {
     const message =
       err instanceof Error && "response" in err
-        ? (err as Error & { response: { output: string[] } }).response.output.join("\n")
+        ? (
+            err as Error & { response: { output: string[] } }
+          ).response.output.join("\n")
         : err instanceof Error
           ? err.message
           : String(err);

@@ -61,14 +61,11 @@ export function ResizableSplit({
     [orientation, side, minSize, maxSize],
   );
 
-  const onPointerUp = useCallback(
-    (e: React.PointerEvent<HTMLDivElement>) => {
-      if (dragRef.current === null) return;
-      dragRef.current = null;
-      e.currentTarget.releasePointerCapture(e.pointerId);
-    },
-    [],
-  );
+  const onPointerUp = useCallback((e: React.PointerEvent<HTMLDivElement>) => {
+    if (dragRef.current === null) return;
+    dragRef.current = null;
+    e.currentTarget.releasePointerCapture(e.pointerId);
+  }, []);
 
   const isHorizontal = orientation === "horizontal";
   const sizedStyle = isHorizontal

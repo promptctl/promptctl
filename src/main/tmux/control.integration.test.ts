@@ -103,115 +103,135 @@ describe("TmuxControlConnection mesh (real tmux)", () => {
     killServer(socket);
   });
 
-  it("starts in no-sessions when the tmux server has no sessions yet", { timeout: 15000 }, async () => {
-    // No new-session executed before connect — the server-less path is
-    // the legitimate empty-mesh state.
-    const conn = TmuxControlConnection.start({
-      socketPath: socket,
-      ...meshDepsFor(socket),
-      reconcileIntervalMs: 5000,
-    });
+  it(
+    "starts in no-sessions when the tmux server has no sessions yet",
+    { timeout: 15000 },
+    async () => {
+      // No new-session executed before connect — the server-less path is
+      // the legitimate empty-mesh state.
+      const conn = TmuxControlConnection.start({
+        socketPath: socket,
+        ...meshDepsFor(socket),
+        reconcileIntervalMs: 5000,
+      });
 
-    await Promise.race([
-      conn.ready,
-      delay(5000).then(() => {
-        throw new Error(
-          `connection never reached ready; state=${JSON.stringify(conn.getState())}`,
-        );
-      }),
-    ]);
+      await Promise.race([
+        conn.ready,
+        delay(5000).then(() => {
+          throw new Error(
+            `connection never reached ready; state=${JSON.stringify(conn.getState())}`,
+          );
+        }),
+      ]);
 
-    expect(conn.getState().status).toBe("no-sessions");
-    expect(conn.getState().observedSessions).toBe(0);
-  });
+      expect(conn.getState().status).toBe("no-sessions");
+      expect(conn.getState().observedSessions).toBe(0);
+    },
+  );
 
-  it("discovers existing sessions at startup and reaches ready", { timeout: 15000 }, async () => {
-    execSync(tmuxCmd(socket, "new-session -d -s alpha"), { stdio: "ignore" });
-    execSync(tmuxCmd(socket, "new-session -d -s beta"), { stdio: "ignore" });
+  it(
+    "discovers existing sessions at startup and reaches ready",
+    { timeout: 15000 },
+    async () => {
+      execSync(tmuxCmd(socket, "new-session -d -s alpha"), { stdio: "ignore" });
+      execSync(tmuxCmd(socket, "new-session -d -s beta"), { stdio: "ignore" });
 
-    const conn = TmuxControlConnection.start({
-      socketPath: socket,
-      ...meshDepsFor(socket),
-      reconcileIntervalMs: 5000,
-    });
+      const conn = TmuxControlConnection.start({
+        socketPath: socket,
+        ...meshDepsFor(socket),
+        reconcileIntervalMs: 5000,
+      });
 
-    await Promise.race([
-      conn.ready,
-      delay(5000).then(() => {
-        throw new Error(
-          `connection never reached ready; state=${JSON.stringify(conn.getState())}`,
-        );
-      }),
-    ]);
+      await Promise.race([
+        conn.ready,
+        delay(5000).then(() => {
+          throw new Error(
+            `connection never reached ready; state=${JSON.stringify(conn.getState())}`,
+          );
+        }),
+      ]);
 
-    expect(conn.getState().status).toBe("ready");
-    expect(conn.getState().observedSessions).toBe(2);
-  });
+      expect(conn.getState().status).toBe("ready");
+      expect(conn.getState().observedSessions).toBe(2);
+    },
+  );
 
-  it("survives a kill-server / restart cycle and returns to ready", { timeout: 15000 }, async () => {
-    execSync(tmuxCmd(socket, "new-session -d -s probe"), { stdio: "ignore" });
+  it(
+    "survives a kill-server / restart cycle and returns to ready",
+    { timeout: 15000 },
+    async () => {
+      execSync(tmuxCmd(socket, "new-session -d -s probe"), { stdio: "ignore" });
 
-    const conn = TmuxControlConnection.start({
-      socketPath: socket,
-      ...meshDepsFor(socket),
-      reconcileIntervalMs: 100,
-    });
+      const conn = TmuxControlConnection.start({
+        socketPath: socket,
+        ...meshDepsFor(socket),
+        reconcileIntervalMs: 100,
+      });
 
-    await conn.ready;
-    expect(conn.getState().status).toBe("ready");
+      await conn.ready;
+      expect(conn.getState().status).toBe("ready");
 
-    killServer(socket);
+      killServer(socket);
 
-    // The mesh empties out as transports drop. status goes to no-sessions.
-    await waitFor(
-      () => conn.getState().status === "no-sessions",
-      3000,
-      "transition to no-sessions after server kill",
-    );
+      // The mesh empties out as transports drop. status goes to no-sessions.
+      await waitFor(
+        () => conn.getState().status === "no-sessions",
+        3000,
+        "transition to no-sessions after server kill",
+      );
 
-    // Bring the server back up. The periodic reconcile picks up the new
-    // session, spawns a client for it, and the mesh recovers to ready.
-    execSync(tmuxCmd(socket, "new-session -d -s recovery"), { stdio: "ignore" });
+      // Bring the server back up. The periodic reconcile picks up the new
+      // session, spawns a client for it, and the mesh recovers to ready.
+      execSync(tmuxCmd(socket, "new-session -d -s recovery"), {
+        stdio: "ignore",
+      });
 
-    await waitFor(
-      () => conn.getState().status === "ready",
-      5000,
-      "reconnect after server restart",
-    );
+      await waitFor(
+        () => conn.getState().status === "ready",
+        5000,
+        "reconnect after server restart",
+      );
 
-    expect(conn.getState().observedSessions).toBeGreaterThanOrEqual(1);
-  });
+      expect(conn.getState().observedSessions).toBeGreaterThanOrEqual(1);
+    },
+  );
 
-  it("routes execute() through the mesh and works across reconnects", { timeout: 15000 }, async () => {
-    execSync(tmuxCmd(socket, "new-session -d -s probe"), { stdio: "ignore" });
+  it(
+    "routes execute() through the mesh and works across reconnects",
+    { timeout: 15000 },
+    async () => {
+      execSync(tmuxCmd(socket, "new-session -d -s probe"), { stdio: "ignore" });
 
-    const conn = TmuxControlConnection.start({
-      socketPath: socket,
-      ...meshDepsFor(socket),
-      reconcileIntervalMs: 100,
-    });
+      const conn = TmuxControlConnection.start({
+        socketPath: socket,
+        ...meshDepsFor(socket),
+        reconcileIntervalMs: 100,
+      });
 
-    await conn.ready;
-    const r1 = await conn.execute("display-message -p 'pre-kill'");
-    expect(r1.success).toBe(true);
+      await conn.ready;
+      const r1 = await conn.execute("display-message -p 'pre-kill'");
+      expect(r1.success).toBe(true);
 
-    killServer(socket);
-    await waitFor(
-      () => conn.getState().status === "no-sessions",
-      3000,
-      "no-sessions after kill",
-    );
+      killServer(socket);
+      await waitFor(
+        () => conn.getState().status === "no-sessions",
+        3000,
+        "no-sessions after kill",
+      );
 
-    execSync(tmuxCmd(socket, "new-session -d -s recovery"), { stdio: "ignore" });
-    await waitFor(
-      () => conn.getState().status === "ready",
-      5000,
-      "ready after restart",
-    );
+      execSync(tmuxCmd(socket, "new-session -d -s recovery"), {
+        stdio: "ignore",
+      });
+      await waitFor(
+        () => conn.getState().status === "ready",
+        5000,
+        "ready after restart",
+      );
 
-    // Same connection handle; mesh now contains a different underlying
-    // client. The execute() call routes through the new client transparently.
-    const r2 = await conn.execute("display-message -p 'post-reconnect'");
-    expect(r2.success).toBe(true);
-  });
+      // Same connection handle; mesh now contains a different underlying
+      // client. The execute() call routes through the new client transparently.
+      const r2 = await conn.execute("display-message -p 'post-reconnect'");
+      expect(r2.success).toBe(true);
+    },
+  );
 });

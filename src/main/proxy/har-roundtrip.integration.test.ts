@@ -49,10 +49,14 @@ interface UpstreamFixture {
 async function spawnHttpsUpstream(
   handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
 ): Promise<UpstreamFixture> {
-  const server = https.createServer({ key: cert.key, cert: cert.cert }, handler);
+  const server = https.createServer(
+    { key: cert.key, cert: cert.cert },
+    handler,
+  );
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const addr = server.address();
-  if (typeof addr !== "object" || addr === null) throw new Error("upstream addr");
+  if (typeof addr !== "object" || addr === null)
+    throw new Error("upstream addr");
   return {
     origin: `https://127.0.0.1:${addr.port}`,
     async close() {
@@ -75,7 +79,9 @@ beforeEach(async () => {
   collected = [];
   collectedClients = [];
   unsubscribe = proxyEventBus.subscribe((ev) => collected.push(ev));
-  unsubscribeClients = proxyEventBus.subscribeClients((info) => collectedClients.push(info));
+  unsubscribeClients = proxyEventBus.subscribeClients((info) =>
+    collectedClients.push(info),
+  );
 });
 
 afterEach(async () => {
@@ -99,29 +105,29 @@ afterEach(async () => {
 });
 
 const SSE_FIXTURE = [
-  'event: message_start',
+  "event: message_start",
   'data: {"type":"message_start","message":{"id":"msg_round","type":"message","role":"assistant","model":"claude-opus-4-7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":12,"output_tokens":0}}}',
-  '',
-  'event: content_block_start',
+  "",
+  "event: content_block_start",
   'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
-  '',
-  'event: content_block_delta',
+  "",
+  "event: content_block_delta",
   'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}',
-  '',
-  'event: content_block_delta',
+  "",
+  "event: content_block_delta",
   'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":", world"}}',
-  '',
-  'event: content_block_stop',
+  "",
+  "event: content_block_stop",
   'data: {"type":"content_block_stop","index":0}',
-  '',
-  'event: message_delta',
+  "",
+  "event: message_delta",
   'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":3}}',
-  '',
-  'event: message_stop',
+  "",
+  "event: message_stop",
   'data: {"type":"message_stop"}',
-  '',
-  '',
-].join('\n');
+  "",
+  "",
+].join("\n");
 
 describe("HAR round-trip", () => {
   it("live capture → HAR → replay produces equivalent event stream (req #4)", async () => {
@@ -169,8 +175,14 @@ describe("HAR round-trip", () => {
     expect(replaySummary.url).toBe(liveSummary.url);
     expect(replaySummary.responseStatus).toBe(liveSummary.responseStatus);
     expect(replaySummary.assembledBody).toEqual(liveSummary.assembledBody);
-    expect(replayEvents.every((event) => event.clientId.startsWith("replay-"))).toBe(true);
-    expect(collectedClients.some((client) => client.clientId === replayEvents[0]?.clientId)).toBe(true);
+    expect(
+      replayEvents.every((event) => event.clientId.startsWith("replay-")),
+    ).toBe(true);
+    expect(
+      collectedClients.some(
+        (client) => client.clientId === replayEvents[0]?.clientId,
+      ),
+    ).toBe(true);
   });
 
   it("appending after replay keeps a single HAR file with growing entries (req #5b)", async () => {

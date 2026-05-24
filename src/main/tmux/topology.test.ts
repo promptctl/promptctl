@@ -23,10 +23,7 @@ import type {
 } from "tmux-control-mode-js/protocol";
 import { PANE_FORMAT } from "./pane-parse";
 import type { ConnectionStateEvent } from "./control";
-import {
-  TmuxTopologyTracker,
-  TOPOLOGY_SUBSCRIPTIONS,
-} from "./topology";
+import { TmuxTopologyTracker, TOPOLOGY_SUBSCRIPTIONS } from "./topology";
 
 // Local shape — TopologyClient was retired with the mesh refactor; the tracker
 // now consumes execute() / subscribeRaw() directly via deps. Tests still
@@ -89,7 +86,10 @@ function paneLine(fields: {
 }
 
 function makeHarness(): Harness {
-  const eventHandlers = new Map<keyof TmuxEventMap, ((ev: unknown) => void)[]>();
+  const eventHandlers = new Map<
+    keyof TmuxEventMap,
+    ((ev: unknown) => void)[]
+  >();
   const stateListeners = new Set<(s: ConnectionStateEvent) => void>();
   let listPanesLines: string[] = [];
 
@@ -191,7 +191,11 @@ describe("TmuxTopologyTracker", () => {
   it("subscribes to every documented topology channel on ready", async () => {
     const h = makeHarness();
     h.setListPanesResponse([]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
 
     const subscribed = new Set(h.client.subscribeCalls.map((c) => c[0]));
@@ -211,7 +215,11 @@ describe("TmuxTopologyTracker", () => {
         currentCommand: "vim",
       }),
     ]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
 
     const snap = h.tracker.snapshot();
@@ -223,7 +231,11 @@ describe("TmuxTopologyTracker", () => {
   it("patches a pane field from subscription-changed and broadcasts only on diff", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1", currentCommand: "zsh" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
 
     const broadcastsAfterSeed = h.snapshots.length;
@@ -262,7 +274,11 @@ describe("TmuxTopologyTracker", () => {
       paneLine({ id: "%2", windowId: "@7", windowName: "old" }),
       paneLine({ id: "%3", windowId: "@8", windowName: "other" }),
     ]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
 
     h.fireEvent("subscription-changed", {
@@ -284,7 +300,11 @@ describe("TmuxTopologyTracker", () => {
   it("re-runs list-panes on a topology event and reflects the new pane", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
     expect(h.tracker.snapshot().panes).toHaveLength(1);
 
@@ -301,7 +321,11 @@ describe("TmuxTopologyTracker", () => {
   it("clears the snapshot on a non-ready transition", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
     expect(h.tracker.snapshot().panes).toHaveLength(1);
 
@@ -328,14 +352,27 @@ describe("TmuxTopologyTracker", () => {
     // gap during which tmux may have changed.
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
     const subsAfterFirstReady = h.client.subscribeCalls.length;
     expect(subsAfterFirstReady).toBe(TOPOLOGY_SUBSCRIPTIONS.length);
 
-    h.fireConnState({ status: "closed", reason: "drop", reconnectAttempts: 1, observedSessions: 0 });
+    h.fireConnState({
+      status: "closed",
+      reason: "drop",
+      reconnectAttempts: 1,
+      observedSessions: 0,
+    });
     h.setListPanesResponse([paneLine({ id: "%5" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 1, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 1,
+      observedSessions: 1,
+    });
     await flush();
 
     // Same number of subscriptions — no re-issue from the tracker.
@@ -346,7 +383,11 @@ describe("TmuxTopologyTracker", () => {
   it("ignores subscription-changed for an unknown pane (race with topology)", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
     const before = h.snapshots.length;
 
@@ -370,7 +411,11 @@ describe("TmuxTopologyTracker", () => {
       paneLine({ id: "%1", windowId: "@0" }),
       paneLine({ id: "%2", windowId: "@1" }),
     ]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
     expect(h.tracker.snapshot().panes).toHaveLength(2);
 
@@ -392,7 +437,11 @@ describe("TmuxTopologyTracker", () => {
       paneLine({ id: "%3", sessionName: "promptctl-test" }),
       paneLine({ id: "%4", sessionName: "scratch" }),
     ]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
 
     const ids = h.tracker.snapshot().panes.map((p) => p.id);
@@ -402,7 +451,11 @@ describe("TmuxTopologyTracker", () => {
   it("dispose() removes all listeners and clears state", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     await flush();
 
     const seen = vi.fn();

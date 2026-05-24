@@ -9,10 +9,7 @@ interface SettingsState {
   compressKeepLastN: number;
 }
 
-const MODELS = [
-  "gpt-5.4",
-  "gpt-4o",
-];
+const MODELS = ["gpt-5.4", "gpt-4o"];
 
 export function Settings() {
   const [settings, setSettings] = useState<SettingsState>({
@@ -118,12 +115,10 @@ export function Settings() {
 
       <div className="space-y-6 rounded-xl border border-neutral-800 bg-neutral-900 p-6">
         <div>
-          <h3 className="text-lg font-semibold text-neutral-200">
-            OpenAI API
-          </h3>
+          <h3 className="text-lg font-semibold text-neutral-200">OpenAI API</h3>
           <p className="mt-1 text-sm text-neutral-500">
-            Powers Smart Compress and Topic Focus in Context Workshop.
-            Uses a separate, cost-effective model to analyze conversations.
+            Powers Smart Compress and Topic Focus in Context Workshop. Uses a
+            separate, cost-effective model to analyze conversations.
           </p>
         </div>
 
@@ -167,7 +162,8 @@ export function Settings() {
           </select>
           <p className="text-sm text-neutral-600">
             Used for context analysis and topic segmentation. Cheaper models
-            work well here — the heavy lifting is pattern recognition, not generation.
+            work well here — the heavy lifting is pattern recognition, not
+            generation.
           </p>
         </div>
 
@@ -186,9 +182,7 @@ export function Settings() {
           >
             {testing ? "Testing..." : "Test Connection"}
           </button>
-          {saved && (
-            <span className="text-sm text-green-400">Saved</span>
-          )}
+          {saved && <span className="text-sm text-green-400">Saved</span>}
           {testResult && (
             <span
               className={`text-sm ${testResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}
@@ -211,8 +205,8 @@ export function Settings() {
               npm run tokens:calibrate
             </code>
             ). The count_tokens endpoint is free to call but rate-limited, so
-            the app never uses it at runtime — only once to learn per-content-kind
-            correction factors for the local estimator.
+            the app never uses it at runtime — only once to learn
+            per-content-kind correction factors for the local estimator.
           </p>
         </div>
 
@@ -249,9 +243,7 @@ export function Settings() {
           >
             {anthTesting ? "Testing..." : "Test Connection"}
           </button>
-          {anthSaved && (
-            <span className="text-sm text-green-400">Saved</span>
-          )}
+          {anthSaved && <span className="text-sm text-green-400">Saved</span>}
           {anthTestResult && (
             <span
               className={`text-sm ${anthTestResult.startsWith("Error") ? "text-red-400" : "text-green-400"}`}
@@ -315,9 +307,8 @@ export function Settings() {
               className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-500"
             />
             <p className="text-sm text-neutral-600">
-              Results at or above this count (but below the summarize
-              threshold) get head/tail truncated. Below this they are left
-              alone.
+              Results at or above this count (but below the summarize threshold)
+              get head/tail truncated. Below this they are left alone.
             </p>
           </div>
 
@@ -338,8 +329,8 @@ export function Settings() {
               className="w-full rounded-md border border-neutral-700 bg-neutral-950 px-3 py-2 text-sm text-neutral-200 outline-none focus:border-neutral-500"
             />
             <p className="text-sm text-neutral-600">
-              The last N tool results are never compressed — the assistant
-              often references them on the next turn.
+              The last N tool results are never compressed — the assistant often
+              references them on the next turn.
             </p>
           </div>
         </div>

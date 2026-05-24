@@ -28,7 +28,8 @@ export function getTmuxProxy(): TmuxClientProxy {
 
 const INITIAL_CONTROL_STATE: TmuxControlState = {
   status: "connecting",
-  reconnectAttempts: 0, observedSessions: 0,
+  reconnectAttempts: 0,
+  observedSessions: 0,
 };
 
 // [LAW:dataflow-not-control-flow] Hook returns a single state value seeded by
@@ -43,11 +44,9 @@ export function useControlState(): TmuxControlState {
     const off = window.electronAPI.on("tmux:control-state", (event) => {
       if (alive) setState(event);
     });
-    void window.electronAPI
-      .invoke("tmux:control-state:get")
-      .then((current) => {
-        if (alive) setState(current);
-      });
+    void window.electronAPI.invoke("tmux:control-state:get").then((current) => {
+      if (alive) setState(current);
+    });
     return () => {
       alive = false;
       off();

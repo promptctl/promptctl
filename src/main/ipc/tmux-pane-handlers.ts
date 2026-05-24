@@ -12,11 +12,7 @@
 // subscription. [LAW:one-source-of-truth] one spawn path.
 
 import { ipcMain } from "electron";
-import type {
-  PaneId,
-  PaneProcesses,
-  TmuxSnapshot,
-} from "../../shared/types";
+import type { PaneId, PaneProcesses, TmuxSnapshot } from "../../shared/types";
 import { getPaneProcesses } from "../tmux/processes";
 
 export interface TmuxPaneHandlersDeps {

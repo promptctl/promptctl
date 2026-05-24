@@ -71,6 +71,8 @@ describe("JsonlLineView — composed field grid", () => {
     };
     render(<JsonlLineView raw={raw} />);
     // The inner text remains in the DOM; the tag literals do not.
-    expect(screen.getByText((_, el) => el?.textContent === "/review")).toBeDefined();
+    expect(
+      screen.getByText((_, el) => el?.textContent === "/review"),
+    ).toBeDefined();
   });
 });

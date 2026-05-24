@@ -105,9 +105,7 @@ function renderXML(text: string): ReactNode[] {
             <span
               key={`p${i}o${j}`}
               title={s.text}
-              className={
-                s.closing ? "text-neutral-500" : "text-amber-400/60"
-              }
+              className={s.closing ? "text-neutral-500" : "text-amber-400/60"}
             >
               {s.closing ? "›" : "‹"}
             </span>,

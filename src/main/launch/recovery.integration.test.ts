@@ -69,6 +69,8 @@ describe("recovery.readEnv (real OS)", () => {
     await delay(50);
     const env = await readEnv(child.pid as number);
     expect(env).not.toBeNull();
-    expect(envContainsLaunchId(env as string, "missing" as LaunchId)).toBe(false);
+    expect(envContainsLaunchId(env as string, "missing" as LaunchId)).toBe(
+      false,
+    );
   });
 });

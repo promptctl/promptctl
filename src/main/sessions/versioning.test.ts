@@ -42,7 +42,13 @@ afterEach(async () => {
 
 describe("recordVersion", () => {
   it("appends a new version and advances head", async () => {
-    const info = await recordVersion(sessionPath, "claude", "v1 content", "First", 100);
+    const info = await recordVersion(
+      sessionPath,
+      "claude",
+      "v1 content",
+      "First",
+      100,
+    );
     expect(info.idx).toBe(1);
     expect(info.label).toBe("First");
 
@@ -85,7 +91,13 @@ describe("recordVersion", () => {
 
   it("stores correct sizeBytes and tokensTotal", async () => {
     const content = "hello world";
-    const info = await recordVersion(sessionPath, "claude", content, "Test", 500);
+    const info = await recordVersion(
+      sessionPath,
+      "claude",
+      content,
+      "Test",
+      500,
+    );
     expect(info.sizeBytes).toBe(Buffer.byteLength(content, "utf-8"));
     expect(info.tokensTotal).toBe(500);
   });

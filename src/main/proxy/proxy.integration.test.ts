@@ -24,7 +24,12 @@ import type { ProxyEvent } from "../../shared/proxy-events";
 interface UpstreamFixture {
   origin: string;
   close(): Promise<void>;
-  lastRequest: { method: string; path: string; headers: Record<string, string>; body: string } | null;
+  lastRequest: {
+    method: string;
+    path: string;
+    headers: Record<string, string>;
+    body: string;
+  } | null;
 }
 
 let cert: { key: string; cert: string };
@@ -55,10 +60,14 @@ beforeAll(async () => {
 async function spawnHttpsUpstream(
   handler: (req: http.IncomingMessage, res: http.ServerResponse) => void,
 ): Promise<UpstreamFixture> {
-  const server = https.createServer({ key: cert.key, cert: cert.cert }, handler);
+  const server = https.createServer(
+    { key: cert.key, cert: cert.cert },
+    handler,
+  );
   await new Promise<void>((resolve) => server.listen(0, "127.0.0.1", resolve));
   const addr = server.address();
-  if (typeof addr !== "object" || addr === null) throw new Error("upstream addr");
+  if (typeof addr !== "object" || addr === null)
+    throw new Error("upstream addr");
   return {
     origin: `https://127.0.0.1:${addr.port}`,
     async close() {
@@ -135,7 +144,11 @@ describe("proxy integration", () => {
         headers: req.headers,
         body: Buffer.concat(chunks).toString("utf8"),
       };
-      const responseBody = JSON.stringify({ id: "msg_1", role: "assistant", text: "ok" });
+      const responseBody = JSON.stringify({
+        id: "msg_1",
+        role: "assistant",
+        text: "ok",
+      });
       res.writeHead(200, {
         "content-type": "application/json",
         "content-length": String(Buffer.byteLength(responseBody)),
@@ -151,17 +164,26 @@ describe("proxy integration", () => {
       onEntry: (e) => localRecorder.appendEntry(e),
     });
 
-    const result = await postJson(proxy.port, "/v1/messages", {
-      model: "claude-opus-4-7",
-      max_tokens: 10,
-      messages: [{ role: "user", content: "hi" }],
-    }, {
-      "x-api-key": "sk-test-secret",
-      "anthropic-version": "2023-06-01",
-    });
+    const result = await postJson(
+      proxy.port,
+      "/v1/messages",
+      {
+        model: "claude-opus-4-7",
+        max_tokens: 10,
+        messages: [{ role: "user", content: "hi" }],
+      },
+      {
+        "x-api-key": "sk-test-secret",
+        "anthropic-version": "2023-06-01",
+      },
+    );
 
     expect(result.status).toBe(200);
-    expect(JSON.parse(result.body)).toEqual({ id: "msg_1", role: "assistant", text: "ok" });
+    expect(JSON.parse(result.body)).toEqual({
+      id: "msg_1",
+      role: "assistant",
+      text: "ok",
+    });
 
     // The upstream handler ran => TLS handshake to the upstream succeeded.
     const got = received.value;
@@ -188,12 +210,16 @@ describe("proxy integration", () => {
     expect(files).toHaveLength(1);
 
     // Emitted events: secrets stripped from request_headers.
-    const reqHeaderEvents = collectedEvents.filter((e) => e.kind === "request_headers");
+    const reqHeaderEvents = collectedEvents.filter(
+      (e) => e.kind === "request_headers",
+    );
     expect(reqHeaderEvents).toHaveLength(1);
     expect(collectedEvents.every((e) => e.clientId.length > 0)).toBe(true);
     if (reqHeaderEvents[0].kind === "request_headers") {
       expect(reqHeaderEvents[0].headers["x-api-key"]).toBeUndefined();
-      expect(reqHeaderEvents[0].headers["anthropic-version"]).toBe("2023-06-01");
+      expect(reqHeaderEvents[0].headers["anthropic-version"]).toBe(
+        "2023-06-01",
+      );
     }
   });
 
@@ -206,29 +232,29 @@ describe("proxy integration", () => {
         "cache-control": "no-cache",
       });
       const sse = [
-        'event: message_start',
+        "event: message_start",
         'data: {"type":"message_start","message":{"id":"msg_stream","type":"message","role":"assistant","model":"claude-opus-4-7","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":5,"output_tokens":0}}}',
-        '',
-        'event: content_block_start',
+        "",
+        "event: content_block_start",
         'data: {"type":"content_block_start","index":0,"content_block":{"type":"text","text":""}}',
-        '',
-        'event: content_block_delta',
+        "",
+        "event: content_block_delta",
         'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"Hello"}}',
-        '',
-        'event: content_block_delta',
+        "",
+        "event: content_block_delta",
         'data: {"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":" world"}}',
-        '',
-        'event: content_block_stop',
+        "",
+        "event: content_block_stop",
         'data: {"type":"content_block_stop","index":0}',
-        '',
-        'event: message_delta',
+        "",
+        "event: message_delta",
         'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":2}}',
-        '',
-        'event: message_stop',
+        "",
+        "event: message_stop",
         'data: {"type":"message_stop"}',
-        '',
-        '',
-      ].join('\n');
+        "",
+        "",
+      ].join("\n");
       res.end(sse);
     });
 
@@ -257,7 +283,9 @@ describe("proxy integration", () => {
     const harPath = localRecorder.getCurrentPath();
     if (!harPath) throw new Error("HAR not written");
     const harContent = JSON.parse(await readFile(harPath, "utf8"));
-    const respText = JSON.parse(harContent.log.entries[0].response.content.text);
+    const respText = JSON.parse(
+      harContent.log.entries[0].response.content.text,
+    );
     expect(respText).toMatchObject({
       id: "msg_stream",
       role: "assistant",
@@ -273,10 +301,14 @@ describe("proxy integration", () => {
     const sseEvents = collectedEvents.filter((e) => e.kind === "sse_event");
     expect(sseEvents.length).toBeGreaterThanOrEqual(6);
 
-    const completeEvent = collectedEvents.find((e) => e.kind === "response_complete");
+    const completeEvent = collectedEvents.find(
+      (e) => e.kind === "response_complete",
+    );
     expect(completeEvent).toBeDefined();
     if (completeEvent?.kind === "response_complete") {
-      expect(completeEvent.body.content).toEqual([{ type: "text", text: "Hello world" }]);
+      expect(completeEvent.body.content).toEqual([
+        { type: "text", text: "Hello world" },
+      ]);
     }
   });
 
@@ -286,22 +318,24 @@ describe("proxy integration", () => {
     // message_start. We force identity by stripping accept-encoding.
     let upstreamAcceptEncoding: string | undefined;
     upstream = await spawnHttpsUpstream(async (req, res) => {
-      upstreamAcceptEncoding = req.headers["accept-encoding"] as string | undefined;
+      upstreamAcceptEncoding = req.headers["accept-encoding"] as
+        | string
+        | undefined;
       for await (const _ of req) void _;
       res.writeHead(200, { "content-type": "text/event-stream" });
       res.end(
         [
-          'event: message_start',
+          "event: message_start",
           'data: {"type":"message_start","message":{"id":"msg_x","type":"message","role":"assistant","model":"m","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}',
-          '',
-          'event: message_delta',
+          "",
+          "event: message_delta",
           'data: {"type":"message_delta","delta":{"stop_reason":"end_turn","stop_sequence":null},"usage":{"output_tokens":1}}',
-          '',
-          'event: message_stop',
+          "",
+          "event: message_stop",
           'data: {"type":"message_stop"}',
-          '',
-          '',
-        ].join('\n'),
+          "",
+          "",
+        ].join("\n"),
       );
     });
 
@@ -320,7 +354,12 @@ describe("proxy integration", () => {
         // Client requests compression — the proxy must NOT forward this.
         "accept-encoding": "gzip, br",
       },
-      body: JSON.stringify({ model: "x", max_tokens: 1, messages: [], stream: true }),
+      body: JSON.stringify({
+        model: "x",
+        max_tokens: 1,
+        messages: [],
+        stream: true,
+      }),
     }).then((r) => r.text());
 
     expect(upstreamAcceptEncoding).toBeUndefined();
@@ -330,7 +369,9 @@ describe("proxy integration", () => {
     expect(errors).toEqual([]);
 
     // response_complete should carry an actual assembled body, not the raw text.
-    const complete = collectedEvents.find((e) => e.kind === "response_complete");
+    const complete = collectedEvents.find(
+      (e) => e.kind === "response_complete",
+    );
     expect(complete).toBeDefined();
     if (complete?.kind === "response_complete") {
       expect(complete.body).toMatchObject({ id: "msg_x", type: "message" });

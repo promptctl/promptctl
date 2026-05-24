@@ -3,7 +3,12 @@
 // Session files live under ~/.gemini/tmp/<folder>/chats/*.json.
 import { readdir, readFile, writeFile, stat } from "node:fs/promises";
 import path from "node:path";
-import type { Project, SessionInfo, MessageSummary, DiffEntry } from "../../../shared/types";
+import type {
+  Project,
+  SessionInfo,
+  MessageSummary,
+  DiffEntry,
+} from "../../../shared/types";
 import type { ProviderAdapter } from "../types";
 import { countTokens } from "../tokenizer";
 import type { RawSession, RawMessage, RawContent } from "./types";
@@ -36,7 +41,12 @@ function extractPreview(msg: RawMessage): string {
 }
 
 function extractText(msg: RawMessage): string {
-  const role = msg.type === "user" ? "User" : msg.type === "gemini" ? "Assistant" : msg.type;
+  const role =
+    msg.type === "user"
+      ? "User"
+      : msg.type === "gemini"
+        ? "Assistant"
+        : msg.type;
   const parts: string[] = [];
   for (const c of contentArray(msg)) {
     if ("text" in c && typeof c.text === "string") {
@@ -283,9 +293,7 @@ export const geminiAdapter: ProviderAdapter = {
             const content = msg.content;
             if (typeof content === "string") {
               if (content.length > 5) {
-                previewMessages.push(
-                  content.slice(0, 200).replace(/\n/g, " "),
-                );
+                previewMessages.push(content.slice(0, 200).replace(/\n/g, " "));
               }
               continue;
             }
@@ -298,9 +306,7 @@ export const geminiAdapter: ProviderAdapter = {
                 typeof c.text === "string" &&
                 c.text.length > 5
               ) {
-                previewMessages.push(
-                  c.text.slice(0, 200).replace(/\n/g, " "),
-                );
+                previewMessages.push(c.text.slice(0, 200).replace(/\n/g, " "));
                 break;
               }
             }
@@ -441,9 +447,16 @@ export const geminiAdapter: ProviderAdapter = {
     const newSummaries = summarizeMessages(newMsgs);
 
     // Match by id (Gemini messages have stable ids); positional fallback
-    const oldByKey = new Map<string, { msg: RawMessage; summary: MessageSummary; pos: number }>();
-    const newByKey = new Map<string, { msg: RawMessage; summary: MessageSummary; pos: number }>();
-    const keyOf = (msg: RawMessage, pos: number): string => msg.id ?? `pos:${pos}`;
+    const oldByKey = new Map<
+      string,
+      { msg: RawMessage; summary: MessageSummary; pos: number }
+    >();
+    const newByKey = new Map<
+      string,
+      { msg: RawMessage; summary: MessageSummary; pos: number }
+    >();
+    const keyOf = (msg: RawMessage, pos: number): string =>
+      msg.id ?? `pos:${pos}`;
 
     oldMsgs.forEach((msg, pos) =>
       oldByKey.set(keyOf(msg, pos), { msg, summary: oldSummaries[pos], pos }),

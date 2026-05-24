@@ -35,7 +35,14 @@ function getRgPath(): string {
   const appPath = app?.getAppPath?.() ?? process.cwd();
   const candidates = [
     path.join(appPath, "node_modules", "@vscode", "ripgrep", "bin", binary),
-    path.join(process.cwd(), "node_modules", "@vscode", "ripgrep", "bin", binary),
+    path.join(
+      process.cwd(),
+      "node_modules",
+      "@vscode",
+      "ripgrep",
+      "bin",
+      binary,
+    ),
     process.resourcesPath
       ? path.join(
           process.resourcesPath,
@@ -384,9 +391,7 @@ async function enrichAndSort(
     }
   }
 
-  await Promise.all(
-    Array.from({ length: ENRICH_CONCURRENCY }, () => worker()),
-  );
+  await Promise.all(Array.from({ length: ENRICH_CONCURRENCY }, () => worker()));
 
   if (pending.length > 0) {
     onBatch?.(pending);

@@ -38,7 +38,8 @@ export function countTokensByKind(text: string, kind: ContentKind): number {
 /** Sum token estimates over a tagged-chunk array. */
 export function sumChunks(chunks: BillableChunk[]): number {
   let total = 0;
-  for (const chunk of chunks) total += countTokensByKind(chunk.text, chunk.kind);
+  for (const chunk of chunks)
+    total += countTokensByKind(chunk.text, chunk.kind);
   return total;
 }
 

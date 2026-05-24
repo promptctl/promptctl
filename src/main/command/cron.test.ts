@@ -10,7 +10,9 @@ describe("parseCron", () => {
 
   it("parses step values", () => {
     const expr = parseCron("*/5 * * * *");
-    expect(expr.minutes).toEqual([0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55]);
+    expect(expr.minutes).toEqual([
+      0, 5, 10, 15, 20, 25, 30, 35, 40, 45, 50, 55,
+    ]);
   });
 
   it("parses ranges", () => {

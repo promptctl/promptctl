@@ -17,13 +17,11 @@ const PANE: PaneId = "%17" as PaneId;
 const SESS: SessionId = "$3" as SessionId;
 const WIN: WindowId = "@5" as WindowId;
 
-function row(
-  overrides: {
-    launchId: LaunchId;
-    status: Launch["status"];
-    pid?: number | null;
-  },
-): Launch {
+function row(overrides: {
+  launchId: LaunchId;
+  status: Launch["status"];
+  pid?: number | null;
+}): Launch {
   const base = {
     launchId: overrides.launchId,
     toolKind: "claude" as const,
@@ -71,12 +69,17 @@ describe("envContainsLaunchId", () => {
 
   it("does not match a different launchId that shares a prefix", () => {
     expect(
-      envContainsLaunchId("PROMPTCTL_LAUNCH_ID=abc-123-extended", "abc-123" as LaunchId),
+      envContainsLaunchId(
+        "PROMPTCTL_LAUNCH_ID=abc-123-extended",
+        "abc-123" as LaunchId,
+      ),
     ).toBe(false);
   });
 
   it("returns false when the var is absent", () => {
-    expect(envContainsLaunchId("FOO=bar\0BAZ=qux", "anything" as LaunchId)).toBe(false);
+    expect(
+      envContainsLaunchId("FOO=bar\0BAZ=qux", "anything" as LaunchId),
+    ).toBe(false);
   });
 });
 

@@ -16,10 +16,7 @@ import type {
 } from "../../shared/proxy-events";
 import type { Launch, LaunchId } from "../../shared/types";
 import { ResponseAssembler } from "./assembler";
-import {
-  resolveClientId,
-  resolveRequestClient,
-} from "./client-identity";
+import { resolveClientId, resolveRequestClient } from "./client-identity";
 import { makeEnvelope, newRequestId } from "./envelope";
 import { proxyEventBus } from "./events";
 import { parseSseFrame } from "./sse-parser";
@@ -49,9 +46,7 @@ const HOP_BY_HOP = new Set([
 // uncompressed); HTTP clients all tolerate missing content-encoding.
 // [LAW:dataflow-not-control-flow] One rule, applied unconditionally — no
 // "is this an inspectable response" branch.
-const STRIPPED_UPSTREAM_REQUEST_HEADERS = new Set([
-  "accept-encoding",
-]);
+const STRIPPED_UPSTREAM_REQUEST_HEADERS = new Set(["accept-encoding"]);
 
 const SECRET_HEADERS = new Set([
   "authorization",
@@ -77,7 +72,9 @@ function rawHeaders(req: http.IncomingMessage): Record<string, string> {
   return out;
 }
 
-function upstreamHeaders(headers: Record<string, string>): Record<string, string> {
+function upstreamHeaders(
+  headers: Record<string, string>,
+): Record<string, string> {
   const out: Record<string, string> = {};
   for (const [k, v] of Object.entries(headers)) {
     const lk = k.toLowerCase();
@@ -124,17 +121,19 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
   const upstreamBase = new URL(opts.upstreamTarget);
   const resolveLaunch = opts.resolveLaunch ?? (() => null);
   const server = http.createServer((req, res) =>
-    handleRequest(req, res, upstreamBase, opts.onEntry, resolveLaunch).catch((err) => {
-      // Last-resort error handler — handleRequest emits proxy_error before
-      // throwing, so this is just to prevent server crashes.
-      console.error("[proxy] unhandled error in handleRequest:", err);
-      if (!res.headersSent) {
-        res.writeHead(502, { "content-type": "text/plain" });
-        res.end(`Proxy error: ${(err as Error).message}`);
-      } else {
-        res.end();
-      }
-    }),
+    handleRequest(req, res, upstreamBase, opts.onEntry, resolveLaunch).catch(
+      (err) => {
+        // Last-resort error handler — handleRequest emits proxy_error before
+        // throwing, so this is just to prevent server crashes.
+        console.error("[proxy] unhandled error in handleRequest:", err);
+        if (!res.headersSent) {
+          res.writeHead(502, { "content-type": "text/plain" });
+          res.end(`Proxy error: ${(err as Error).message}`);
+        } else {
+          res.end();
+        }
+      },
+    ),
   );
   // Per-socket cache for the *fallback* ClientInfo (the socket→pid
   // walk result). Identity itself is resolved per request:
@@ -169,7 +168,9 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
 async function readRequestBody(req: http.IncomingMessage): Promise<Buffer> {
   const chunks: Buffer[] = [];
   for await (const chunk of req) {
-    chunks.push(typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer));
+    chunks.push(
+      typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer),
+    );
   }
   return Buffer.concat(chunks);
 }
@@ -248,8 +249,12 @@ async function handleRequest(
     });
   } catch (err) {
     const message = (err as Error).message;
-    const cause = (err as Error & { cause?: { code?: string; message?: string } }).cause;
-    const detail = cause ? ` (cause: ${cause.code ?? ""} ${cause.message ?? ""})` : "";
+    const cause = (
+      err as Error & { cause?: { code?: string; message?: string } }
+    ).cause;
+    const detail = cause
+      ? ` (cause: ${cause.code ?? ""} ${cause.message ?? ""})`
+      : "";
     emit({
       ...envelope(),
       kind: "proxy_error",
@@ -279,7 +284,9 @@ async function handleRequest(
   // Tee the response body: write each chunk to the client AND feed it through
   // the SSE parser pipeline. The parser is best-effort — any parse error is
   // logged but does not interrupt the bytes flowing to the client.
-  const isSse = (upstream.headers["content-type"] ?? "").includes("text/event-stream");
+  const isSse = (upstream.headers["content-type"] ?? "").includes(
+    "text/event-stream",
+  );
   const responseChunks: Buffer[] = [];
   const sseEvents: SseEvent[] = [];
   let assembler: ResponseAssembler | null = null;
@@ -291,7 +298,8 @@ async function handleRequest(
   let sseBuffer = "";
 
   for await (const chunk of upstream.body) {
-    const buf = typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer);
+    const buf =
+      typeof chunk === "string" ? Buffer.from(chunk) : (chunk as Buffer);
     responseChunks.push(buf);
     res.write(buf);
 
@@ -383,7 +391,8 @@ async function handleRequest(
     responseStatus: upstream.status,
     responseHeaders: upstream.headers,
     assembledMessage,
-    rawResponseBody: assembledMessage === null ? Buffer.concat(responseChunks) : null,
+    rawResponseBody:
+      assembledMessage === null ? Buffer.concat(responseChunks) : null,
   });
   onEntry(entry);
 }
@@ -431,7 +440,7 @@ function buildHarEntry(a: BuildEntryArgs): HarEntry {
 
   const responseText = a.assembledMessage
     ? JSON.stringify(a.assembledMessage)
-    : a.rawResponseBody?.toString("utf8") ?? "";
+    : (a.rawResponseBody?.toString("utf8") ?? "");
 
   return {
     startedDateTime: new Date(a.startedAt).toISOString(),
@@ -440,7 +449,10 @@ function buildHarEntry(a: BuildEntryArgs): HarEntry {
       method: a.method,
       url: a.url,
       httpVersion: "HTTP/1.1",
-      headers: Object.entries(a.requestHeaders).map(([name, value]) => ({ name, value })),
+      headers: Object.entries(a.requestHeaders).map(([name, value]) => ({
+        name,
+        value,
+      })),
       queryString: [],
       postData: {
         mimeType: "application/json",
@@ -455,7 +467,10 @@ function buildHarEntry(a: BuildEntryArgs): HarEntry {
       httpVersion: "HTTP/1.1",
       headers: [
         { name: "content-type", value: "application/json" },
-        { name: "content-length", value: String(Buffer.byteLength(responseText, "utf8")) },
+        {
+          name: "content-length",
+          value: String(Buffer.byteLength(responseText, "utf8")),
+        },
         ...Object.entries(a.responseHeaders)
           .filter(([k]) => {
             const lk = k.toLowerCase();

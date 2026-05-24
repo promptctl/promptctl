@@ -93,9 +93,7 @@ export function PaneViewer() {
   // function reference and miss every registry update.
   const launch = useLaunchStore((s) =>
     pane
-      ? s.launches.find(
-          (l) => l.paneId === pane.id && l.status !== "exited",
-        )
+      ? s.launches.find((l) => l.paneId === pane.id && l.status !== "exited")
       : undefined,
   );
   // [LAW:dataflow-not-control-flow] Stream is keyed on the *valid* pane — if

@@ -43,7 +43,10 @@ function makePane(overrides: Partial<TmuxPane> = {}): TmuxPane {
 function harness(opts: { initialPanes?: TmuxPane[] } = {}) {
   const registry = new LaunchRegistry({ save: async () => undefined });
   const snapshotListeners: ((s: TmuxSnapshot) => void)[] = [];
-  const tmuxEventListeners = new Map<keyof TmuxEventMap, ((ev: unknown) => void)[]>();
+  const tmuxEventListeners = new Map<
+    keyof TmuxEventMap,
+    ((ev: unknown) => void)[]
+  >();
   const connStateListeners: ((s: ConnectionStateEvent) => void)[] = [];
   // Default initial snapshot contains the canonical launch's pane with
   // an unset pid (0) so makeRunningLaunch doesn't immediately exit
@@ -215,12 +218,11 @@ describe("LaunchCorrelator exit detection", () => {
     const id = makeRunningLaunch(h.registry);
     // Same pane id, but toolKind is now "unknown" — the tool quit and
     // the shell took over the foreground.
-    h.pushSnapshot([
-      makePane({ currentCommand: "zsh", toolKind: "unknown" }),
-    ]);
+    h.pushSnapshot([makePane({ currentCommand: "zsh", toolKind: "unknown" })]);
     const after = h.registry.get(id);
     expect(after?.status).toBe("exited");
-    if (after?.status === "exited") expect(after.exitReason).toBe("tool exited");
+    if (after?.status === "exited")
+      expect(after.exitReason).toBe("tool exited");
     h.dispose();
   });
 
@@ -243,7 +245,8 @@ describe("LaunchCorrelator exit detection", () => {
     h.fireTmuxEvent("window-close", { windowId: 5 });
     const after = h.registry.get(id);
     expect(after?.status).toBe("exited");
-    if (after?.status === "exited") expect(after.exitReason).toBe("window closed");
+    if (after?.status === "exited")
+      expect(after.exitReason).toBe("window closed");
     h.dispose();
   });
 

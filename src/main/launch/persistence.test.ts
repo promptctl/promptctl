@@ -6,7 +6,13 @@ import { mkdtemp, rm, readdir } from "node:fs/promises";
 import { tmpdir } from "node:os";
 import { join } from "node:path";
 import { loadLaunches, saveLaunches, validateLaunchShape } from "./persistence";
-import type { Launch, LaunchId, PaneId, SessionId, WindowId } from "../../shared/types";
+import type {
+  Launch,
+  LaunchId,
+  PaneId,
+  SessionId,
+  WindowId,
+} from "../../shared/types";
 
 const PANE: PaneId = "%17" as PaneId;
 const SESS: SessionId = "$3" as SessionId;
@@ -74,7 +80,16 @@ describe("launches.json persistence", () => {
     // wrong type for paneId; fourth is a string (not even an object).
     const file = [
       makeRow("good"),
-      { launchId: "b", toolKind: "claude", paneId: "%1", sessionId: "$1", windowId: "@1", cwd: "/x", startedAt: 1, env: {} },
+      {
+        launchId: "b",
+        toolKind: "claude",
+        paneId: "%1",
+        sessionId: "$1",
+        windowId: "@1",
+        cwd: "/x",
+        startedAt: 1,
+        env: {},
+      },
       { ...makeRow("c"), paneId: 42 },
       "not an object",
     ];
@@ -107,7 +122,9 @@ describe("validateLaunchShape", () => {
   }
 
   it("accepts a well-formed pending row", () => {
-    expect(validateLaunchShape({ ...baseCommon(), status: "pending" })).toBeNull();
+    expect(
+      validateLaunchShape({ ...baseCommon(), status: "pending" }),
+    ).toBeNull();
   });
 
   it("accepts a well-formed running row with pid", () => {
@@ -142,7 +159,10 @@ describe("validateLaunchShape", () => {
   });
 
   it("rejects missing required fields", () => {
-    const missing = { ...baseCommon(), status: "pending" } as Record<string, unknown>;
+    const missing = { ...baseCommon(), status: "pending" } as Record<
+      string,
+      unknown
+    >;
     delete missing.paneId;
     expect(validateLaunchShape(missing)).toContain("paneId");
   });

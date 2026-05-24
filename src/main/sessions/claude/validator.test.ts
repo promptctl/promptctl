@@ -1,8 +1,5 @@
 import { describe, it, expect } from "vitest";
-import {
-  validateClaudeLines,
-  validateClaudeContent,
-} from "./validator";
+import { validateClaudeLines, validateClaudeContent } from "./validator";
 import type { ClaudeLine } from "./types";
 
 function line(partial: Partial<ClaudeLine> & { type: string }): ClaudeLine {
@@ -43,7 +40,11 @@ function userWithToolResult(
 describe("validateClaudeLines — happy path", () => {
   it("reports no violations for a well-paired session", () => {
     const lines = [
-      line({ type: "user", uuid: "u1", message: { role: "user", content: "hi" } }),
+      line({
+        type: "user",
+        uuid: "u1",
+        message: { role: "user", content: "hi" },
+      }),
       {
         ...assistantWithToolUse("a1", "tool-1"),
         parentUuid: "u1",
@@ -55,7 +56,11 @@ describe("validateClaudeLines — happy path", () => {
 
   it("tolerates absent parentUuid at branch roots", () => {
     const lines = [
-      line({ type: "user", uuid: "u1", message: { role: "user", content: "hi" } }),
+      line({
+        type: "user",
+        uuid: "u1",
+        message: { role: "user", content: "hi" },
+      }),
     ];
     expect(validateClaudeLines(lines).violations).toEqual([]);
   });
@@ -65,7 +70,11 @@ describe("validateClaudeLines — tool_use/tool_result pairing", () => {
   it("flags orphaned tool_result when the tool_use was removed", () => {
     // Scenario: user trimmed the assistant line; tool_result now has no match.
     const lines = [
-      line({ type: "user", uuid: "u1", message: { role: "user", content: "hi" } }),
+      line({
+        type: "user",
+        uuid: "u1",
+        message: { role: "user", content: "hi" },
+      }),
       userWithToolResult("u2", "tool-1", "u1"),
     ];
     const result = validateClaudeLines(lines);
@@ -85,7 +94,9 @@ describe("validateClaudeLines — tool_use/tool_result pairing", () => {
     ];
     const result = validateClaudeLines(lines);
     expect(result.violations).toHaveLength(1);
-    expect(result.violations[0].offenders[0].detail).toMatch(/no matching tool_result/);
+    expect(result.violations[0].offenders[0].detail).toMatch(
+      /no matching tool_result/,
+    );
   });
 
   it("flags inverted ordering where tool_result precedes tool_use", () => {
@@ -95,7 +106,9 @@ describe("validateClaudeLines — tool_use/tool_result pairing", () => {
     ];
     const result = validateClaudeLines(lines);
     expect(result.violations).toHaveLength(1);
-    expect(result.violations[0].offenders[0].detail).toMatch(/ordering is inverted/);
+    expect(result.violations[0].offenders[0].detail).toMatch(
+      /ordering is inverted/,
+    );
   });
 
   it("aggregates multiple orphans into a single violation entry", () => {
@@ -122,7 +135,9 @@ describe("validateClaudeLines — parent_uuid_chain", () => {
       } as ClaudeLine),
     ];
     const result = validateClaudeLines(lines);
-    const v = result.violations.find((x) => x.invariantId === "parent_uuid_chain");
+    const v = result.violations.find(
+      (x) => x.invariantId === "parent_uuid_chain",
+    );
     if (!v) throw new Error("expected parent_uuid_chain violation");
     expect(v.offenders[0].detail).toMatch(/nonexistent-uuid/);
   });
@@ -137,7 +152,11 @@ describe("validateClaudeLines — parent_uuid_chain", () => {
         message: { role: "user", content: "hi" },
         parentUuid: "u2",
       } as ClaudeLine),
-      line({ type: "user", uuid: "u2", message: { role: "user", content: "hi" } }),
+      line({
+        type: "user",
+        uuid: "u2",
+        message: { role: "user", content: "hi" },
+      }),
     ];
     const parentViolations = validateClaudeLines(lines).violations.filter(
       (v) => v.invariantId === "parent_uuid_chain",
@@ -172,7 +191,9 @@ describe("validateClaudeContent", () => {
         uuid: "u1",
         message: {
           role: "user",
-          content: [{ type: "tool_result", tool_use_id: "tool-gone", content: "x" }],
+          content: [
+            { type: "tool_result", tool_use_id: "tool-gone", content: "x" },
+          ],
         },
       }),
       "", // blank lines tolerated

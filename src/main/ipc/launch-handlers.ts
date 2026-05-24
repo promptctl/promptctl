@@ -58,9 +58,8 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
 
   ipcMain.handle("launch:list", () => registry.list());
 
-  ipcMain.handle(
-    "launch:get",
-    (_e, launchId: LaunchId): Launch | null => registry.get(launchId),
+  ipcMain.handle("launch:get", (_e, launchId: LaunchId): Launch | null =>
+    registry.get(launchId),
   );
 
   // [LAW:single-enforcer] One IPC entry to spawn a tagged launch. The

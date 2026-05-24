@@ -21,7 +21,9 @@ export function computeLatency(
     record.firstByteNs === null ? null : record.firstByteNs - record.startedNs;
   const endNs = record.endedNs ?? record.completedNs;
   const inFlight = endNs === null;
-  const durationNs = inFlight ? nowNs - record.startedNs : endNs - record.startedNs;
+  const durationNs = inFlight
+    ? nowNs - record.startedNs
+    : endNs - record.startedNs;
   const outputTokens = record.assembledResponse?.usage.output_tokens ?? null;
   const tokensPerSec =
     !inFlight &&

@@ -45,10 +45,14 @@ export const useProxyStore = create<ProxyStore>((set) => ({
   appendEvent: (event) =>
     set((state) => {
       const clients = new Map(state.clients);
-      clients.set(event.clientId, clientFromEvent(event, clients.get(event.clientId)));
+      clients.set(
+        event.clientId,
+        clientFromEvent(event, clients.get(event.clientId)),
+      );
       const requests = foldRequests(state.requests, event);
       const selectedRequestId =
-        state.selectedRequestId !== null && !requests.has(state.selectedRequestId)
+        state.selectedRequestId !== null &&
+        !requests.has(state.selectedRequestId)
           ? null
           : state.selectedRequestId;
       return {
@@ -67,21 +71,28 @@ export const useProxyStore = create<ProxyStore>((set) => ({
       for (const info of infos) clients.set(info.clientId, info);
       return { clients };
     }),
-  selectClient: (clientId) => set({ selectedClientId: clientId, selectedRequestId: null }),
+  selectClient: (clientId) =>
+    set({ selectedClientId: clientId, selectedRequestId: null }),
   toggleRequest: (requestId) =>
     set((state) => ({
-      selectedRequestId: state.selectedRequestId === requestId ? null : requestId,
+      selectedRequestId:
+        state.selectedRequestId === requestId ? null : requestId,
     })),
   clearInactiveClients: () =>
     set((state) => {
-      const activeClientIds = new Set([...state.requests.values()].map((r) => r.clientId));
+      const activeClientIds = new Set(
+        [...state.requests.values()].map((r) => r.clientId),
+      );
       const clients = new Map(
-        [...state.clients.entries()].filter(([clientId]) => activeClientIds.has(clientId)),
+        [...state.clients.entries()].filter(([clientId]) =>
+          activeClientIds.has(clientId),
+        ),
       );
       return {
         clients,
         selectedClientId:
-          state.selectedClientId !== null && !clients.has(state.selectedClientId)
+          state.selectedClientId !== null &&
+          !clients.has(state.selectedClientId)
             ? null
             : state.selectedClientId,
       };
@@ -117,7 +128,9 @@ export function initProxySubscription(): () => void {
 
 export function visibleRequests(state: ProxyStore): RequestRecord[] {
   return sortedRequests(state.requests).filter((record) =>
-    state.selectedClientId === null ? true : record.clientId === state.selectedClientId,
+    state.selectedClientId === null
+      ? true
+      : record.clientId === state.selectedClientId,
   );
 }
 
@@ -181,7 +194,10 @@ function applyEvent(record: RequestRecord, event: ProxyEvent): RequestRecord {
   }
 }
 
-function nextState(current: RequestRecordState, target: RequestRecordState): RequestRecordState {
+function nextState(
+  current: RequestRecordState,
+  target: RequestRecordState,
+): RequestRecordState {
   return current === "errored" ? current : target;
 }
 
@@ -204,7 +220,9 @@ function newRecord(event: ProxyEvent): RequestRecord {
   };
 }
 
-function trimRequests(records: Map<string, RequestRecord>): Map<string, RequestRecord> {
+function trimRequests(
+  records: Map<string, RequestRecord>,
+): Map<string, RequestRecord> {
   const sorted = sortedRequests(records);
   const keep = sorted.slice(Math.max(0, sorted.length - MAX_REQUESTS));
   return new Map(keep.map((record) => [record.requestId, record]));
@@ -214,7 +232,10 @@ function sortedRequests(records: Map<string, RequestRecord>): RequestRecord[] {
   return [...records.values()].sort((a, b) => a.startedNs - b.startedNs);
 }
 
-function clientFromEvent(event: ProxyEvent, previous: ClientInfo | undefined): ClientInfo {
+function clientFromEvent(
+  event: ProxyEvent,
+  previous: ClientInfo | undefined,
+): ClientInfo {
   return {
     clientId: event.clientId,
     pid: previous?.pid ?? null,

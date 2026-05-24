@@ -1,4 +1,10 @@
-import { useEffect, useState, useCallback, useRef, type ReactNode } from "react";
+import {
+  useEffect,
+  useState,
+  useCallback,
+  useRef,
+  type ReactNode,
+} from "react";
 import { useSessionStore } from "../store/sessions";
 import type {
   MessageSummary,
@@ -137,9 +143,8 @@ function HelpPanel({
               Manually cut off-topic tangents or frustrated back-and-forth
             </li>
             <li>
-              <strong className="text-red-400">Save</strong> &mdash; original
-              is backed up as{" "}
-              <code className="text-neutral-500">.backup</code>
+              <strong className="text-red-400">Save</strong> &mdash; original is
+              backed up as <code className="text-neutral-500">.backup</code>
             </li>
             <li>
               Resume:{" "}
@@ -181,7 +186,9 @@ function HelpPanel({
           <div className="space-y-1">
             {Object.entries(flagDefinitions).map(([, def]) => (
               <p key={def.label}>
-                <span className={`rounded px-1 py-0.5 text-sm font-bold ${def.color}`}>
+                <span
+                  className={`rounded px-1 py-0.5 text-sm font-bold ${def.color}`}
+                >
                   {def.label}
                 </span>{" "}
                 &mdash; {def.tip}
@@ -202,9 +209,9 @@ function HelpPanel({
               </dt>
               <dd className="mt-1 ml-0.5 text-neutral-400">
                 Sends the conversation to the configured LLM and asks it to
-                identify messages whose content is already summarized
-                elsewhere or no longer needed. Runs after Auto-Trim when the
-                conversation is still large.
+                identify messages whose content is already summarized elsewhere
+                or no longer needed. Runs after Auto-Trim when the conversation
+                is still large.
               </dd>
             </div>
             <div>
@@ -214,11 +221,11 @@ function HelpPanel({
                 </span>
               </dt>
               <dd className="mt-1 ml-0.5 text-neutral-400">
-                Clicking the button segments the conversation into topic
-                blocks so you can see its structure at a glance. Entering a
-                query (e.g. <em>&quot;auth refactor&quot;</em>) additionally
-                marks every off-topic segment for removal. Click any chip to
-                flip its kept/removed state.
+                Clicking the button segments the conversation into topic blocks
+                so you can see its structure at a glance. Entering a query (e.g.{" "}
+                <em>&quot;auth refactor&quot;</em>) additionally marks every
+                off-topic segment for removal. Click any chip to flip its
+                kept/removed state.
               </dd>
             </div>
             <div>
@@ -228,10 +235,9 @@ function HelpPanel({
                 </span>
               </dt>
               <dd className="mt-1 ml-0.5 text-neutral-400">
-                Rewrites bulky tool results in place instead of removing
-                them: LLM-summarizes the largest, middle-truncates medium
-                ones, keeps the last few untouched. Thresholds are
-                configurable in Settings.
+                Rewrites bulky tool results in place instead of removing them:
+                LLM-summarizes the largest, middle-truncates medium ones, keeps
+                the last few untouched. Thresholds are configurable in Settings.
               </dd>
             </div>
             <div>
@@ -340,7 +346,8 @@ const TOOL_HOVER_INFO: Record<string, ToolHoverCardContent> = {
       "Splits the conversation into topic segments. Click the button to just see the segments. Enter a query below to mark everything off-topic for removal.",
     whenToUse:
       "When a long session spans several unrelated threads and you only want to carry one forward.",
-    example: 'Query: "authentication rewrite" → keeps auth work, marks the rest.',
+    example:
+      'Query: "authentication rewrite" → keeps auth work, marks the rest.',
   },
   compressTools: {
     title: "Compress Tools",
@@ -376,7 +383,7 @@ const TOOL_HOVER_INFO: Record<string, ToolHoverCardContent> = {
     title: "Invert Selection",
     summary: "Flip the marked/unmarked state of every message.",
     whenToUse:
-      'When it\'s easier to pick what to KEEP — mark those, then Invert to mark the rest for removal.',
+      "When it's easier to pick what to KEEP — mark those, then Invert to mark the rest for removal.",
   },
   copy: {
     title: "Copy Marked",
@@ -943,8 +950,7 @@ function SessionTree({
                     </p>
                   )}
                   {sessions.map((session) => {
-                    const active =
-                      selectedSessionId === session.sessionId;
+                    const active = selectedSessionId === session.sessionId;
                     const sizeWarning = session.fileSizeBytes > 5_000_000;
                     return (
                       <button
@@ -985,9 +991,7 @@ function SessionTree({
                                 key={i}
                                 className="truncate text-sm text-neutral-500"
                               >
-                                <span className="text-blue-400/60">
-                                  &gt;{" "}
-                                </span>
+                                <span className="text-blue-400/60">&gt; </span>
                                 {preview}
                               </p>
                             ))}
@@ -1285,31 +1289,32 @@ export function SessionEditor() {
   // fetched once and cached per index. [LAW:one-source-of-truth] Adapter
   // parses the line; we keep the JS object verbatim.
   const [expandedRows, setExpandedRows] = useState<Set<number>>(new Set());
-  const [rawByIndex, setRawByIndex] = useState<Map<number, unknown>>(
-    new Map(),
-  );
-  const toggleExpand = useCallback(async (index: number) => {
-    const isExpanded = expandedRows.has(index);
-    const next = new Set(expandedRows);
-    if (isExpanded) {
-      next.delete(index);
+  const [rawByIndex, setRawByIndex] = useState<Map<number, unknown>>(new Map());
+  const toggleExpand = useCallback(
+    async (index: number) => {
+      const isExpanded = expandedRows.has(index);
+      const next = new Set(expandedRows);
+      if (isExpanded) {
+        next.delete(index);
+        setExpandedRows(next);
+        return;
+      }
+      next.add(index);
       setExpandedRows(next);
-      return;
-    }
-    next.add(index);
-    setExpandedRows(next);
-    if (!rawByIndex.has(index)) {
-      const raw = await window.electronAPI.invoke(
-        "session:message-raw",
-        index,
-      );
-      setRawByIndex((prev) => {
-        const n = new Map(prev);
-        n.set(index, raw);
-        return n;
-      });
-    }
-  }, [expandedRows, rawByIndex]);
+      if (!rawByIndex.has(index)) {
+        const raw = await window.electronAPI.invoke(
+          "session:message-raw",
+          index,
+        );
+        setRawByIndex((prev) => {
+          const n = new Map(prev);
+          n.set(index, raw);
+          return n;
+        });
+      }
+    },
+    [expandedRows, rawByIndex],
+  );
   const [saveResult, setSaveResult] = useState<SessionSaveResult | null>(null);
   const [showHelp, setShowHelp] = useState(false);
   const [activeFilters, setActiveFilters] = useState<Set<string>>(new Set());
@@ -1336,20 +1341,18 @@ export function SessionEditor() {
     keepLastN: 3,
   });
   useEffect(() => {
-    void window.electronAPI
-      .invoke("settings:load")
-      .then((s: unknown) => {
-        const cfg = s as {
-          compressSummarizeThreshold?: number;
-          compressTruncateThreshold?: number;
-          compressKeepLastN?: number;
-        };
-        setCompressOpts({
-          summarizeThreshold: cfg.compressSummarizeThreshold ?? 5000,
-          truncateThreshold: cfg.compressTruncateThreshold ?? 1000,
-          keepLastN: cfg.compressKeepLastN ?? 3,
-        });
+    void window.electronAPI.invoke("settings:load").then((s: unknown) => {
+      const cfg = s as {
+        compressSummarizeThreshold?: number;
+        compressTruncateThreshold?: number;
+        compressKeepLastN?: number;
+      };
+      setCompressOpts({
+        summarizeThreshold: cfg.compressSummarizeThreshold ?? 5000,
+        truncateThreshold: cfg.compressTruncateThreshold ?? 1000,
+        keepLastN: cfg.compressKeepLastN ?? 3,
       });
+    });
   }, []);
   const [topicSegments, setTopicSegments] = useState<
     {
@@ -1703,634 +1706,662 @@ export function SessionEditor() {
           data-testid="session-editor-sidebar"
           className="flex h-full flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/50 p-3"
         >
-        <SessionSearchInput
-          value={searchQuery}
-          onChange={onSearchInputChange}
-          onClear={() => {
-            if (searchDebounceRef.current)
-              clearTimeout(searchDebounceRef.current);
-            clearSearch();
-          }}
-          isBusy={searchIsBusy}
-          isSearchActive={isSearchActive}
-        />
-        <div className="flex-1 overflow-y-auto">
-          <SessionTree
-            projects={projects}
-            sessionsByProject={sessionsByProject}
-            expandedProjects={expandedProjects}
-            loadingProjects={loadingProjects}
-            selectedSessionId={selectedSession?.sessionId ?? null}
-            providerMetadata={providerMetadata}
-            onToggleProject={(project) => toggleProject(project)}
-            onSelectSession={(session, project) => {
-              setSaveResult(null);
-              setShowHelp(false);
-              selectSession(session, project);
+          <SessionSearchInput
+            value={searchQuery}
+            onChange={onSearchInputChange}
+            onClear={() => {
+              if (searchDebounceRef.current)
+                clearTimeout(searchDebounceRef.current);
+              clearSearch();
             }}
+            isBusy={searchIsBusy}
+            isSearchActive={isSearchActive}
           />
-        </div>
-      </div>
-
-      <MainArea
-        showHistory={showHistory && selectedSession !== null}
-        historyPanel={
-          <VersionHistoryPanel
-            versions={versions}
-            head={versionHead}
-            onClose={() => setShowHistory(false)}
-            onViewDiff={handleViewDiff}
-            onRestore={handleRestoreVersion}
-          />
-        }
-      >
-      {/* Main panel: search results when active, otherwise editor / empty state.
-          When peek is open, the main panel splits into results + preview so
-          the user can read a session without discarding the search. */}
-      {isSearchActive ? (
-        <div className="flex min-w-0 flex-1 gap-3 overflow-hidden">
-          <div
-            className={`flex flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/50 p-4 ${
-              peekResult ? "w-[45%] shrink-0" : "flex-1"
-            }`}
-          >
-            <SessionSearchResults
-              results={searchResults ?? []}
-              status={searchStatus}
-              progressMessage={searchProgressMessage}
-              errorMessage={searchError}
+          <div className="flex-1 overflow-y-auto">
+            <SessionTree
+              projects={projects}
+              sessionsByProject={sessionsByProject}
+              expandedProjects={expandedProjects}
+              loadingProjects={loadingProjects}
+              selectedSessionId={selectedSession?.sessionId ?? null}
               providerMetadata={providerMetadata}
-              outerQuery={searchQuery}
-              peekFilePath={peekResult?.filePath ?? null}
-              onPeek={(r) => {
-                void openPeek(r);
-              }}
-              onOpen={(r) => {
+              onToggleProject={(project) => toggleProject(project)}
+              onSelectSession={(session, project) => {
                 setSaveResult(null);
                 setShowHelp(false);
-                void selectSearchResult(r);
+                selectSession(session, project);
               }}
             />
           </div>
-          {peekResult && (
-            <div className="min-w-0 flex-1">
-              <PeekPanel
-                result={peekResult}
-                messages={peekMessages}
-                loading={peekLoading}
-                error={peekError}
-                providerMetadata={providerMetadata}
-                onClose={closePeek}
-                onOpen={() => {
-                  setSaveResult(null);
-                  setShowHelp(false);
-                  void selectSearchResult(peekResult);
-                }}
-              />
-            </div>
-          )}
         </div>
-      ) : (
-      <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
-        {!selectedSession ? (
-          <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
-            <p className="text-base text-neutral-500">
-              Select a session from the tree to begin editing
-            </p>
-            <button
-              onClick={() => setShowHelp(true)}
-              className="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
-            >
-              How does this work?
-            </button>
-            {showHelp && activeMetadata && (
-              <div className="w-full max-w-2xl">
-                <HelpPanel
-                  onClose={() => setShowHelp(false)}
-                  metadata={activeMetadata}
+
+        <MainArea
+          showHistory={showHistory && selectedSession !== null}
+          historyPanel={
+            <VersionHistoryPanel
+              versions={versions}
+              head={versionHead}
+              onClose={() => setShowHistory(false)}
+              onViewDiff={handleViewDiff}
+              onRestore={handleRestoreVersion}
+            />
+          }
+        >
+          {/* Main panel: search results when active, otherwise editor / empty state.
+          When peek is open, the main panel splits into results + preview so
+          the user can read a session without discarding the search. */}
+          {isSearchActive ? (
+            <div className="flex min-w-0 flex-1 gap-3 overflow-hidden">
+              <div
+                className={`flex flex-col overflow-hidden rounded-lg border border-neutral-800 bg-neutral-900/50 p-4 ${
+                  peekResult ? "w-[45%] shrink-0" : "flex-1"
+                }`}
+              >
+                <SessionSearchResults
+                  results={searchResults ?? []}
+                  status={searchStatus}
+                  progressMessage={searchProgressMessage}
+                  errorMessage={searchError}
+                  providerMetadata={providerMetadata}
+                  outerQuery={searchQuery}
+                  peekFilePath={peekResult?.filePath ?? null}
+                  onPeek={(r) => {
+                    void openPeek(r);
+                  }}
+                  onOpen={(r) => {
+                    setSaveResult(null);
+                    setShowHelp(false);
+                    void selectSearchResult(r);
+                  }}
                 />
               </div>
-            )}
-          </div>
-        ) : (
-          <div className="flex h-full flex-col gap-3 overflow-hidden">
-            {/* Header */}
-            <div className="flex shrink-0 items-center justify-between">
-              <div className="flex items-center gap-3">
-                <button
-                  onClick={clearSession}
-                  className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
-                >
-                  &larr;
-                </button>
-                <div>
-                  <p className="text-base font-medium text-neutral-200">
-                    {selectedSession.summary ||
-                      selectedSession.sessionId.slice(0, 8)}
-                  </p>
-                  <p className="text-sm text-neutral-500">
-                    {selectedProject?.projectRoot} &middot;{" "}
-                    {relativeTime(selectedSession.lastUpdated)}
-                  </p>
+              {peekResult && (
+                <div className="min-w-0 flex-1">
+                  <PeekPanel
+                    result={peekResult}
+                    messages={peekMessages}
+                    loading={peekLoading}
+                    error={peekError}
+                    providerMetadata={providerMetadata}
+                    onClose={closePeek}
+                    onOpen={() => {
+                      setSaveResult(null);
+                      setShowHelp(false);
+                      void selectSearchResult(peekResult);
+                    }}
+                  />
                 </div>
-              </div>
-
-              <div className="flex items-center gap-2">
-                {saveResult && !saveResult.blocked && (
-                  <span className="text-sm text-green-400">
-                    Saved (backup created)
-                  </span>
-                )}
-                <button
-                  onClick={() => setShowHelp((v) => !v)}
-                  className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
-                >
-                  {showHelp ? "Hide guide" : "Guide"}
-                </button>
-              </div>
+              )}
             </div>
+          ) : (
+            <div className="flex min-w-0 flex-1 flex-col overflow-hidden">
+              {!selectedSession ? (
+                <div className="flex flex-1 flex-col items-center justify-center gap-4 text-center">
+                  <p className="text-base text-neutral-500">
+                    Select a session from the tree to begin editing
+                  </p>
+                  <button
+                    onClick={() => setShowHelp(true)}
+                    className="rounded-md border border-neutral-700 px-3 py-1.5 text-sm text-neutral-400 transition-colors hover:bg-neutral-800 hover:text-neutral-200"
+                  >
+                    How does this work?
+                  </button>
+                  {showHelp && activeMetadata && (
+                    <div className="w-full max-w-2xl">
+                      <HelpPanel
+                        onClose={() => setShowHelp(false)}
+                        metadata={activeMetadata}
+                      />
+                    </div>
+                  )}
+                </div>
+              ) : (
+                <div className="flex h-full flex-col gap-3 overflow-hidden">
+                  {/* Header */}
+                  <div className="flex shrink-0 items-center justify-between">
+                    <div className="flex items-center gap-3">
+                      <button
+                        onClick={clearSession}
+                        className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 hover:text-neutral-200"
+                      >
+                        &larr;
+                      </button>
+                      <div>
+                        <p className="text-base font-medium text-neutral-200">
+                          {selectedSession.summary ||
+                            selectedSession.sessionId.slice(0, 8)}
+                        </p>
+                        <p className="text-sm text-neutral-500">
+                          {selectedProject?.projectRoot} &middot;{" "}
+                          {relativeTime(selectedSession.lastUpdated)}
+                        </p>
+                      </div>
+                    </div>
 
-            {/* Help panel */}
-            {showHelp && activeMetadata && (
-              <HelpPanel
-                onClose={() => setShowHelp(false)}
-                metadata={activeMetadata}
-              />
-            )}
+                    <div className="flex items-center gap-2">
+                      {saveResult && !saveResult.blocked && (
+                        <span className="text-sm text-green-400">
+                          Saved (backup created)
+                        </span>
+                      )}
+                      <button
+                        onClick={() => setShowHelp((v) => !v)}
+                        className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
+                      >
+                        {showHelp ? "Hide guide" : "Guide"}
+                      </button>
+                    </div>
+                  </div>
 
-            {/* Toolbar
+                  {/* Help panel */}
+                  {showHelp && activeMetadata && (
+                    <HelpPanel
+                      onClose={() => setShowHelp(false)}
+                      metadata={activeMetadata}
+                    />
+                  )}
+
+                  {/* Toolbar
                 [LAW:locality-or-seam] The toolbar is split into two rows that
                 serve different jobs: the actions row wraps freely (any width,
                 any number of tools), while the save row is always a single
                 line with stats on the left and the primary Save button on
                 the right — so "Remove N & Save" never gets pushed off-screen
                 when the window is narrow or the right panel is open. */}
-            <div className="shrink-0 space-y-2 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2">
-              {/* Actions row — flex-wrap so groups can flow to the next line */}
-              <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
-                {/* Cleanup / AI tools */}
-                <div className="flex items-center gap-2">
-                  <ToolHoverCard info={TOOL_HOVER_INFO.autoTrim}>
-                    <button
-                      onClick={handleAutoTrim}
-                      className="rounded bg-orange-600/20 px-2.5 py-1 text-sm font-medium text-orange-400 transition-colors hover:bg-orange-600/30"
-                    >
-                      Auto-Trim
-                    </button>
-                  </ToolHoverCard>
-                  <ToolHoverCard info={TOOL_HOVER_INFO.smartCompress}>
-                    <button
-                      onClick={handleSmartCompress}
-                      disabled={llmWorking || messages.length === 0}
-                      className="rounded bg-violet-600/20 px-2.5 py-1 text-sm font-medium text-violet-400 transition-colors hover:bg-violet-600/30 disabled:opacity-30"
-                    >
-                      {llmWorking ? "Analyzing..." : "Smart Compress"}
-                    </button>
-                  </ToolHoverCard>
-                  <ToolHoverCard info={TOOL_HOVER_INFO.topicFocus}>
-                    <button
-                      onClick={handleSegmentTopics}
-                      disabled={llmWorking || messages.length === 0}
-                      className="rounded bg-cyan-600/20 px-2.5 py-1 text-sm font-medium text-cyan-400 transition-colors hover:bg-cyan-600/30 disabled:opacity-30"
-                    >
-                      Topic Focus
-                    </button>
-                  </ToolHoverCard>
-                  <ToolHoverCard
-                    info={{
-                      ...TOOL_HOVER_INFO.compressTools,
-                      summary: `${TOOL_HOVER_INFO.compressTools.summary} Current thresholds: summarize at ${compressOpts.summarizeThreshold}+ tokens, truncate at ${compressOpts.truncateThreshold}+, keep last ${compressOpts.keepLastN}.`,
-                    }}
-                  >
-                    <button
-                      onClick={handleCompressTools}
-                      disabled={llmWorking || messages.length === 0}
-                      className="rounded bg-emerald-600/20 px-2.5 py-1 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-600/30 disabled:opacity-30"
-                    >
-                      Compress Tools
-                    </button>
-                  </ToolHoverCard>
-                </div>
-
-                <div className="h-4 w-px bg-neutral-700" />
-
-                {/* Versioning group */}
-                <div className="flex items-center gap-1">
-                  <ToolHoverCard
-                    info={{
-                      ...TOOL_HOVER_INFO.undo,
-                      summary: canUndo
-                        ? `${TOOL_HOVER_INFO.undo.summary} Next undo: ${versions[versionHead - 2]?.label ?? "previous version"}.`
-                        : `${TOOL_HOVER_INFO.undo.summary} Nothing to undo.`,
-                    }}
-                  >
-                    <button
-                      data-testid="undo-button"
-                      onClick={() => undo()}
-                      disabled={!canUndo}
-                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
-                    >
-                      &#8617; Undo
-                    </button>
-                  </ToolHoverCard>
-                  <ToolHoverCard
-                    info={{
-                      ...TOOL_HOVER_INFO.redo,
-                      summary: canRedo
-                        ? `${TOOL_HOVER_INFO.redo.summary} Next redo: ${versions[versionHead]?.label ?? "next version"}.`
-                        : `${TOOL_HOVER_INFO.redo.summary} Nothing to redo.`,
-                    }}
-                  >
-                    <button
-                      data-testid="redo-button"
-                      onClick={() => redo()}
-                      disabled={!canRedo}
-                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
-                    >
-                      &#8618; Redo
-                    </button>
-                  </ToolHoverCard>
-                  <ToolHoverCard info={TOOL_HOVER_INFO.history}>
-                    <button
-                      data-testid="history-button"
-                      onClick={() => setShowHistory((v) => !v)}
-                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
-                    >
-                      History ({versions.length})
-                    </button>
-                  </ToolHoverCard>
-                </div>
-
-                <div className="h-4 w-px bg-neutral-700" />
-
-                {/* Selection group */}
-                <div className="flex items-center gap-1">
-                  <ToolHoverCard info={TOOL_HOVER_INFO.clear}>
-                    <button
-                      onClick={deselectAll}
-                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
-                    >
-                      Clear
-                    </button>
-                  </ToolHoverCard>
-                  <ToolHoverCard info={TOOL_HOVER_INFO.invert}>
-                    <button
-                      onClick={() => {
-                        const next = new Set<number>();
-                        for (const m of messages) {
-                          if (!markedForRemoval.has(m.index)) next.add(m.index);
-                        }
-                        useSessionStore.setState({ markedForRemoval: next });
-                      }}
-                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
-                    >
-                      Invert
-                    </button>
-                  </ToolHoverCard>
-                  <ToolHoverCard info={TOOL_HOVER_INFO.copy}>
-                    <button
-                      onClick={handleCopySelected}
-                      disabled={markedForRemoval.size === 0}
-                      className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
-                    >
-                      Copy
-                    </button>
-                  </ToolHoverCard>
-                </div>
-              </div>
-
-              <div className="h-px bg-neutral-800" />
-
-              {/* Save row — one line, stats left, primary action right, always visible */}
-              <div className="flex items-center justify-between gap-3">
-                <SessionStats
-                  messages={messages}
-                  markedCount={markedForRemoval.size}
-                  totalTokens={totalTokens}
-                  markedTokens={markedTokens}
-                />
-                <ToolHoverCard info={TOOL_HOVER_INFO.save}>
-                  <button
-                    onClick={handleSave}
-                    disabled={markedForRemoval.size === 0 || saving}
-                    className="rounded bg-red-600/80 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-30"
-                  >
-                    {saving
-                      ? "Saving..."
-                      : `Remove ${markedForRemoval.size} & Save`}
-                  </button>
-                </ToolHoverCard>
-              </div>
-
-              {/* Filter chips row */}
-              {!loading && messages.length > 0 && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {Object.entries(typeCounts).map(([type, count]) => {
-                    const style = typeStyles[type];
-                    const color = style?.color ?? FALLBACK_STYLE;
-                    const isFiltering = activeFilters.has(`type:${type}`);
-                    return (
-                      <button
-                        key={`type:${type}`}
-                        onClick={() => toggleFilter(`type:${type}`)}
-                        className={`rounded px-2 py-1 text-sm transition-colors ${color} ${
-                          isFiltering
-                            ? "ring-1 ring-white/30"
-                            : "opacity-70 hover:opacity-100"
-                        }`}
-                        title={`Filter by ${type} messages`}
-                      >
-                        {style?.label ?? type} ({count})
-                      </button>
-                    );
-                  })}
-
-                  <div className="h-4 w-px bg-neutral-700" />
-
-                  {Object.entries(flagCounts).map(([flag, count]) => {
-                    const info = flagDefs[flag];
-                    if (!info) return null;
-                    const isFiltering = activeFilters.has(`flag:${flag}`);
-                    return (
-                      <button
-                        key={`flag:${flag}`}
-                        onClick={() => toggleFilter(`flag:${flag}`)}
-                        className={`rounded px-2 py-1 text-sm transition-colors ${info.color} ${
-                          isFiltering
-                            ? "ring-1 ring-white/30"
-                            : "opacity-70 hover:opacity-100"
-                        }`}
-                        title={`Filter by ${info.label}`}
-                      >
-                        {info.label} ({count})
-                      </button>
-                    );
-                  })}
-
-                  {activeFilters.size > 0 && (
-                    <button
-                      onClick={() => setActiveFilters(new Set())}
-                      className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
-                    >
-                      Clear filter
-                    </button>
-                  )}
-                </div>
-              )}
-
-              {/* Tool chips row */}
-              {!loading && Object.keys(toolNameCounts).length > 0 && (
-                <div className="flex flex-wrap items-center gap-2">
-                  {Object.entries(toolNameCounts)
-                    .sort((a, b) => b[1] - a[1])
-                    .map(([name, count]) => {
-                      const isFiltering = activeFilters.has(`tool:${name}`);
-                      return (
-                        <button
-                          key={`tool:${name}`}
-                          onClick={() => toggleFilter(`tool:${name}`)}
-                          className={`rounded px-2 py-1 text-sm transition-colors bg-violet-500/20 text-violet-400 ${
-                            isFiltering
-                              ? "ring-1 ring-white/30"
-                              : "opacity-70 hover:opacity-100"
-                          }`}
-                          title={`Filter by tool: ${name}`}
+                  <div className="shrink-0 space-y-2 rounded-lg border border-neutral-800 bg-neutral-900 px-3 py-2">
+                    {/* Actions row — flex-wrap so groups can flow to the next line */}
+                    <div className="flex flex-wrap items-center gap-x-3 gap-y-2">
+                      {/* Cleanup / AI tools */}
+                      <div className="flex items-center gap-2">
+                        <ToolHoverCard info={TOOL_HOVER_INFO.autoTrim}>
+                          <button
+                            onClick={handleAutoTrim}
+                            className="rounded bg-orange-600/20 px-2.5 py-1 text-sm font-medium text-orange-400 transition-colors hover:bg-orange-600/30"
+                          >
+                            Auto-Trim
+                          </button>
+                        </ToolHoverCard>
+                        <ToolHoverCard info={TOOL_HOVER_INFO.smartCompress}>
+                          <button
+                            onClick={handleSmartCompress}
+                            disabled={llmWorking || messages.length === 0}
+                            className="rounded bg-violet-600/20 px-2.5 py-1 text-sm font-medium text-violet-400 transition-colors hover:bg-violet-600/30 disabled:opacity-30"
+                          >
+                            {llmWorking ? "Analyzing..." : "Smart Compress"}
+                          </button>
+                        </ToolHoverCard>
+                        <ToolHoverCard info={TOOL_HOVER_INFO.topicFocus}>
+                          <button
+                            onClick={handleSegmentTopics}
+                            disabled={llmWorking || messages.length === 0}
+                            className="rounded bg-cyan-600/20 px-2.5 py-1 text-sm font-medium text-cyan-400 transition-colors hover:bg-cyan-600/30 disabled:opacity-30"
+                          >
+                            Topic Focus
+                          </button>
+                        </ToolHoverCard>
+                        <ToolHoverCard
+                          info={{
+                            ...TOOL_HOVER_INFO.compressTools,
+                            summary: `${TOOL_HOVER_INFO.compressTools.summary} Current thresholds: summarize at ${compressOpts.summarizeThreshold}+ tokens, truncate at ${compressOpts.truncateThreshold}+, keep last ${compressOpts.keepLastN}.`,
+                          }}
                         >
-                          {name} ({count})
-                        </button>
-                      );
-                    })}
-                </div>
-              )}
-            </div>
+                          <button
+                            onClick={handleCompressTools}
+                            disabled={llmWorking || messages.length === 0}
+                            className="rounded bg-emerald-600/20 px-2.5 py-1 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-600/30 disabled:opacity-30"
+                          >
+                            Compress Tools
+                          </button>
+                        </ToolHoverCard>
+                      </div>
 
-            {/* Topic segments panel — visible whenever segmentation has run.
+                      <div className="h-4 w-px bg-neutral-700" />
+
+                      {/* Versioning group */}
+                      <div className="flex items-center gap-1">
+                        <ToolHoverCard
+                          info={{
+                            ...TOOL_HOVER_INFO.undo,
+                            summary: canUndo
+                              ? `${TOOL_HOVER_INFO.undo.summary} Next undo: ${versions[versionHead - 2]?.label ?? "previous version"}.`
+                              : `${TOOL_HOVER_INFO.undo.summary} Nothing to undo.`,
+                          }}
+                        >
+                          <button
+                            data-testid="undo-button"
+                            onClick={() => undo()}
+                            disabled={!canUndo}
+                            className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
+                          >
+                            &#8617; Undo
+                          </button>
+                        </ToolHoverCard>
+                        <ToolHoverCard
+                          info={{
+                            ...TOOL_HOVER_INFO.redo,
+                            summary: canRedo
+                              ? `${TOOL_HOVER_INFO.redo.summary} Next redo: ${versions[versionHead]?.label ?? "next version"}.`
+                              : `${TOOL_HOVER_INFO.redo.summary} Nothing to redo.`,
+                          }}
+                        >
+                          <button
+                            data-testid="redo-button"
+                            onClick={() => redo()}
+                            disabled={!canRedo}
+                            className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
+                          >
+                            &#8618; Redo
+                          </button>
+                        </ToolHoverCard>
+                        <ToolHoverCard info={TOOL_HOVER_INFO.history}>
+                          <button
+                            data-testid="history-button"
+                            onClick={() => setShowHistory((v) => !v)}
+                            className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
+                          >
+                            History ({versions.length})
+                          </button>
+                        </ToolHoverCard>
+                      </div>
+
+                      <div className="h-4 w-px bg-neutral-700" />
+
+                      {/* Selection group */}
+                      <div className="flex items-center gap-1">
+                        <ToolHoverCard info={TOOL_HOVER_INFO.clear}>
+                          <button
+                            onClick={deselectAll}
+                            className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
+                          >
+                            Clear
+                          </button>
+                        </ToolHoverCard>
+                        <ToolHoverCard info={TOOL_HOVER_INFO.invert}>
+                          <button
+                            onClick={() => {
+                              const next = new Set<number>();
+                              for (const m of messages) {
+                                if (!markedForRemoval.has(m.index))
+                                  next.add(m.index);
+                              }
+                              useSessionStore.setState({
+                                markedForRemoval: next,
+                              });
+                            }}
+                            className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800"
+                          >
+                            Invert
+                          </button>
+                        </ToolHoverCard>
+                        <ToolHoverCard info={TOOL_HOVER_INFO.copy}>
+                          <button
+                            onClick={handleCopySelected}
+                            disabled={markedForRemoval.size === 0}
+                            className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
+                          >
+                            Copy
+                          </button>
+                        </ToolHoverCard>
+                      </div>
+                    </div>
+
+                    <div className="h-px bg-neutral-800" />
+
+                    {/* Save row — one line, stats left, primary action right, always visible */}
+                    <div className="flex items-center justify-between gap-3">
+                      <SessionStats
+                        messages={messages}
+                        markedCount={markedForRemoval.size}
+                        totalTokens={totalTokens}
+                        markedTokens={markedTokens}
+                      />
+                      <ToolHoverCard info={TOOL_HOVER_INFO.save}>
+                        <button
+                          onClick={handleSave}
+                          disabled={markedForRemoval.size === 0 || saving}
+                          className="rounded bg-red-600/80 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-30"
+                        >
+                          {saving
+                            ? "Saving..."
+                            : `Remove ${markedForRemoval.size} & Save`}
+                        </button>
+                      </ToolHoverCard>
+                    </div>
+
+                    {/* Filter chips row */}
+                    {!loading && messages.length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {Object.entries(typeCounts).map(([type, count]) => {
+                          const style = typeStyles[type];
+                          const color = style?.color ?? FALLBACK_STYLE;
+                          const isFiltering = activeFilters.has(`type:${type}`);
+                          return (
+                            <button
+                              key={`type:${type}`}
+                              onClick={() => toggleFilter(`type:${type}`)}
+                              className={`rounded px-2 py-1 text-sm transition-colors ${color} ${
+                                isFiltering
+                                  ? "ring-1 ring-white/30"
+                                  : "opacity-70 hover:opacity-100"
+                              }`}
+                              title={`Filter by ${type} messages`}
+                            >
+                              {style?.label ?? type} ({count})
+                            </button>
+                          );
+                        })}
+
+                        <div className="h-4 w-px bg-neutral-700" />
+
+                        {Object.entries(flagCounts).map(([flag, count]) => {
+                          const info = flagDefs[flag];
+                          if (!info) return null;
+                          const isFiltering = activeFilters.has(`flag:${flag}`);
+                          return (
+                            <button
+                              key={`flag:${flag}`}
+                              onClick={() => toggleFilter(`flag:${flag}`)}
+                              className={`rounded px-2 py-1 text-sm transition-colors ${info.color} ${
+                                isFiltering
+                                  ? "ring-1 ring-white/30"
+                                  : "opacity-70 hover:opacity-100"
+                              }`}
+                              title={`Filter by ${info.label}`}
+                            >
+                              {info.label} ({count})
+                            </button>
+                          );
+                        })}
+
+                        {activeFilters.size > 0 && (
+                          <button
+                            onClick={() => setActiveFilters(new Set())}
+                            className="rounded px-2 py-1 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
+                          >
+                            Clear filter
+                          </button>
+                        )}
+                      </div>
+                    )}
+
+                    {/* Tool chips row */}
+                    {!loading && Object.keys(toolNameCounts).length > 0 && (
+                      <div className="flex flex-wrap items-center gap-2">
+                        {Object.entries(toolNameCounts)
+                          .sort((a, b) => b[1] - a[1])
+                          .map(([name, count]) => {
+                            const isFiltering = activeFilters.has(
+                              `tool:${name}`,
+                            );
+                            return (
+                              <button
+                                key={`tool:${name}`}
+                                onClick={() => toggleFilter(`tool:${name}`)}
+                                className={`rounded px-2 py-1 text-sm transition-colors bg-violet-500/20 text-violet-400 ${
+                                  isFiltering
+                                    ? "ring-1 ring-white/30"
+                                    : "opacity-70 hover:opacity-100"
+                                }`}
+                                title={`Filter by tool: ${name}`}
+                              >
+                                {name} ({count})
+                              </button>
+                            );
+                          })}
+                      </div>
+                    )}
+                  </div>
+
+                  {/* Topic segments panel — visible whenever segmentation has run.
                 Shows a legend so the meaning of the two chip states is
                 explicit (keep vs will-be-removed), and hosts the optional
                 "Focus on" query that marks off-topic segments automatically.
                 [LAW:one-source-of-truth] `topicSegments` drives visibility;
                 we don't keep a separate "is panel open" flag. */}
-            {topicSegments.length > 0 && (
-              <div className="shrink-0 space-y-2 rounded-lg border border-cyan-900/40 bg-cyan-950/10 px-3 py-2">
-                <div className="flex items-center justify-between">
-                  <span className="text-sm font-medium text-neutral-200">
-                    Topic Segments
-                  </span>
-                  <button
-                    onClick={() => {
-                      setTopicSegments([]);
-                      setFocusQuery("");
-                    }}
-                    className="rounded px-2 py-0.5 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
-                  >
-                    Dismiss
-                  </button>
-                </div>
-
-                {/* Legend — removes ambiguity about which chip state is kept */}
-                <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-400">
-                  <span className="flex items-center gap-1.5">
-                    <span className="rounded bg-cyan-600/20 px-1.5 py-0.5 text-cyan-400">
-                      kept
-                    </span>
-                    <span>stays in the session</span>
-                  </span>
-                  <span className="flex items-center gap-1.5">
-                    <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-neutral-500 line-through">
-                      removed
-                    </span>
-                    <span>will be deleted on Save</span>
-                  </span>
-                  <span className="text-neutral-500">Click any chip to toggle.</span>
-                </div>
-
-                {/* Chips */}
-                <div className="flex flex-wrap gap-1.5">
-                  {topicSegments.map((seg, i) => (
-                    <button
-                      key={i}
-                      onClick={() => {
-                        const next = new Set(markedForRemoval);
-                        const wasRelevant = seg.relevant;
-                        for (let idx = seg.startIndex; idx <= seg.endIndex; idx++) {
-                          if (wasRelevant) next.add(idx);
-                          else next.delete(idx);
-                        }
-                        useSessionStore.setState({ markedForRemoval: next });
-                        setTopicSegments(
-                          topicSegments.map((s, j) =>
-                            j === i ? { ...s, relevant: !s.relevant } : s,
-                          ),
-                        );
-                      }}
-                      className={`rounded px-2 py-1 text-sm transition-colors ${
-                        seg.relevant
-                          ? "bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30"
-                          : "bg-neutral-800 text-neutral-500 line-through hover:bg-neutral-700"
-                      }`}
-                      title={`Messages ${seg.startIndex}-${seg.endIndex} (${formatTokens(seg.tokenCount)}). Click to toggle.`}
-                    >
-                      {seg.topic} ({formatTokens(seg.tokenCount)})
-                    </button>
-                  ))}
-                </div>
-
-                {/* Focus query input — the second triggers off the user's
-                    intent. Typing a query and submitting re-runs the analysis
-                    and auto-marks off-topic segments. */}
-                <div className="flex items-center gap-2 border-t border-cyan-900/30 pt-2">
-                  <span className="text-sm text-cyan-400">Focus on:</span>
-                  <input
-                    type="text"
-                    value={focusQuery}
-                    onChange={(e) => setFocusQuery(e.target.value)}
-                    onKeyDown={(e) => {
-                      if (e.key === "Enter") void handleApplyFocusQuery();
-                    }}
-                    placeholder='e.g. "authentication implementation" or "routing bug"'
-                    className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder-neutral-600 outline-none focus:border-cyan-500"
-                  />
-                  <button
-                    onClick={() => void handleApplyFocusQuery()}
-                    disabled={!focusQuery.trim() || llmWorking}
-                    className="rounded bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-cyan-500 disabled:opacity-30"
-                    title="Re-segment and auto-mark everything outside this topic"
-                  >
-                    Mark off-topic
-                  </button>
-                </div>
-              </div>
-            )}
-
-            {/* Resume reminder after save */}
-            {saveResult && !saveResult.blocked && activeMetadata && (
-              <div className="shrink-0 rounded-lg border border-green-800/50 bg-green-950/20 px-4 py-3">
-                <p className="text-sm text-neutral-400">
-                  Saved. Original backed up. Resume with:
-                </p>
-                <code className="mt-1 block rounded bg-neutral-900 px-3 py-1.5 text-sm text-green-400">
-                  cd {selectedProject?.projectRoot ?? "your-project"} &&{" "}
-                  {activeMetadata.helpText.resumeCommand}
-                </code>
-                <p className="mt-1 text-sm text-neutral-500">
-                  First message:{" "}
-                  <em className="text-neutral-400">
-                    &quot;Summarize where we are and what&apos;s next&quot;
-                  </em>
-                </p>
-              </div>
-            )}
-
-            {/* Search + copy status */}
-            <div className="flex shrink-0 items-center gap-2">
-              <input
-                type="text"
-                value={searchText}
-                onChange={(e) => setSearchText(e.target.value)}
-                placeholder="Filter messages..."
-                className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder-neutral-600 outline-none focus:border-neutral-500"
-              />
-              {(activeFilters.size > 0 || searchText) && (
-                <span className="text-sm text-neutral-500">
-                  {filteredMessages.length} / {messages.length}
-                </span>
-              )}
-            </div>
-
-            {/* Copy success toast */}
-            {copyStatus && (
-              <div className="shrink-0 rounded-lg border border-emerald-800/50 bg-emerald-950/30 px-4 py-2 text-sm text-emerald-400">
-                {copyStatus}
-              </div>
-            )}
-
-            {/* Message list + preview */}
-            <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
-              <div
-                className={`overflow-y-auto ${previewIndex !== null ? "w-1/2" : "w-full"}`}
-              >
-                {loading ? (
-                  <p className="p-4 text-sm text-neutral-500">
-                    Loading session...
-                  </p>
-                ) : (
-                  <>
-                  {filteredMessages.length > 0 && (() => {
-                    const filteredIndices = filteredMessages.map((m) => m.index);
-                    const allSelected = filteredIndices.every((i) => markedForRemoval.has(i));
-                    const someSelected = filteredIndices.some((i) => markedForRemoval.has(i));
-                    return (
-                      <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-neutral-700 bg-neutral-900 px-3 py-1.5">
-                        <input
-                          type="checkbox"
-                          checked={allSelected}
-                          ref={(el) => {
-                            if (el) el.indeterminate = someSelected && !allSelected;
+                  {topicSegments.length > 0 && (
+                    <div className="shrink-0 space-y-2 rounded-lg border border-cyan-900/40 bg-cyan-950/10 px-3 py-2">
+                      <div className="flex items-center justify-between">
+                        <span className="text-sm font-medium text-neutral-200">
+                          Topic Segments
+                        </span>
+                        <button
+                          onClick={() => {
+                            setTopicSegments([]);
+                            setFocusQuery("");
                           }}
-                          onChange={() => {
-                            const next = new Set(markedForRemoval);
-                            if (allSelected) {
-                              for (const i of filteredIndices) next.delete(i);
-                            } else {
-                              for (const i of filteredIndices) next.add(i);
-                            }
-                            useSessionStore.setState({ markedForRemoval: next });
-                          }}
-                          className="shrink-0 accent-red-500"
-                        />
-                        <span className="text-sm text-neutral-500">
-                          {allSelected
-                            ? `All ${filteredIndices.length} selected`
-                            : someSelected
-                              ? `${filteredIndices.filter((i) => markedForRemoval.has(i)).length} of ${filteredIndices.length} selected`
-                              : `Select all ${filteredIndices.length}`}
+                          className="rounded px-2 py-0.5 text-sm text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
+                        >
+                          Dismiss
+                        </button>
+                      </div>
+
+                      {/* Legend — removes ambiguity about which chip state is kept */}
+                      <div className="flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-400">
+                        <span className="flex items-center gap-1.5">
+                          <span className="rounded bg-cyan-600/20 px-1.5 py-0.5 text-cyan-400">
+                            kept
+                          </span>
+                          <span>stays in the session</span>
+                        </span>
+                        <span className="flex items-center gap-1.5">
+                          <span className="rounded bg-neutral-800 px-1.5 py-0.5 text-neutral-500 line-through">
+                            removed
+                          </span>
+                          <span>will be deleted on Save</span>
+                        </span>
+                        <span className="text-neutral-500">
+                          Click any chip to toggle.
                         </span>
                       </div>
-                    );
-                  })()}
-                  {filteredMessages.map((msg) => {
-                    const style = typeStyles[msg.type];
-                    return (
-                      <MessageRow
-                        key={msg.index}
-                        msg={msg}
-                        marked={markedForRemoval.has(msg.index)}
-                        typeColor={style?.color ?? FALLBACK_STYLE}
-                        typeLabel={style?.label ?? msg.type}
-                        flagDefs={flagDefs}
-                        expanded={expandedRows.has(msg.index)}
-                        expandedRaw={rawByIndex.get(msg.index)}
-                        onToggle={() => handleToggle(msg.index)}
-                        onPreview={() =>
-                          previewIndex === msg.index
-                            ? closePreview()
-                            : previewMessage(msg.index)
-                        }
-                        onShiftClick={() => handleShiftClick(msg.index)}
-                        onToggleExpand={() => void toggleExpand(msg.index)}
-                      />
-                    );
-                  })}
-                  </>
-                )}
-              </div>
 
-              {previewIndex !== null && (
-                <div className="w-1/2">
-                  <PreviewPanel
-                    raw={previewRaw}
-                    index={previewIndex}
-                    onClose={closePreview}
-                  />
+                      {/* Chips */}
+                      <div className="flex flex-wrap gap-1.5">
+                        {topicSegments.map((seg, i) => (
+                          <button
+                            key={i}
+                            onClick={() => {
+                              const next = new Set(markedForRemoval);
+                              const wasRelevant = seg.relevant;
+                              for (
+                                let idx = seg.startIndex;
+                                idx <= seg.endIndex;
+                                idx++
+                              ) {
+                                if (wasRelevant) next.add(idx);
+                                else next.delete(idx);
+                              }
+                              useSessionStore.setState({
+                                markedForRemoval: next,
+                              });
+                              setTopicSegments(
+                                topicSegments.map((s, j) =>
+                                  j === i ? { ...s, relevant: !s.relevant } : s,
+                                ),
+                              );
+                            }}
+                            className={`rounded px-2 py-1 text-sm transition-colors ${
+                              seg.relevant
+                                ? "bg-cyan-600/20 text-cyan-400 hover:bg-cyan-600/30"
+                                : "bg-neutral-800 text-neutral-500 line-through hover:bg-neutral-700"
+                            }`}
+                            title={`Messages ${seg.startIndex}-${seg.endIndex} (${formatTokens(seg.tokenCount)}). Click to toggle.`}
+                          >
+                            {seg.topic} ({formatTokens(seg.tokenCount)})
+                          </button>
+                        ))}
+                      </div>
+
+                      {/* Focus query input — the second triggers off the user's
+                    intent. Typing a query and submitting re-runs the analysis
+                    and auto-marks off-topic segments. */}
+                      <div className="flex items-center gap-2 border-t border-cyan-900/30 pt-2">
+                        <span className="text-sm text-cyan-400">Focus on:</span>
+                        <input
+                          type="text"
+                          value={focusQuery}
+                          onChange={(e) => setFocusQuery(e.target.value)}
+                          onKeyDown={(e) => {
+                            if (e.key === "Enter") void handleApplyFocusQuery();
+                          }}
+                          placeholder='e.g. "authentication implementation" or "routing bug"'
+                          className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder-neutral-600 outline-none focus:border-cyan-500"
+                        />
+                        <button
+                          onClick={() => void handleApplyFocusQuery()}
+                          disabled={!focusQuery.trim() || llmWorking}
+                          className="rounded bg-cyan-600 px-3 py-1.5 text-sm font-medium text-white transition-colors hover:bg-cyan-500 disabled:opacity-30"
+                          title="Re-segment and auto-mark everything outside this topic"
+                        >
+                          Mark off-topic
+                        </button>
+                      </div>
+                    </div>
+                  )}
+
+                  {/* Resume reminder after save */}
+                  {saveResult && !saveResult.blocked && activeMetadata && (
+                    <div className="shrink-0 rounded-lg border border-green-800/50 bg-green-950/20 px-4 py-3">
+                      <p className="text-sm text-neutral-400">
+                        Saved. Original backed up. Resume with:
+                      </p>
+                      <code className="mt-1 block rounded bg-neutral-900 px-3 py-1.5 text-sm text-green-400">
+                        cd {selectedProject?.projectRoot ?? "your-project"} &&{" "}
+                        {activeMetadata.helpText.resumeCommand}
+                      </code>
+                      <p className="mt-1 text-sm text-neutral-500">
+                        First message:{" "}
+                        <em className="text-neutral-400">
+                          &quot;Summarize where we are and what&apos;s
+                          next&quot;
+                        </em>
+                      </p>
+                    </div>
+                  )}
+
+                  {/* Search + copy status */}
+                  <div className="flex shrink-0 items-center gap-2">
+                    <input
+                      type="text"
+                      value={searchText}
+                      onChange={(e) => setSearchText(e.target.value)}
+                      placeholder="Filter messages..."
+                      className="flex-1 rounded-md border border-neutral-700 bg-neutral-900 px-3 py-1.5 text-sm text-neutral-200 placeholder-neutral-600 outline-none focus:border-neutral-500"
+                    />
+                    {(activeFilters.size > 0 || searchText) && (
+                      <span className="text-sm text-neutral-500">
+                        {filteredMessages.length} / {messages.length}
+                      </span>
+                    )}
+                  </div>
+
+                  {/* Copy success toast */}
+                  {copyStatus && (
+                    <div className="shrink-0 rounded-lg border border-emerald-800/50 bg-emerald-950/30 px-4 py-2 text-sm text-emerald-400">
+                      {copyStatus}
+                    </div>
+                  )}
+
+                  {/* Message list + preview */}
+                  <div className="flex min-h-0 flex-1 overflow-hidden rounded-lg border border-neutral-800">
+                    <div
+                      className={`overflow-y-auto ${previewIndex !== null ? "w-1/2" : "w-full"}`}
+                    >
+                      {loading ? (
+                        <p className="p-4 text-sm text-neutral-500">
+                          Loading session...
+                        </p>
+                      ) : (
+                        <>
+                          {filteredMessages.length > 0 &&
+                            (() => {
+                              const filteredIndices = filteredMessages.map(
+                                (m) => m.index,
+                              );
+                              const allSelected = filteredIndices.every((i) =>
+                                markedForRemoval.has(i),
+                              );
+                              const someSelected = filteredIndices.some((i) =>
+                                markedForRemoval.has(i),
+                              );
+                              return (
+                                <div className="sticky top-0 z-10 flex items-center gap-2 border-b border-neutral-700 bg-neutral-900 px-3 py-1.5">
+                                  <input
+                                    type="checkbox"
+                                    checked={allSelected}
+                                    ref={(el) => {
+                                      if (el)
+                                        el.indeterminate =
+                                          someSelected && !allSelected;
+                                    }}
+                                    onChange={() => {
+                                      const next = new Set(markedForRemoval);
+                                      if (allSelected) {
+                                        for (const i of filteredIndices)
+                                          next.delete(i);
+                                      } else {
+                                        for (const i of filteredIndices)
+                                          next.add(i);
+                                      }
+                                      useSessionStore.setState({
+                                        markedForRemoval: next,
+                                      });
+                                    }}
+                                    className="shrink-0 accent-red-500"
+                                  />
+                                  <span className="text-sm text-neutral-500">
+                                    {allSelected
+                                      ? `All ${filteredIndices.length} selected`
+                                      : someSelected
+                                        ? `${filteredIndices.filter((i) => markedForRemoval.has(i)).length} of ${filteredIndices.length} selected`
+                                        : `Select all ${filteredIndices.length}`}
+                                  </span>
+                                </div>
+                              );
+                            })()}
+                          {filteredMessages.map((msg) => {
+                            const style = typeStyles[msg.type];
+                            return (
+                              <MessageRow
+                                key={msg.index}
+                                msg={msg}
+                                marked={markedForRemoval.has(msg.index)}
+                                typeColor={style?.color ?? FALLBACK_STYLE}
+                                typeLabel={style?.label ?? msg.type}
+                                flagDefs={flagDefs}
+                                expanded={expandedRows.has(msg.index)}
+                                expandedRaw={rawByIndex.get(msg.index)}
+                                onToggle={() => handleToggle(msg.index)}
+                                onPreview={() =>
+                                  previewIndex === msg.index
+                                    ? closePreview()
+                                    : previewMessage(msg.index)
+                                }
+                                onShiftClick={() => handleShiftClick(msg.index)}
+                                onToggleExpand={() =>
+                                  void toggleExpand(msg.index)
+                                }
+                              />
+                            );
+                          })}
+                        </>
+                      )}
+                    </div>
+
+                    {previewIndex !== null && (
+                      <div className="w-1/2">
+                        <PreviewPanel
+                          raw={previewRaw}
+                          index={previewIndex}
+                          onClose={closePreview}
+                        />
+                      </div>
+                    )}
+                  </div>
                 </div>
               )}
             </div>
-          </div>
-        )}
-      </div>
-      )}
-
-      </MainArea>
+          )}
+        </MainArea>
       </ResizableSplit>
 
       {/* Diff viewer modal */}

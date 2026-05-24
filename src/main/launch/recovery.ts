@@ -33,7 +33,9 @@ export interface RecoveryResult {
   readonly exited: readonly Launch[];
 }
 
-export async function recoverLaunches(deps: RecoveryDeps): Promise<RecoveryResult> {
+export async function recoverLaunches(
+  deps: RecoveryDeps,
+): Promise<RecoveryResult> {
   const readPidEnv = deps.readPidEnv ?? readEnv;
   const candidates = deps.registry.listActive();
   const recovered: Launch[] = [];

@@ -19,7 +19,7 @@ export function TmuxControlDebug() {
   // Clear selection when the selected pane disappears from topology.
   const activePaneData =
     selectedPane !== null
-      ? topology.panes.find((p) => p.id === selectedPane) ?? null
+      ? (topology.panes.find((p) => p.id === selectedPane) ?? null)
       : null;
   const stream = usePaneStream(activePaneData);
 
@@ -91,11 +91,7 @@ export function TmuxControlDebug() {
             data-pane-id={activePaneData?.id}
             className="h-96 w-full rounded bg-neutral-950"
           >
-            <PaneTerminal
-              stream={stream}
-              className="h-full w-full"
-              autoFocus
-            />
+            <PaneTerminal stream={stream} className="h-full w-full" autoFocus />
           </div>
         </section>
       )}
@@ -175,10 +171,7 @@ function PaneRow({
         title={pane.currentPath}
       >
         <span className="text-amber-300">{pane.currentCommand || "—"}</span>
-        <span className="text-neutral-500">
-          {" "}
-          · {pane.currentPath || "—"}
-        </span>
+        <span className="text-neutral-500"> · {pane.currentPath || "—"}</span>
       </span>
       <span data-testid={`${idTestId}-size`} className="text-neutral-500">
         {pane.width}×{pane.height}
@@ -212,4 +205,3 @@ const STATUS_CLASSES: Record<DebugStatus, string> = {
   "no-sessions": "text-amber-400",
   closed: "text-red-400",
 };
-

@@ -172,7 +172,9 @@ export async function saveSession(
       ? "Saved (no removals)"
       : `Removed ${indicesToRemove.length} message${indicesToRemove.length === 1 ? "" : "s"}`;
   const label =
-    violations.length > 0 ? `${removalLabel} (saved with ${violations.length} violation${violations.length === 1 ? "" : "s"})` : removalLabel;
+    violations.length > 0
+      ? `${removalLabel} (saved with ${violations.length} violation${violations.length === 1 ? "" : "s"})`
+      : removalLabel;
   await recordCurrentVersion(label);
 
   return {

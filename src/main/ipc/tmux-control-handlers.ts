@@ -17,8 +17,9 @@ import type {
 export function registerTmuxControlHandlers(
   connection: TmuxControlConnection,
 ): () => void {
-  ipcMain.handle("tmux:control-state:get", (): ConnectionStateEvent =>
-    connection.getState(),
+  ipcMain.handle(
+    "tmux:control-state:get",
+    (): ConnectionStateEvent => connection.getState(),
   );
 
   // [LAW:one-type-per-behavior] No watch-session IPC: the mesh observes

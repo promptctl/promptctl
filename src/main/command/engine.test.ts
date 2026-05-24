@@ -109,18 +109,14 @@ describe("CommandEngine", () => {
   });
 
   it("kill-pane action invokes execute with single-quoted target", async () => {
-    engine.addCommand(
-      makeCommand({ action: { kind: "kill-pane" } }),
-    );
+    engine.addCommand(makeCommand({ action: { kind: "kill-pane" } }));
     await engine.fireCommand("cmd-1");
     expect(deps.sent).toEqual([]);
     expect(deps.executed).toEqual([`kill-pane -t '${PANE}'`]);
   });
 
   it("capture-output action invokes execute with single-quoted target", async () => {
-    engine.addCommand(
-      makeCommand({ action: { kind: "capture-output" } }),
-    );
+    engine.addCommand(makeCommand({ action: { kind: "capture-output" } }));
     await engine.fireCommand("cmd-1");
     expect(deps.executed).toEqual([
       `capture-pane -t '${PANE}' -p -e -J -S -500`,

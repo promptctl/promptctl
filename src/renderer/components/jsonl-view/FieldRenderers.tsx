@@ -64,7 +64,9 @@ const FIELD_RENDERERS: Record<string, FieldRenderer> = {
   level: (v) => <Pill label={String(v)} kind="system" />,
   hookEvent: (v) => <Pill label={String(v)} kind="hook" />,
   hookName: (v) => (
-    <span className="font-mono text-[11.5px] text-neutral-300">{String(v)}</span>
+    <span className="font-mono text-[11.5px] text-neutral-300">
+      {String(v)}
+    </span>
   ),
   command: (v) => (
     <span
@@ -75,16 +77,33 @@ const FIELD_RENDERERS: Record<string, FieldRenderer> = {
     </span>
   ),
   stop_reason: (v) =>
-    v == null ? <PrimitiveValue value={v} /> : <Pill label={String(v)} kind="system" />,
+    v == null ? (
+      <PrimitiveValue value={v} />
+    ) : (
+      <Pill label={String(v)} kind="system" />
+    ),
   stop_sequence: (v) =>
-    v == null ? <PrimitiveValue value={v} /> : <Pill label={String(v)} kind="system" />,
+    v == null ? (
+      <PrimitiveValue value={v} />
+    ) : (
+      <Pill label={String(v)} kind="system" />
+    ),
 
   // Boolean-ish flags — single-glyph glance
   isSidechain: (v) =>
-    v ? <FlagGlyph glyph="⇢" tip="isSidechain" tone="info" /> : <PrimitiveValue value={v} />,
+    v ? (
+      <FlagGlyph glyph="⇢" tip="isSidechain" tone="info" />
+    ) : (
+      <PrimitiveValue value={v} />
+    ),
   isMeta: (v) =>
-    v ? <FlagGlyph glyph="§" tip="isMeta" tone="warn" /> : <PrimitiveValue value={v} />,
-  is_error: (v) => (v ? <Pill label="error" kind="error" /> : <PrimitiveValue value={v} />),
+    v ? (
+      <FlagGlyph glyph="§" tip="isMeta" tone="warn" />
+    ) : (
+      <PrimitiveValue value={v} />
+    ),
+  is_error: (v) =>
+    v ? <Pill label="error" kind="error" /> : <PrimitiveValue value={v} />,
   isSnapshotUpdate: (v) => <PrimitiveValue value={v} />,
   interrupted: (v) => <PrimitiveValue value={v} />,
   isImage: (v) => <PrimitiveValue value={v} />,
@@ -126,7 +145,13 @@ export function AnyValue({ value }: { value: unknown }) {
 
 // ---- Recursive dispatcher -------------------------------------------------
 
-function FieldGroup({ entries, depth }: { entries: [string, unknown][]; depth: number }) {
+function FieldGroup({
+  entries,
+  depth,
+}: {
+  entries: [string, unknown][];
+  depth: number;
+}) {
   if (entries.length === 0) return <Dim>{"{ }"}</Dim>;
   return (
     <div className="flex flex-col gap-0.5">
@@ -168,7 +193,11 @@ function FieldRow({
   if (shape === "array") {
     const arr = value as unknown[];
     return (
-      <ExpandableField fieldKey={fieldKey} summary={`[${arr.length}]`} depth={depth}>
+      <ExpandableField
+        fieldKey={fieldKey}
+        summary={`[${arr.length}]`}
+        depth={depth}
+      >
         <ArrayGroup items={arr} depth={depth + 1} />
       </ExpandableField>
     );
@@ -216,7 +245,11 @@ function classifyValue(fieldKey: string, value: unknown): Shape {
 
 function InlineLeaf({ fieldKey, value }: { fieldKey: string; value: unknown }) {
   const renderer = FIELD_RENDERERS[fieldKey];
-  const rendered = renderer ? renderer(value) : <PrimitiveValue value={value} />;
+  const rendered = renderer ? (
+    renderer(value)
+  ) : (
+    <PrimitiveValue value={value} />
+  );
   return (
     <div className="flex items-baseline gap-2 min-w-0">
       <KeyLabel fieldKey={fieldKey} />
@@ -336,13 +369,18 @@ function ArrayItem({
   }
   const isArr = Array.isArray(value);
   const count = isArr ? value.length : Object.keys(value as object).length;
-  const summary = isArr ? `[${count}]` : objectSummary(Object.keys(value as object));
+  const summary = isArr
+    ? `[${count}]`
+    : objectSummary(Object.keys(value as object));
   return (
     <ExpandableField fieldKey={`[${idx}]`} summary={summary} depth={depth}>
       {isArr ? (
         <ArrayGroup items={value as unknown[]} depth={depth + 1} />
       ) : (
-        <FieldGroup entries={Object.entries(value as object)} depth={depth + 1} />
+        <FieldGroup
+          entries={Object.entries(value as object)}
+          depth={depth + 1}
+        />
       )}
     </ExpandableField>
   );
@@ -392,8 +430,12 @@ export function ContentBlockView({
           </span>
         )}
         <Pill label={block.type} kind={block.type} />
-        {block.type === "tool_use" && block.name && <ToolName value={block.name} />}
-        {block.type === "tool_use" && block.id && <IdValue value={block.id} len={10} />}
+        {block.type === "tool_use" && block.name && (
+          <ToolName value={block.name} />
+        )}
+        {block.type === "tool_use" && block.id && (
+          <IdValue value={block.id} len={10} />
+        )}
         {block.type === "tool_result" && block.tool_use_id && (
           <span
             className="font-mono text-[11.5px] text-neutral-500"
@@ -441,7 +483,9 @@ export function ContentBlockView({
         block.type !== "text" &&
         block.type !== "tool_result" && (
           <FieldGroup
-            entries={Object.entries(block as unknown as Record<string, unknown>)}
+            entries={Object.entries(
+              block as unknown as Record<string, unknown>,
+            )}
             depth={1}
           />
         )}

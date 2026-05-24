@@ -73,7 +73,9 @@ export class ResponseAssembler {
         if (event.delta.type === "text_delta") {
           block.textBuffer += (event.delta as { text: string }).text;
         } else if (event.delta.type === "input_json_delta") {
-          block.inputJsonBuffer += (event.delta as { partial_json: string }).partial_json;
+          block.inputJsonBuffer += (
+            event.delta as { partial_json: string }
+          ).partial_json;
         }
         // Unknown delta types are ignored opaquely — defers thinking_delta etc.
         return;
@@ -108,17 +110,22 @@ export class ResponseAssembler {
   // all blocks in index order.
   complete(): AnthropicMessage {
     if (!this.message) {
-      throw new Error("ResponseAssembler.complete() called before message_start");
+      throw new Error(
+        "ResponseAssembler.complete() called before message_start",
+      );
     }
     if (!this.done) {
-      throw new Error("ResponseAssembler.complete() called before message_stop");
+      throw new Error(
+        "ResponseAssembler.complete() called before message_stop",
+      );
     }
     const indices = Array.from(this.blocks.keys()).sort((a, b) => a - b);
     const content: AnthropicContentBlock[] = indices.map((idx) => {
       const state = this.blocks.get(idx);
       // Indices come from this.blocks.keys(), so get() always returns a value.
       // The narrow is here only to satisfy strict null checking.
-      if (!state) throw new Error(`assembler: missing block state for index ${idx}`);
+      if (!state)
+        throw new Error(`assembler: missing block state for index ${idx}`);
       return finalizeBlock(state);
     });
     this.message.content = content;
@@ -137,7 +144,7 @@ function finalizeBlock(state: BlockState): AnthropicContentBlock {
     const input =
       state.inputJsonBuffer.length > 0
         ? (JSON.parse(state.inputJsonBuffer) as Record<string, unknown>)
-        : (start as { input?: Record<string, unknown> }).input ?? {};
+        : ((start as { input?: Record<string, unknown> }).input ?? {});
     return {
       type: "tool_use",
       id: (start as { id: string }).id,

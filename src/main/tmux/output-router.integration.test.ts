@@ -128,7 +128,8 @@ function makeFakeWc(
     destroyListeners: new Set(),
     send(channel: string, payload: unknown) {
       this.sent.push({ channel, payload });
-      if (channel === "tmux:output:chunk") chunks.push(payload as TmuxOutputChunk);
+      if (channel === "tmux:output:chunk")
+        chunks.push(payload as TmuxOutputChunk);
       if (channel === "tmux:output:state")
         states.push(payload as TmuxOutputStateEvent);
     },

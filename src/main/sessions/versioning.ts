@@ -56,7 +56,10 @@ function emptyMeta(sessionPath: string, provider: string): VersionMeta {
   return { sessionPath, provider, head: 0, versions: [] };
 }
 
-async function readMeta(sessionPath: string, provider: string): Promise<VersionState> {
+async function readMeta(
+  sessionPath: string,
+  provider: string,
+): Promise<VersionState> {
   const versionsDir = dirFor(sessionPath);
   const metaPath = path.join(versionsDir, "meta.json");
 

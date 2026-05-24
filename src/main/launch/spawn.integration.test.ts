@@ -198,9 +198,9 @@ describe("launch identity env propagation (real tmux mesh)", () => {
       const execute = (cmd: string) => conn.execute(cmd);
       // SEED_SESSION exists (we created it in beforeEach).
       expect(await sessionExistsForTesting(execute, SEED_SESSION)).toBe(true);
-      expect(
-        await sessionExistsForTesting(execute, `nope-${Date.now()}`),
-      ).toBe(false);
+      expect(await sessionExistsForTesting(execute, `nope-${Date.now()}`)).toBe(
+        false,
+      );
     },
   );
 

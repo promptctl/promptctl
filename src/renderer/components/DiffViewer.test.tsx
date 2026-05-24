@@ -150,9 +150,7 @@ describe("DiffViewer", () => {
     const after = makeMessage(0, "user", "modified text");
     after.tokens = 200;
 
-    const entries: DiffEntry[] = [
-      { kind: "modified", before, after },
-    ];
+    const entries: DiffEntry[] = [{ kind: "modified", before, after }];
     render(
       <DiffViewer
         fromVersion={makeVersion(1)}

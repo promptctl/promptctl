@@ -1,4 +1,11 @@
-import { useState, useCallback, useMemo, useRef, useEffect, type KeyboardEvent } from "react";
+import {
+  useState,
+  useCallback,
+  useMemo,
+  useRef,
+  useEffect,
+  type KeyboardEvent,
+} from "react";
 import { usePaneSelectionStore } from "../store/pane-selection";
 import { useCommandStore } from "../store/command";
 import { getTmuxProxy, useTopology } from "../tmux/proxy";
@@ -17,11 +24,12 @@ export function CommandBar() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   // Filter commands by name for suggestions
-  const suggestions = input.length > 0
-    ? commands.filter((c) =>
-        c.name.toLowerCase().includes(input.toLowerCase()),
-      ).slice(0, 5)
-    : [];
+  const suggestions =
+    input.length > 0
+      ? commands
+          .filter((c) => c.name.toLowerCase().includes(input.toLowerCase()))
+          .slice(0, 5)
+      : [];
 
   const sendToPane = useCallback(async () => {
     const text = input.trim();
@@ -137,7 +145,11 @@ export function CommandBar() {
               }`}
               title={`${event.type}: ${event.detail ?? ""}`}
             >
-              {event.type === "error" ? "ERR" : event.type === "matched" ? "MTH" : "OK"}
+              {event.type === "error"
+                ? "ERR"
+                : event.type === "matched"
+                  ? "MTH"
+                  : "OK"}
             </span>
           ))}
       </div>

@@ -80,7 +80,10 @@ interface Harness {
 }
 
 function makeHarness(): Harness {
-  const eventHandlers = new Map<keyof TmuxEventMap, ((ev: unknown) => void)[]>();
+  const eventHandlers = new Map<
+    keyof TmuxEventMap,
+    ((ev: unknown) => void)[]
+  >();
   const stateListeners = new Set<(s: ConnectionStateEvent) => void>();
   const state = { captureOutput: [] as string[] };
 
@@ -97,7 +100,10 @@ function makeHarness(): Harness {
         success: true,
       };
     },
-    async setPaneAction(paneId: number, action: string): Promise<CommandResponse> {
+    async setPaneAction(
+      paneId: number,
+      action: string,
+    ): Promise<CommandResponse> {
       client.setPaneActionCalls.push([paneId, action]);
       if (client.setPaneActionError !== null) throw client.setPaneActionError;
       return {
@@ -169,12 +175,12 @@ const encoder = new TextEncoder();
 describe("TmuxOutputRouter", () => {
   it("captures scrollback on first subscribe and sends streaming state", async () => {
     const h = makeHarness();
-    h.setCaptureOutput([
-      "line1",
-      "line2",
-      "line3",
-    ]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.setCaptureOutput(["line1", "line2", "line3"]);
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     const wc = h.makeWc();
 
     h.router.subscribe("%1" as PaneId, wc as unknown as WebContentsLike);
@@ -198,7 +204,11 @@ describe("TmuxOutputRouter", () => {
 
   it("forwards output bytes only to watchers of that pane", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc1 = h.makeWc();
     const wc2 = h.makeWc();
@@ -234,7 +244,11 @@ describe("TmuxOutputRouter", () => {
 
   it("forwards extended-output the same as output", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc = h.makeWc();
     h.router.subscribe("%5" as PaneId, wc as unknown as WebContentsLike);
@@ -254,7 +268,11 @@ describe("TmuxOutputRouter", () => {
 
   it("auto-resumes and sends paused state on pause event", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc = h.makeWc();
     h.router.subscribe("%3" as PaneId, wc as unknown as WebContentsLike);
@@ -275,7 +293,11 @@ describe("TmuxOutputRouter", () => {
 
   it("logs an error when auto-resume rejects", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc = h.makeWc();
     h.router.subscribe("%7" as PaneId, wc as unknown as WebContentsLike);
@@ -283,7 +305,9 @@ describe("TmuxOutputRouter", () => {
     wc.sent.length = 0;
 
     h.client.setPaneActionError = new Error("pane gone");
-    const errSpy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    const errSpy = vi
+      .spyOn(console, "error")
+      .mockImplementation(() => undefined);
 
     h.fireEvent("pause", { type: "pause", paneId: 7 });
     await flush();
@@ -299,7 +323,11 @@ describe("TmuxOutputRouter", () => {
 
   it("sends streaming state on continue event", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc = h.makeWc();
     h.router.subscribe("%3" as PaneId, wc as unknown as WebContentsLike);
@@ -315,7 +343,11 @@ describe("TmuxOutputRouter", () => {
 
   it("stops delivery after unsubscribe", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc = h.makeWc();
     const wcRef = wc as unknown as WebContentsLike;
@@ -336,7 +368,11 @@ describe("TmuxOutputRouter", () => {
 
   it("cleans up when WebContents is destroyed", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc = h.makeWc();
     h.router.subscribe("%1" as PaneId, wc as unknown as WebContentsLike);
@@ -357,7 +393,11 @@ describe("TmuxOutputRouter", () => {
 
   it("broadcasts disconnected on non-ready connection state", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc = h.makeWc();
     h.router.subscribe("%1" as PaneId, wc as unknown as WebContentsLike);
@@ -367,7 +407,8 @@ describe("TmuxOutputRouter", () => {
     h.fireConnState({
       status: "closed",
       reason: "transport closed",
-      reconnectAttempts: 1, observedSessions: 0,
+      reconnectAttempts: 1,
+      observedSessions: 0,
     });
 
     const states = wc.sent.filter((s) => s.channel === "tmux:output:state");
@@ -378,7 +419,11 @@ describe("TmuxOutputRouter", () => {
   it("re-captures scrollback on reconnect for existing watchers", async () => {
     const h = makeHarness();
     h.setCaptureOutput(["old"]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     const wc = h.makeWc();
     h.router.subscribe("%1" as PaneId, wc as unknown as WebContentsLike);
     await flush();
@@ -387,10 +432,15 @@ describe("TmuxOutputRouter", () => {
     h.fireConnState({
       status: "closed",
       reason: "drop",
-      reconnectAttempts: 1, observedSessions: 0,
+      reconnectAttempts: 1,
+      observedSessions: 0,
     });
     h.setCaptureOutput(["reconnected"]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 1, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 1,
+      observedSessions: 1,
+    });
     await flush();
 
     // A second capture-pane was issued.
@@ -399,7 +449,11 @@ describe("TmuxOutputRouter", () => {
 
   it("dispose removes all listeners and stops delivery", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc = h.makeWc();
     h.router.subscribe("%1" as PaneId, wc as unknown as WebContentsLike);
@@ -419,7 +473,11 @@ describe("TmuxOutputRouter", () => {
 
   it("delivers to multiple watchers of the same pane", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc1 = h.makeWc();
     const wc2 = h.makeWc();
@@ -441,7 +499,11 @@ describe("TmuxOutputRouter", () => {
 
   it("skips delivery to destroyed WebContents", async () => {
     const h = makeHarness();
-    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
+    h.fireConnState({
+      status: "ready",
+      reconnectAttempts: 0,
+      observedSessions: 1,
+    });
     h.setCaptureOutput([]);
     const wc1 = h.makeWc();
     const wc2 = h.makeWc();

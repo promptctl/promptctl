@@ -65,7 +65,10 @@ type Rule = (lines: ClaudeLine[]) => InvariantViolation | null;
 // The Anthropic API rejects sessions with orphans in either direction.
 const ruleToolUsePairing: Rule = (lines) => {
   const toolUses = new Map<string, { lineIndex: number; blockIndex: number }>();
-  const toolResults = new Map<string, { lineIndex: number; blockIndex: number }>();
+  const toolResults = new Map<
+    string,
+    { lineIndex: number; blockIndex: number }
+  >();
 
   for (let i = 0; i < lines.length; i++) {
     const blocks = contentBlocks(lines[i]);

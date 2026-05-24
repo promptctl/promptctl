@@ -180,17 +180,16 @@ describe("TmuxTopologyTracker (real tmux mesh)", () => {
 
     await conn.ready;
     await waitFor(
-      () =>
-        tracker.snapshot().panes.some((p) => p.sessionName === "user-work"),
+      () => tracker.snapshot().panes.some((p) => p.sessionName === "user-work"),
       5000,
       "user-work panes appear in snapshot",
     );
 
     const snap = tracker.snapshot();
     expect(snap.panes.some((p) => p.sessionName === SEED_SESSION)).toBe(true);
-    expect(snap.panes.filter((p) => p.sessionName === "user-work")).toHaveLength(
-      2,
-    );
+    expect(
+      snap.panes.filter((p) => p.sessionName === "user-work"),
+    ).toHaveLength(2);
 
     tracker.dispose();
     conn.close();

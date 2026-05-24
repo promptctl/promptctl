@@ -58,10 +58,7 @@ export interface ProviderAdapter {
 
   // Persistence — adapter handles format-specific save (JSON rewrite vs JSONL line removal).
   // indicesToRemove are logical indices; adapter translates to physical as needed.
-  saveSession(
-    indicesToRemove: number[],
-    outputPath?: string,
-  ): Promise<string>;
+  saveSession(indicesToRemove: number[], outputPath?: string): Promise<string>;
 
   // [LAW:single-enforcer] Return what saveSession would write, without I/O.
   // The editor coordinator calls this to run pre-save validation. Adapters
