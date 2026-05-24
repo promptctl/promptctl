@@ -229,14 +229,37 @@ describe("LaunchCorrelator exit detection", () => {
     h.dispose();
   });
 
-  it("marks the launch exited when the pane vanishes from the snapshot", () => {
+  it("marks the launch exited when a previously-observed pane vanishes from the snapshot", () => {
     const h = harness();
     const id = makeRunningLaunch(h.registry);
+    // First snapshot brings the pane into view with a pid — this is the
+    // "previously observed" gate the correlator uses to distinguish
+    // "real exit" from "stale snapshot that pre-dates the launch."
+    h.pushSnapshot([makePane({ pid: 4242 })]);
     expect(h.registry.get(id)?.status).toBe("running");
     h.pushSnapshot([]); // pane disappeared
     const after = h.registry.get(id);
     expect(after?.status).toBe("exited");
     if (after?.status === "exited") expect(after.exitReason).toBe("pane gone");
+    h.dispose();
+  });
+
+  it("does NOT mark exited when an unobserved pane is absent from the snapshot", () => {
+    // [LAW:types-are-the-program] A topology refresh that started
+    // before the launch's new-session was acknowledged can broadcast
+    // after markRunning with the new pane legitimately absent. The
+    // gate (`pid === null` → skip) treats that case as "snapshot
+    // predates the launch", not as a real exit. Pid attaches happen
+    // only when a snapshot contains the pane, so `pid === null` is
+    // the precise discriminator for "never observed."
+    const h = harness();
+    const id = makeRunningLaunch(h.registry);
+    // pid is null (no prior observation). An empty snapshot must NOT
+    // mark exit — the launch's pane simply hasn't surfaced yet in any
+    // topology refresh we've received.
+    h.pushSnapshot([]);
+    const after = h.registry.get(id);
+    expect(after?.status).toBe("running");
     h.dispose();
   });
 

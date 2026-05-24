@@ -89,13 +89,24 @@ export function startLaunchCorrelator(deps: CorrelatorDeps): () => void {
 
   // [LAW:dataflow-not-control-flow] reconcileFromSnapshot runs the same
   // pipeline on every topology edge: read snapshot, project to running
-  // rows, two outcomes gated on data (pane missing → markExited; pane
-  // present → attach pid). Registry idempotency absorbs repeats.
+  // rows, gated on data. Pane missing & never-observed is "snapshot
+  // predates the launch" (no exit); pane missing & previously-observed
+  // is real exit; pane present is pid attach.
+  //
+  // [LAW:types-are-the-program] "Have we seen this pane?" already has
+  // an answer on the row — `pid !== null`. Pid attaches happen only via
+  // a snapshot that contained the pane; recovery only keeps pid-known
+  // rows alive. So `pid === null && pane missing` is the precise
+  // signature of "this snapshot was taken before tmux acknowledged
+  // new-session for this launch" and must NOT be read as an exit.
+  // Adding a parallel `paneObserved` boolean would duplicate this
+  // information across two fields that can drift.
   const reconcileFromSnapshot = (snapshot: TmuxSnapshot): void => {
     for (const launch of deps.registry.listActive()) {
       if (launch.status !== "running") continue;
       const pane = snapshot.panes.find((p) => p.id === launch.paneId);
-      if (!pane) {
+      if (pane === undefined) {
+        if (launch.pid === null) continue;
         deps.registry.markExited(launch.launchId, "pane gone");
         continue;
       }
