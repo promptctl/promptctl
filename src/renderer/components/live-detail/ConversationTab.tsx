@@ -397,16 +397,18 @@ function BlockWithToolLink({
       data-tool-result-id={resultId ?? undefined}
     >
       {renderBlock(block, { index: blockIndex })}
-      {hasResultLink ? (
+      {hasResultLink && toolUseId !== null ? (
         <ToolJumpLink
-          target={`[data-tool-result-id="${toolUseId}"]`}
+          attr="data-tool-result-id"
+          value={toolUseId}
           label="→ result"
           testId="conversation-tool-use-jump"
         />
       ) : null}
-      {hasUseLink ? (
+      {hasUseLink && resultId !== null ? (
         <ToolJumpLink
-          target={`[data-tool-use-id="${resultId}"]`}
+          attr="data-tool-use-id"
+          value={resultId}
           label="← input"
           testId="conversation-tool-result-jump"
         />
@@ -452,12 +454,24 @@ function RequestIdLink({
   );
 }
 
+// [LAW:single-enforcer] Selector construction lives here. Callers pass
+// the attribute name and value as separate strings; the value is
+// CSS-escaped before being interpolated. This shape makes "the caller
+// built the selector with an unescaped untrusted value" unrepresentable
+// at the type level — there is no `target` parameter to misuse.
+//
+// [LAW:locality-or-seam] The jump scope is the timeline container that
+// hosts THIS button, not the whole document. `closest()` keeps the
+// lookup local to the rendering tree even when multiple Conversation
+// tabs coexist in the document.
 function ToolJumpLink({
-  target,
+  attr,
+  value,
   label,
   testId,
 }: {
-  target: string;
+  attr: string;
+  value: string;
   label: string;
   testId: string;
 }) {
@@ -465,20 +479,29 @@ function ToolJumpLink({
     <button
       type="button"
       data-testid={testId}
-      data-jump-target={target}
-      // [LAW:locality-or-seam] The jump scope is the timeline container
-      // that hosts THIS button, not the whole document. Resolving the
-      // scope via `closest()` keeps the lookup local to the rendering
-      // tree even when multiple Conversation tabs / detail panes coexist
-      // in the same document (avoids cross-pane scroll on id collision).
       onClick={(event) => {
         const scope = event.currentTarget.closest(
           '[data-testid="conversation-timeline"]',
         );
         if (scope === null) return;
-        const el = scope.querySelector(target);
-        if (el instanceof HTMLElement && typeof el.scrollIntoView === "function") {
-          el.scrollIntoView({ block: "nearest", behavior: "auto" });
+        // tool_use_id comes from untrusted Anthropic payloads — values
+        // containing `]`, `"`, or escape characters would otherwise
+        // break the selector or hit the wrong element. CSS.escape is
+        // the supported sanitizer; the try/catch is a backstop for
+        // engines (very old browsers, certain test environments) that
+        // either lack CSS.escape or reject the selector.
+        try {
+          const selector = `[${attr}="${cssEscape(value)}"]`;
+          const el = scope.querySelector(selector);
+          if (
+            el instanceof HTMLElement &&
+            typeof el.scrollIntoView === "function"
+          ) {
+            el.scrollIntoView({ block: "nearest", behavior: "auto" });
+          }
+        } catch {
+          // Malformed id → no-op. Clicking does nothing, but the UI
+          // doesn't crash.
         }
       }}
       className="mt-1 ml-1 text-[10px] text-cyan-400 underline-offset-2 hover:underline"
@@ -486,6 +509,17 @@ function ToolJumpLink({
       {label}
     </button>
   );
+}
+
+// CSS.escape is in every Electron / modern browser; the fallback is
+// defensive against very old test environments. We do the minimum
+// escape (`"` → `\"`, `\` → `\\`) which is sufficient for the values
+// in a `[attr="..."]` selector.
+function cssEscape(value: string): string {
+  if (typeof CSS !== "undefined" && typeof CSS.escape === "function") {
+    return CSS.escape(value);
+  }
+  return value.replace(/\\/g, "\\\\").replace(/"/g, '\\"');
 }
 
 function msFromNs(ns: number): number {

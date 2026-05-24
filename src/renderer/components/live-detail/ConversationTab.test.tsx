@@ -245,6 +245,53 @@ describe("ConversationTab", () => {
     expect(resultJumpButtons[0]).toHaveTextContent("← input");
   });
 
+  it("tool-pair link does not crash on malformed tool_use_id (CSS escape)", () => {
+    // [LAW:types-are-the-program] The ToolJumpLink signature takes
+    // (attr, value) separately and escapes the value internally; a
+    // value containing characters that would otherwise break the
+    // selector (quotes, brackets, backslashes) must not crash the UI.
+    const evilId = 'toolu_bad"]injection\\here';
+    const toolUse = {
+      type: "tool_use",
+      id: evilId,
+      name: "Read",
+      input: {},
+    };
+    const toolResult = {
+      type: "tool_result",
+      tool_use_id: evilId,
+      content: "x",
+    };
+    const r1 = makeRequest({
+      requestId: "r1",
+      requestBody: { messages: [{ role: "user", content: "x" }] },
+      assembledResponse: makeAssistant("a1", [toolUse], "tool_use"),
+    });
+    const r2 = makeRequest({
+      requestId: "r2",
+      requestBody: {
+        messages: [
+          { role: "user", content: "x" },
+          { role: "assistant", content: [toolUse] },
+          { role: "user", content: [toolResult] },
+        ],
+      },
+      assembledResponse: makeAssistant("a2", [{ type: "text", text: "done" }]),
+    });
+    render(
+      <ConversationTab
+        chain={[r1, r2]}
+        selectedRequestId="r1"
+        onSelectRequest={undefined}
+      />,
+    );
+    const useJump = screen.getAllByTestId("conversation-tool-use-jump")[0];
+    expect(useJump).toBeDefined();
+    // Click must not throw even though the id contains characters that
+    // would break a raw `[attr="<id>"]` selector.
+    expect(() => fireEvent.click(useJump)).not.toThrow();
+  });
+
   it("renders TTFB and tokens on the boundary when available", () => {
     const rec = makeRequest({
       requestId: "req-1",
