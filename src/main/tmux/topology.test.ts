@@ -26,8 +26,21 @@ import type { ConnectionStateEvent } from "./control";
 import {
   TmuxTopologyTracker,
   TOPOLOGY_SUBSCRIPTIONS,
-  type TopologyClient,
 } from "./topology";
+
+// Local shape — TopologyClient was retired with the mesh refactor; the tracker
+// now consumes execute() / subscribeRaw() directly via deps. Tests still
+// instantiate a fake under this shape so assertions can read the call log.
+interface FakeClient {
+  executeCalls: string[];
+  subscribeCalls: [string, string, string][];
+  execute(command: string): Promise<CommandResponse>;
+  subscribeRaw(
+    name: string,
+    what: string,
+    format: string,
+  ): Promise<CommandResponse>;
+}
 
 interface Harness {
   tracker: TmuxTopologyTracker;
@@ -37,10 +50,7 @@ interface Harness {
     payload: TmuxEventMap[K],
   ) => void;
   setListPanesResponse: (lines: string[]) => void;
-  client: TopologyClient & {
-    executeCalls: string[];
-    subscribeCalls: [string, string, string][];
-  };
+  client: FakeClient;
   snapshots: ReturnType<TmuxTopologyTracker["snapshot"]>[];
 }
 
@@ -83,10 +93,7 @@ function makeHarness(): Harness {
   const stateListeners = new Set<(s: ConnectionStateEvent) => void>();
   let listPanesLines: string[] = [];
 
-  const client: TopologyClient & {
-    executeCalls: string[];
-    subscribeCalls: [string, string, string][];
-  } = {
+  const client: FakeClient = {
     executeCalls: [],
     subscribeCalls: [],
     async execute(command: string): Promise<CommandResponse> {
@@ -130,11 +137,18 @@ function makeHarness(): Harness {
     onConnectionState(listener) {
       stateListeners.add(listener);
       // Mirror the real connection: fire current state synchronously.
-      listener({ status: "connecting", reconnectAttempts: 0 });
+      listener({
+        status: "connecting",
+        reconnectAttempts: 0,
+        observedSessions: 0,
+      });
       return () => stateListeners.delete(listener);
     },
-    getClient() {
-      return client;
+    execute(command) {
+      return client.execute(command);
+    },
+    subscribeRaw(name, what, format) {
+      return client.subscribeRaw(name, what, format);
     },
   });
 
@@ -177,7 +191,7 @@ describe("TmuxTopologyTracker", () => {
   it("subscribes to every documented topology channel on ready", async () => {
     const h = makeHarness();
     h.setListPanesResponse([]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
 
     const subscribed = new Set(h.client.subscribeCalls.map((c) => c[0]));
@@ -197,7 +211,7 @@ describe("TmuxTopologyTracker", () => {
         currentCommand: "vim",
       }),
     ]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
 
     const snap = h.tracker.snapshot();
@@ -209,7 +223,7 @@ describe("TmuxTopologyTracker", () => {
   it("patches a pane field from subscription-changed and broadcasts only on diff", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1", currentCommand: "zsh" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
 
     const broadcastsAfterSeed = h.snapshots.length;
@@ -248,7 +262,7 @@ describe("TmuxTopologyTracker", () => {
       paneLine({ id: "%2", windowId: "@7", windowName: "old" }),
       paneLine({ id: "%3", windowId: "@8", windowName: "other" }),
     ]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
 
     h.fireEvent("subscription-changed", {
@@ -270,7 +284,7 @@ describe("TmuxTopologyTracker", () => {
   it("re-runs list-panes on a topology event and reflects the new pane", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
     expect(h.tracker.snapshot().panes).toHaveLength(1);
 
@@ -287,7 +301,7 @@ describe("TmuxTopologyTracker", () => {
   it("clears the snapshot on a non-ready transition", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
     expect(h.tracker.snapshot().panes).toHaveLength(1);
 
@@ -295,6 +309,7 @@ describe("TmuxTopologyTracker", () => {
       status: "closed",
       reason: "transport closed",
       reconnectAttempts: 1,
+      observedSessions: 0,
     });
 
     expect(h.tracker.snapshot().panes).toHaveLength(0);
@@ -303,28 +318,35 @@ describe("TmuxTopologyTracker", () => {
     expect(h.snapshots[h.snapshots.length - 1].panes).toHaveLength(0);
   });
 
-  it("re-subscribes and re-seeds across a reconnect", async () => {
+  it("subscribes once and re-seeds the snapshot across a reconnect", async () => {
+    // [LAW:single-enforcer] Re-subscription on transport churn is the
+    // connection's job, not the tracker's. The tracker subscribes ONCE on
+    // its first ready transition and trusts the connection's sticky
+    // subscriptions to survive topology-source transfers. Re-seeding the
+    // snapshot via list-panes still happens on every ready, because the
+    // snapshot is the tracker's owned state — it has to refresh after a
+    // gap during which tmux may have changed.
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
     const subsAfterFirstReady = h.client.subscribeCalls.length;
+    expect(subsAfterFirstReady).toBe(TOPOLOGY_SUBSCRIPTIONS.length);
 
-    h.fireConnState({ status: "closed", reason: "drop", reconnectAttempts: 1 });
+    h.fireConnState({ status: "closed", reason: "drop", reconnectAttempts: 1, observedSessions: 0 });
     h.setListPanesResponse([paneLine({ id: "%5" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 1 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 1, observedSessions: 1 });
     await flush();
 
-    expect(h.client.subscribeCalls.length).toBe(
-      subsAfterFirstReady + TOPOLOGY_SUBSCRIPTIONS.length,
-    );
+    // Same number of subscriptions — no re-issue from the tracker.
+    expect(h.client.subscribeCalls.length).toBe(subsAfterFirstReady);
     expect(h.tracker.snapshot().panes.map((p) => p.id)).toEqual(["%5"]);
   });
 
   it("ignores subscription-changed for an unknown pane (race with topology)", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
     const before = h.snapshots.length;
 
@@ -348,7 +370,7 @@ describe("TmuxTopologyTracker", () => {
       paneLine({ id: "%1", windowId: "@0" }),
       paneLine({ id: "%2", windowId: "@1" }),
     ]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
     expect(h.tracker.snapshot().panes).toHaveLength(2);
 
@@ -370,7 +392,7 @@ describe("TmuxTopologyTracker", () => {
       paneLine({ id: "%3", sessionName: "promptctl-test" }),
       paneLine({ id: "%4", sessionName: "scratch" }),
     ]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
 
     const ids = h.tracker.snapshot().panes.map((p) => p.id);
@@ -380,7 +402,7 @@ describe("TmuxTopologyTracker", () => {
   it("dispose() removes all listeners and clears state", async () => {
     const h = makeHarness();
     h.setListPanesResponse([paneLine({ id: "%1" })]);
-    h.fireConnState({ status: "ready", reconnectAttempts: 0 });
+    h.fireConnState({ status: "ready", reconnectAttempts: 0, observedSessions: 1 });
     await flush();
 
     const seen = vi.fn();

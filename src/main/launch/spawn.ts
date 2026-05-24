@@ -9,8 +9,8 @@
 // markRunning OR markExited. Variability lives in the spec (toolKind,
 // cwd, sessionName), never in branches that choose which steps to run.
 
-import type { TmuxClient } from "tmux-control-mode-js";
 import { tmuxEscape } from "tmux-control-mode-js/protocol";
+import type { CommandResponse } from "tmux-control-mode-js/protocol";
 import type {
   Launch,
   LaunchId,
@@ -41,11 +41,18 @@ export interface SpawnTopology {
   onSnapshot(listener: (snapshot: TmuxSnapshot) => void): () => void;
 }
 
+// [LAW:locality-or-seam] The spawn flow consumes tmux through one method:
+// execute(). The connection's mesh routes the request to any ready client
+// and rejects loudly when the mesh is empty (no-sessions). No "is the
+// connection ready" branch lives here — that knowledge is in the caller's
+// error handling, not in this module's control flow.
 export interface SpawnDeps {
   readonly registry: LaunchRegistry;
   readonly topology: SpawnTopology;
-  // Returns the live client or null between disconnect and reconnect-ready.
-  readonly getClient: () => TmuxClient | null;
+  // Run a tmux command. Rejects when the mesh is empty (no sessions
+  // observed yet) — the caller surfaces that as a user-visible "try again
+  // in a moment" message.
+  readonly execute: (command: string) => Promise<CommandResponse>;
   // Returns the proxy's listening port so the env block can point the
   // tool at the loopback proxy. Resolved at call time so a proxy restart
   // (changed port) doesn't strand pre-baked env blocks.
@@ -64,15 +71,6 @@ export interface SpawnDeps {
 const DEFAULT_TIMEOUT_MS = 5000;
 
 export async function spawnLaunch(deps: SpawnDeps, spec: LaunchSpec): Promise<Launch> {
-  const client = deps.getClient();
-  if (client === null) {
-    // Loud failure surfaces in LaunchToolDialog. The control connection
-    // is between disconnect and reconnect-ready — the user can retry.
-    throw new Error(
-      "tmux control connection is not ready — try again in a moment",
-    );
-  }
-
   // Reject collisions up front. tmux's `new-session -d -s NAME` in
   // control mode does NOT consistently raise `%error duplicate session`
   // when NAME exists — under some tmux versions it silently creates a
@@ -81,7 +79,7 @@ export async function spawnLaunch(deps: SpawnDeps, spec: LaunchSpec): Promise<La
   // throws on tmux's `%error` reply; we pattern-match the "can't find
   // session" text (the steady-state "doesn't exist" reply) and treat
   // everything else as propagating.
-  if (await sessionExists(client, spec.sessionName)) {
+  if (await sessionExists(deps.execute, spec.sessionName)) {
     throw new Error(`tmux session "${spec.sessionName}" already exists`);
   }
 
@@ -106,7 +104,7 @@ export async function spawnLaunch(deps: SpawnDeps, spec: LaunchSpec): Promise<La
   // new-session here is expected to succeed. tmux still surfaces
   // unexpected errors (binary missing, permission denied, etc.) as a
   // thrown TmuxCommandError, which we let propagate verbatim.
-  await client.execute(
+  await deps.execute(
     [
       "new-session",
       "-d",
@@ -123,7 +121,7 @@ export async function spawnLaunch(deps: SpawnDeps, spec: LaunchSpec): Promise<La
   // O(1) — one pane, one line. The library throws TmuxCommandError on
   // tmux's `%error` (e.g. session died between new-session and here);
   // we let that propagate with tmux's original message.
-  const listResp = await client.execute(
+  const listResp = await deps.execute(
     `list-panes -t ${tmuxEscape(spec.sessionName)} -F "#{pane_id}|#{session_id}|#{window_id}"`,
   );
   const line = listResp.output[0]?.trim();
@@ -190,9 +188,12 @@ export { sessionExists as sessionExistsForTesting };
 //  - session present     → `%end` with empty output  → resolve success
 //  - session absent      → `%error can't find session: NAME` → throw
 //  - other (server gone) → different error text → propagate
-async function sessionExists(client: TmuxClient, name: string): Promise<boolean> {
+async function sessionExists(
+  execute: (command: string) => Promise<CommandResponse>,
+  name: string,
+): Promise<boolean> {
   try {
-    const resp = await client.execute(`has-session -t =${tmuxEscape(name)}`);
+    const resp = await execute(`has-session -t =${tmuxEscape(name)}`);
     // tmux 3.x returns `%end` (success) even when the session doesn't
     // exist on some configurations — but with diagnostic output in the
     // body. The robust read is: success AND no error-shaped output.

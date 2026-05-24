@@ -1,22 +1,21 @@
 // @vitest-environment node
 //
-// Integration tests for TmuxControlConnection against a real tmux binary.
-// Run unconditionally with the default `npm test` — tmux is a hard project
-// requirement (README boundaries) and integration regressions must surface
-// in the same loop as unit regressions, not behind an opt-in env var.
+// Integration tests for TmuxControlConnection's flat mesh against a real
+// tmux binary. Run unconditionally with the default `npm test` — tmux is a
+// hard project requirement (README boundaries) and integration regressions
+// must surface in the same loop as unit regressions.
 //
 // Isolation: each test spawns its own tmux server on a unique `-L <socket>`
 // name. The prefix `promptctl-tmux-control-` is distinct from the library's
 // `tmux-js-test-` so the two suites can run concurrently without colliding,
 // and neither touches the developer's default tmux server.
 
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
-import { spawnTmux } from "tmux-control-mode-js";
+import { spawnTmux, type TmuxTransport } from "tmux-control-mode-js";
 import { TmuxControlConnection } from "./control";
-import { ensureSession } from "./session";
-
-const OWNED = "promptctl-test";
+import { TmuxError, tmuxExec } from "./exec";
+import type { SessionId } from "../../shared/types";
 
 function uniqueSocket(): string {
   return `promptctl-tmux-control-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -52,46 +51,88 @@ async function waitFor(
   }
 }
 
+// Returns the mesh-aware transport + enumeration deps for a given test
+// socket. The connection discovers whatever sessions exist on the socket
+// at startup and spawns a per-session client.
+function meshDepsFor(socket: string) {
+  const transportFactory = (sessionId: SessionId): TmuxTransport =>
+    spawnTmux(["attach-session", "-t", sessionId], { socketPath: socket });
+  const enumerateSessions = async (): Promise<SessionId[]> => {
+    try {
+      const stdout = await tmuxExec([
+        "-L",
+        socket,
+        "list-sessions",
+        "-F",
+        "#{session_id}",
+      ]);
+      return stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => line as SessionId);
+    } catch (err) {
+      if (
+        err instanceof TmuxError &&
+        /no server running|error connecting to/.test(err.stderr)
+      ) {
+        return [];
+      }
+      throw err;
+    }
+  };
+  return { transportFactory, enumerateSessions };
+}
+
 afterEach(() => {
   TmuxControlConnection.__resetForTesting();
 });
 
-describe("TmuxControlConnection (real tmux)", () => {
+describe("TmuxControlConnection mesh (real tmux)", () => {
   let socket: string;
 
   beforeEach(() => {
     socket = uniqueSocket();
-    execSync(tmuxCmd(socket, "new-session -d -s probe"), { stdio: "ignore" });
+    // Outer timeout sits above the largest inner waitFor budget so a
+    // failure surfaces a descriptive "waitFor(<label>) timed out" message
+    // instead of vitest's generic "Test timed out in 5000ms".
+    vi.setConfig({ testTimeout: 15000 });
   });
 
   afterEach(() => {
     killServer(socket);
   });
 
-  it("ensureSession is idempotent without a controlling terminal", async () => {
-    // Regression: `tmux new-session -A -s NAME -d` falls back to attach-session
-    // when the session exists, which tries to open /dev/tty and fails under
-    // Electron with "open terminal failed: not a terminal". The reconnect loop
-    // calls bootstrap() on every retry, so the second-and-onward calls must
-    // succeed without a TTY. We force the no-TTY path by detaching stdio.
-    await ensureSession(OWNED, socket); // first call: creates the session
-    await ensureSession(OWNED, socket); // second call: must NOT try to attach
+  it("starts in no-sessions when the tmux server has no sessions yet", { timeout: 15000 }, async () => {
+    // No new-session executed before connect — the server-less path is
+    // the legitimate empty-mesh state.
+    const conn = TmuxControlConnection.start({
+      socketPath: socket,
+      ...meshDepsFor(socket),
+      reconcileIntervalMs: 5000,
+    });
 
-    const list = execSync(tmuxCmd(socket, "list-sessions -F '#{session_name}'"), {
-      stdio: ["ignore", "pipe", "ignore"],
-    })
-      .toString()
-      .trim()
-      .split("\n");
-    expect(list).toContain(OWNED);
+    await Promise.race([
+      conn.ready,
+      delay(5000).then(() => {
+        throw new Error(
+          `connection never reached ready; state=${JSON.stringify(conn.getState())}`,
+        );
+      }),
+    ]);
+
+    expect(conn.getState().status).toBe("no-sessions");
+    expect(conn.getState().observedSessions).toBe(0);
   });
 
-  it("connects to a real tmux server and reaches ready", async () => {
+  it("discovers existing sessions at startup and reaches ready", { timeout: 15000 }, async () => {
+    execSync(tmuxCmd(socket, "new-session -d -s alpha"), { stdio: "ignore" });
+    execSync(tmuxCmd(socket, "new-session -d -s beta"), { stdio: "ignore" });
+
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-      sessionName: OWNED,
-      bootstrap: () => ensureSession(OWNED, socket),
-      reconnectDelayMs: 100,
+      socketPath: socket,
+      ...meshDepsFor(socket),
+      reconcileIntervalMs: 5000,
     });
 
     await Promise.race([
@@ -104,31 +145,32 @@ describe("TmuxControlConnection (real tmux)", () => {
     ]);
 
     expect(conn.getState().status).toBe("ready");
+    expect(conn.getState().observedSessions).toBe(2);
   });
 
-  it("survives a kill-server / restart cycle and returns to ready", async () => {
+  it("survives a kill-server / restart cycle and returns to ready", { timeout: 15000 }, async () => {
+    execSync(tmuxCmd(socket, "new-session -d -s probe"), { stdio: "ignore" });
+
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-      sessionName: OWNED,
-      bootstrap: () => ensureSession(OWNED, socket),
-      reconnectDelayMs: 100,
+      socketPath: socket,
+      ...meshDepsFor(socket),
+      reconcileIntervalMs: 100,
     });
 
     await conn.ready;
     expect(conn.getState().status).toBe("ready");
 
-    // Kill the server. The transport's onClose fires, which the connection
-    // routes through handleClientFailure → setStatus("closed") → reconnect.
     killServer(socket);
 
+    // The mesh empties out as transports drop. status goes to no-sessions.
     await waitFor(
-      () => conn.getState().status === "closed",
+      () => conn.getState().status === "no-sessions",
       3000,
-      "transition to closed after server kill",
+      "transition to no-sessions after server kill",
     );
 
-    // Bring the server back up. The next reconnect probe will succeed and the
-    // connection should reach ready again without manual intervention.
+    // Bring the server back up. The periodic reconcile picks up the new
+    // session, spawns a client for it, and the mesh recovers to ready.
     execSync(tmuxCmd(socket, "new-session -d -s recovery"), { stdio: "ignore" });
 
     await waitFor(
@@ -137,33 +179,27 @@ describe("TmuxControlConnection (real tmux)", () => {
       "reconnect after server restart",
     );
 
-    expect(conn.getState().status).toBe("ready");
+    expect(conn.getState().observedSessions).toBeGreaterThanOrEqual(1);
   });
 
-  it("can issue commands through the new client after reconnect", async () => {
-    // After a transport drop + reconnect, the connection's `client` accessor
-    // must point at the new TmuxClient and that client must successfully
-    // round-trip commands. This is the load-bearing property — any caller that
-    // held a reference to the connection (not the raw client) keeps working
-    // across reconnects without re-fetching.
+  it("routes execute() through the mesh and works across reconnects", { timeout: 15000 }, async () => {
+    execSync(tmuxCmd(socket, "new-session -d -s probe"), { stdio: "ignore" });
+
     const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-      sessionName: OWNED,
-      bootstrap: () => ensureSession(OWNED, socket),
-      reconnectDelayMs: 100,
+      socketPath: socket,
+      ...meshDepsFor(socket),
+      reconcileIntervalMs: 100,
     });
 
     await conn.ready;
-    const before = conn.client;
-    if (before === null) throw new Error("client null after ready");
-    const r1 = await before.execute("display-message -p 'pre-kill'");
+    const r1 = await conn.execute("display-message -p 'pre-kill'");
     expect(r1.success).toBe(true);
 
     killServer(socket);
     await waitFor(
-      () => conn.getState().status === "closed",
+      () => conn.getState().status === "no-sessions",
       3000,
-      "closed after kill",
+      "no-sessions after kill",
     );
 
     execSync(tmuxCmd(socket, "new-session -d -s recovery"), { stdio: "ignore" });
@@ -173,10 +209,9 @@ describe("TmuxControlConnection (real tmux)", () => {
       "ready after restart",
     );
 
-    const after = conn.client;
-    if (after === null) throw new Error("client null after reconnect-ready");
-    expect(after).not.toBe(before);
-    const r2 = await after.execute("display-message -p 'post-reconnect'");
+    // Same connection handle; mesh now contains a different underlying
+    // client. The execute() call routes through the new client transparently.
+    const r2 = await conn.execute("display-message -p 'post-reconnect'");
     expect(r2.success).toBe(true);
   });
 });

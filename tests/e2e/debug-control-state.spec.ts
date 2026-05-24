@@ -36,39 +36,31 @@ test.describe("/debug/tmux-control reflects TmuxControlConnection state", () => 
     server?.killServer();
   });
 
-  test("status transitions ready → closed → ready around a kill+restart", async () => {
+  test("status transitions ready → no-sessions → ready around a kill+restart", async () => {
     const { window } = appHandle;
 
     const status = window.locator("[data-testid=control-status]");
-    const reason = window.locator("[data-testid=control-reason]");
-    const reconnects = window.locator(
-      "[data-testid=control-reconnect-attempts]",
-    );
 
-    // 1. Connection reaches ready against the bootstrap session.
+    // 1. Connection reaches ready against the bootstrap session the fixture
+    //    created. Discovery enumerates it and spawns a client.
     await expect(status).toHaveText("ready", { timeout: READY_TIMEOUT_MS });
 
-    // 2. Kill the server. The transport drops; main routes through
-    //    handleClientFailure → setStatus("closed") → reconnect-loop, and
-    //    forwards the new state on `tmux:control-state`.
+    // 2. Kill the server. Every client's transport drops and the mesh
+    //    empties — status transitions to the honest "no-sessions" state
+    //    (not "closed": the connection itself isn't closed, the mesh is
+    //    just empty until tmux comes back).
     server.killServer();
 
-    await expect(status).toHaveText("closed", { timeout: CLOSED_TIMEOUT_MS });
-    // `reason` should carry whatever the transport reported; assert it's
-    // non-empty rather than match an exact string (tmux can phrase it
-    // differently across platforms / versions).
-    await expect(reason).not.toHaveText("—");
+    await expect(status).toHaveText("no-sessions", {
+      timeout: CLOSED_TIMEOUT_MS,
+    });
 
-    // 3. Bring the server back. The next reconnect probe succeeds and the
-    //    panel returns to "ready".
+    // 3. Bring the server back with a fresh session. The periodic reconcile
+    //    re-enumerates, spawns a client, and the mesh transitions to ready.
     server.newSession("recovery");
 
     await expect(status).toHaveText("ready", {
       timeout: RECONNECT_TIMEOUT_MS,
     });
-
-    // Reconnect counter must have incremented at least once across the cycle.
-    const attempts = Number(await reconnects.textContent());
-    expect(attempts).toBeGreaterThanOrEqual(1);
   });
 });

@@ -23,16 +23,46 @@
 
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import { execSync } from "node:child_process";
-import { spawnTmux } from "tmux-control-mode-js";
+import { spawnTmux, type TmuxTransport } from "tmux-control-mode-js";
 import { tmuxEscape } from "tmux-control-mode-js/protocol";
 import { TmuxControlConnection } from "../tmux/control";
-import { ensureSession } from "../tmux/session";
 import { TmuxTopologyTracker } from "../tmux/topology";
+import { TmuxError, tmuxExec } from "../tmux/exec";
 import { composeShellCommand, sessionExistsForTesting } from "./spawn";
 import { launchEnvBlock } from "./registry";
-import type { LaunchId } from "../../shared/types";
+import type { LaunchId, SessionId } from "../../shared/types";
 
-const OWNED = "promptctl-test-launch";
+const SEED_SESSION = "launch-seed";
+
+function meshDepsFor(socket: string) {
+  const transportFactory = (sessionId: SessionId): TmuxTransport =>
+    spawnTmux(["attach-session", "-t", sessionId], { socketPath: socket });
+  const enumerateSessions = async (): Promise<SessionId[]> => {
+    try {
+      const stdout = await tmuxExec([
+        "-L",
+        socket,
+        "list-sessions",
+        "-F",
+        "#{session_id}",
+      ]);
+      return stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => line as SessionId);
+    } catch (err) {
+      if (
+        err instanceof TmuxError &&
+        /no server running|error connecting to/.test(err.stderr)
+      ) {
+        return [];
+      }
+      throw err;
+    }
+  };
+  return { transportFactory, enumerateSessions };
+}
 
 function uniqueSocket(): string {
   return `promptctl-launch-${Date.now()}-${Math.random().toString(36).slice(2, 7)}`;
@@ -72,11 +102,16 @@ afterEach(() => {
   TmuxControlConnection.__resetForTesting();
 });
 
-describe("launch identity env propagation (real tmux)", () => {
+describe("launch identity env propagation (real tmux mesh)", () => {
   let socket: string;
 
   beforeEach(() => {
     socket = uniqueSocket();
+    // Seed a session so the mesh has something to attach to; the spawn
+    // flow creates a different one via execute().
+    execSync(tmuxCmd(socket, `new-session -d -s ${SEED_SESSION}`), {
+      stdio: "ignore",
+    });
   });
 
   afterEach(() => {
@@ -88,11 +123,9 @@ describe("launch identity env propagation (real tmux)", () => {
     { timeout: 15000 },
     async () => {
       const conn = TmuxControlConnection.start({
-        transportFactory: () =>
-          spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-        sessionName: OWNED,
-        bootstrap: () => ensureSession(OWNED, socket),
-        reconnectDelayMs: 100,
+        socketPath: socket,
+        ...meshDepsFor(socket),
+        reconcileIntervalMs: 200,
       });
       await Promise.race([
         conn.ready,
@@ -100,9 +133,6 @@ describe("launch identity env propagation (real tmux)", () => {
           throw new Error("control connection never reached ready");
         }),
       ]);
-
-      const client = conn.client;
-      if (!client) throw new Error("control client null after ready");
 
       const launchId = "test-launch-env-12345" as LaunchId;
       const env = launchEnvBlock({
@@ -115,7 +145,7 @@ describe("launch identity env propagation (real tmux)", () => {
       const shellCommand = composeShellCommand(env, "/bin/cat");
       const TARGET_SESSION = `launch-env-target-${Date.now()}`;
 
-      await client.execute(
+      await conn.execute(
         [
           "new-session",
           "-d",
@@ -127,12 +157,9 @@ describe("launch identity env propagation (real tmux)", () => {
         ].join(" "),
       );
 
-      // tmux returns from new-session before the pane is fully populated
-      // in some versions — give the kernel a beat to fork+exec the child
-      // so list-panes returns a meaningful pid.
       let panePid = 0;
       for (let attempt = 0; attempt < 50; attempt += 1) {
-        const list = await client.execute(
+        const list = await conn.execute(
           `list-panes -t ${tmuxEscape(TARGET_SESSION)} -F "#{pane_pid}"`,
         );
         const candidate = Number(list.output[0]?.trim());
@@ -144,11 +171,6 @@ describe("launch identity env propagation (real tmux)", () => {
       }
       expect(panePid).toBeGreaterThan(0);
 
-      // tmux's new-session is `sh -c <cmd>` → sh → env → cat. The pane's
-      // foreground pid is whichever of those is currently running; by
-      // the time we ask, env has exec'd into cat. Give the chain a beat
-      // to settle, then read env. The pid we want may be panePid or a
-      // child; pgrep -P traces children.
       await delay(150);
       const envText = readProcessEnv(panePid);
       expect(envText).toContain(`PROMPTCTL_LAUNCH_ID=${launchId}`);
@@ -158,7 +180,7 @@ describe("launch identity env propagation (real tmux)", () => {
       );
       expect(envText).toContain("PROMPTCTL_LAUNCH_TOOL=claude");
 
-      await client.execute(`kill-session -t ${tmuxEscape(TARGET_SESSION)}`);
+      await conn.execute(`kill-session -t ${tmuxEscape(TARGET_SESSION)}`);
     },
   );
 
@@ -167,22 +189,17 @@ describe("launch identity env propagation (real tmux)", () => {
     { timeout: 10000 },
     async () => {
       const conn = TmuxControlConnection.start({
-        transportFactory: () =>
-          spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-        sessionName: OWNED,
-        bootstrap: () => ensureSession(OWNED, socket),
-        reconnectDelayMs: 100,
+        socketPath: socket,
+        ...meshDepsFor(socket),
+        reconcileIntervalMs: 200,
       });
       await conn.ready;
-      const client = conn.client;
-      if (!client) throw new Error("control client null after ready");
 
-      // OWNED was bootstrapped — sessionExists should report true.
-      expect(await sessionExistsForTesting(client, OWNED)).toBe(true);
-      // A name that nobody created — should report false (the
-      // "can't find session" reply is recognized and converted).
+      const execute = (cmd: string) => conn.execute(cmd);
+      // SEED_SESSION exists (we created it in beforeEach).
+      expect(await sessionExistsForTesting(execute, SEED_SESSION)).toBe(true);
       expect(
-        await sessionExistsForTesting(client, `nope-${Date.now()}`),
+        await sessionExistsForTesting(execute, `nope-${Date.now()}`),
       ).toBe(false);
     },
   );
@@ -191,21 +208,18 @@ describe("launch identity env propagation (real tmux)", () => {
     "topology populates after a launch-style new-session",
     { timeout: 10000 },
     async () => {
-      // Sanity: when we spawn a session via new-session, the topology
-      // tracker sees it via window-add events. This is the wire we
-      // depend on for waitForToolInPane in production.
       const conn = TmuxControlConnection.start({
-        transportFactory: () =>
-          spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-        sessionName: OWNED,
-        bootstrap: () => ensureSession(OWNED, socket),
-        reconnectDelayMs: 100,
+        socketPath: socket,
+        ...meshDepsFor(socket),
+        reconcileIntervalMs: 200,
       });
       await conn.ready;
       const topology = new TmuxTopologyTracker({
         onEvent: (event, handler) => conn.on(event, handler),
         onConnectionState: (listener) => conn.onConnectionState(listener),
-        getClient: () => conn.client,
+        execute: (cmd) => conn.execute(cmd),
+        subscribeRaw: (name, what, format) =>
+          conn.subscribeRaw(name, what, format),
       });
       await waitFor(
         () => topology.snapshot().panes.length > 0,
@@ -214,9 +228,7 @@ describe("launch identity env propagation (real tmux)", () => {
       );
 
       const TARGET = `topo-target-${Date.now()}`;
-      const client = conn.client;
-      if (!client) throw new Error("control client null after ready");
-      await client.execute(
+      await conn.execute(
         `new-session -d -s ${tmuxEscape(TARGET)} -c /tmp ${tmuxEscape("/bin/cat")}`,
       );
       await waitFor(
@@ -224,7 +236,7 @@ describe("launch identity env propagation (real tmux)", () => {
         5000,
         "new session shows in topology",
       );
-      await client.execute(`kill-session -t ${tmuxEscape(TARGET)}`);
+      await conn.execute(`kill-session -t ${tmuxEscape(TARGET)}`);
       topology.dispose();
     },
   );

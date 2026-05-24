@@ -15,7 +15,7 @@ beforeEach(() => {
     "tmux:control-state:get": (): TmuxControlState => ({
       status: "closed",
       reason: "no tmux server",
-      reconnectAttempts: 0,
+      reconnectAttempts: 0, observedSessions: 0,
     }),
     "tmux:topology:get": (): TmuxSnapshot => EMPTY_TOPOLOGY,
   });
@@ -45,7 +45,7 @@ describe("TmuxControlDebug", () => {
     setInvokeHandlers(api, {
       "tmux:control-state:get": (): TmuxControlState => ({
         status: "connecting",
-        reconnectAttempts: 0,
+        reconnectAttempts: 0, observedSessions: 0,
       }),
       "tmux:topology:get": (): TmuxSnapshot => EMPTY_TOPOLOGY,
     });
@@ -61,7 +61,7 @@ describe("TmuxControlDebug", () => {
     act(() => {
       api.emit("tmux:control-state", {
         status: "ready",
-        reconnectAttempts: 0,
+        reconnectAttempts: 0, observedSessions: 0,
       } satisfies TmuxControlState);
     });
 
@@ -72,7 +72,7 @@ describe("TmuxControlDebug", () => {
       api.emit("tmux:control-state", {
         status: "closed",
         reason: "transport closed",
-        reconnectAttempts: 3,
+        reconnectAttempts: 3, observedSessions: 0,
       } satisfies TmuxControlState);
     });
 
@@ -90,7 +90,7 @@ describe("TmuxControlDebug", () => {
     setInvokeHandlers(api, {
       "tmux:control-state:get": (): TmuxControlState => ({
         status: "ready",
-        reconnectAttempts: 0,
+        reconnectAttempts: 0, observedSessions: 0,
       }),
       "tmux:topology:get": (): TmuxSnapshot => EMPTY_TOPOLOGY,
     });

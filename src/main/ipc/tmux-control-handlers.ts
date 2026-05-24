@@ -13,7 +13,6 @@ import type {
   ConnectionStateEvent,
   TmuxControlConnection,
 } from "../tmux/control";
-import type { SessionId } from "../../shared/types";
 
 export function registerTmuxControlHandlers(
   connection: TmuxControlConnection,
@@ -22,14 +21,10 @@ export function registerTmuxControlHandlers(
     connection.getState(),
   );
 
-  // [LAW:single-enforcer] Renderer intent ("watch this pane's session") reaches
-  // the connection's lone attached-session writer here. The renderer never
-  // drives switch-client directly — main owns the attachment across reconnects.
-  ipcMain.handle(
-    "tmux:watch-session",
-    (_e, sessionId: SessionId | null): Promise<void> =>
-      connection.watchSession(sessionId),
-  );
+  // [LAW:one-type-per-behavior] No watch-session IPC: the mesh observes
+  // every session simultaneously, so the renderer has no "switch attached
+  // session" affordance to invoke. Output flows from every session through
+  // the same channels regardless of focus.
 
   const off = connection.onConnectionState((event) => {
     for (const win of BrowserWindow.getAllWindows()) {
@@ -40,7 +35,6 @@ export function registerTmuxControlHandlers(
 
   return () => {
     ipcMain.removeHandler("tmux:control-state:get");
-    ipcMain.removeHandler("tmux:watch-session");
     off();
   };
 }

@@ -20,7 +20,6 @@ import type {
   DiffEntry,
   TmuxOutputChunk,
   TmuxOutputStateEvent,
-  SessionId,
   PaneId,
   Launch,
   LaunchEvent,
@@ -170,7 +169,6 @@ export interface ElectronAPI {
   invoke(channel: "proxy:load-har", filePath: string): Promise<ProxyStatus>;
   invoke(channel: "proxy:pick-har"): Promise<string | null>;
   invoke(channel: "tmux:control-state:get"): Promise<TmuxControlState>;
-  invoke(channel: "tmux:watch-session", sessionId: SessionId | null): Promise<void>;
   invoke(channel: string, ...args: unknown[]): Promise<unknown>;
   writeClipboard(text: string): void;
 
@@ -242,9 +240,10 @@ export interface ElectronAPI {
 // Mirrors src/main/tmux/control.ts ConnectionStateEvent. Duplicated here so
 // the renderer doesn't import main-process modules.
 export interface TmuxControlState {
-  status: "connecting" | "ready" | "closed";
+  status: "connecting" | "ready" | "no-sessions" | "closed";
   reason?: string;
   reconnectAttempts: number;
+  observedSessions: number;
 }
 
 // Structural shape the library's renderer bridge expects. Exposed by the

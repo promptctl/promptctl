@@ -25,8 +25,11 @@
 // strictly worse than dropping them and letting the next ready-transition
 // re-list from scratch.
 
-import type { TmuxClient, TmuxEventMap } from "tmux-control-mode-js";
-import type { SubscriptionChangedMessage } from "tmux-control-mode-js/protocol";
+import type { TmuxEventMap } from "tmux-control-mode-js";
+import type {
+  CommandResponse,
+  SubscriptionChangedMessage,
+} from "tmux-control-mode-js/protocol";
 import { detectToolKind, PANE_FORMAT, parsePaneList } from "./pane-parse";
 import type { ConnectionStateEvent } from "./control";
 import type {
@@ -72,13 +75,15 @@ const TOPOLOGY_EVENTS = [
   "unlinked-window-renamed",
 ] as const satisfies readonly (keyof TmuxEventMap)[];
 
-// Minimal client surface the tracker actually exercises. Letting tests pass a
-// fake instead of standing up the full TmuxClient.
-export type TopologyClient = Pick<TmuxClient, "execute" | "subscribeRaw">;
-
+// [LAW:locality-or-seam] The tracker consumes tmux through two operations
+// — execute() for the periodic list-panes refresh, subscribeRaw() for the
+// pane/window/session field subscriptions. Both route through the
+// connection's mesh-aware dispatch; the tracker never inspects which
+// underlying client serviced a request.
 export interface TopologyDeps {
   // Reconnect-safe event subscription. In production this is
-  // TmuxControlConnection.on, which re-registers handlers across reconnects.
+  // TmuxControlConnection.on, which classifies events by name and routes
+  // them to the appropriate client(s) in the mesh.
   onEvent<K extends keyof TmuxEventMap>(
     event: K,
     handler: (ev: TmuxEventMap[K]) => void,
@@ -86,10 +91,18 @@ export interface TopologyDeps {
   // Notification on every connection-state transition (and once immediately
   // with the current state).
   onConnectionState(listener: (s: ConnectionStateEvent) => void): () => void;
-  // Returns the live TmuxClient when the connection is ready, or null
-  // otherwise. The tracker only invokes commands inside the ready handler,
-  // so the null branch is the safety net for racing disconnects.
-  getClient(): TopologyClient | null;
+  // Run a tmux command. Rejects loudly when the mesh is empty (the
+  // no-sessions case); the tracker logs and waits for the next ready
+  // transition rather than retrying blindly.
+  execute(command: string): Promise<CommandResponse>;
+  // Register a sticky topology subscription. The connection re-issues it
+  // automatically when the topology-source role transfers between clients,
+  // so the tracker subscribes once and never re-subscribes itself.
+  subscribeRaw(
+    name: string,
+    what: string,
+    format: string,
+  ): Promise<CommandResponse>;
 }
 
 export type TopologyListener = (snapshot: TmuxSnapshot) => void;
@@ -153,43 +166,46 @@ export class TmuxTopologyTracker {
     this.panes.clear();
   }
 
+  private subscriptionsRegistered = false;
+
   private handleConnState = (state: ConnectionStateEvent): void => {
     if (state.status === "ready") {
       void this.onReady();
       return;
     }
-    // Not-ready (connecting / closed): the topology is unknown. Broadcast an
-    // empty snapshot so the renderer reflects the gap honestly.
+    // Not-ready (connecting / no-sessions / closed): the topology is
+    // unknown or empty. Broadcast an empty snapshot so the renderer reflects
+    // the gap honestly.
     if (this.panes.size === 0) return;
     this.panes = new Map();
     this.broadcast();
   };
 
   private onReady = async (): Promise<void> => {
-    const client = this.deps.getClient();
-    if (client === null) return;
-    // Re-subscribe on every ready edge — the new client has no subscriptions,
-    // even if a prior client did. This is part of the dataflow contract: the
-    // same sequence runs on every ready, regardless of "is this a reconnect."
-    for (const sub of TOPOLOGY_SUBSCRIPTIONS) {
-      await safeAwait(
-        client.subscribeRaw(sub.name, sub.what, sub.format),
-        `subscribe(${sub.name})`,
-      );
+    // [LAW:single-enforcer] Subscriptions register once; the connection
+    // re-applies them across topology-source transitions. The flag is the
+    // tracker's only piece of "have we set up" state, distinct from the
+    // connection's own sticky-subscriptions map.
+    if (!this.subscriptionsRegistered) {
+      for (const sub of TOPOLOGY_SUBSCRIPTIONS) {
+        await safeAwait(
+          this.deps.subscribeRaw(sub.name, sub.what, sub.format),
+          `subscribe(${sub.name})`,
+        );
+      }
+      this.subscriptionsRegistered = true;
     }
-    await this.refreshPanes(client);
+    await this.refreshPanes();
   };
 
   private handleTopologyEvent = (): void => {
-    const client = this.deps.getClient();
-    if (client === null) return;
-    void this.refreshPanes(client);
+    void this.refreshPanes();
   };
 
-  private async refreshPanes(client: TopologyClient): Promise<void> {
+  private async refreshPanes(): Promise<void> {
     const generation = ++this.refreshGeneration;
     const resp = await safeAwait(
-      client.execute(`list-panes -a -F "${PANE_FORMAT}"`),
+      this.deps.execute(`list-panes -a -F "${PANE_FORMAT}"`),
       "list-panes",
     );
     if (resp === null || !resp.success) return;

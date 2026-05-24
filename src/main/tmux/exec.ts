@@ -1,10 +1,11 @@
-// [LAW:single-enforcer] Every tmux process spawn in main goes through this
-// one function. After 77e.1.9, the only legitimate caller is the session
-// bootstrap (`ensureSession` in src/main/tmux/session.ts) — runtime tmux
-// operations route through the TmuxControlConnection / TmuxClient instead.
-// The bootstrap genuinely needs a non-control-mode shellout: we have to
-// probe for and create the named session BEFORE attach-session can attach
-// the control client, so a TmuxClient does not yet exist.
+// [LAW:single-enforcer] Every non-control-mode tmux shellout in main goes
+// through this one function. The flat-mesh connection uses it for two
+// bootstrap-style operations that cannot route through a TmuxClient:
+//   - `list-sessions` to enumerate session ids before any client is spawned
+//     (a chicken-and-egg avoided by shelling out to tmux directly)
+//   - `kill-session` on close() to tear down sessions promptctl created
+// Runtime tmux operations (send-keys, capture-pane, subscribe, etc.) route
+// through the control connection / library clients instead.
 import { execFile } from "node:child_process";
 
 export class TmuxError extends Error {

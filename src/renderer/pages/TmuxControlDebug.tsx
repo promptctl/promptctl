@@ -200,13 +200,16 @@ function PaneRow({
   );
 }
 
-function statusClass(status: "connecting" | "ready" | "closed"): string {
+type DebugStatus = "connecting" | "ready" | "no-sessions" | "closed";
+
+function statusClass(status: DebugStatus): string {
   return STATUS_CLASSES[status];
 }
 
-const STATUS_CLASSES: Record<"connecting" | "ready" | "closed", string> = {
+const STATUS_CLASSES: Record<DebugStatus, string> = {
   connecting: "text-amber-400",
   ready: "text-green-400",
+  "no-sessions": "text-amber-400",
   closed: "text-red-400",
 };
 

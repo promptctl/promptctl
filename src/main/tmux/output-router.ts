@@ -26,11 +26,12 @@ export interface WebContentsLike {
   isDestroyed(): boolean;
 }
 
-export interface OutputRouterClient {
-  execute(command: string): Promise<CommandResponse>;
-  setPaneAction(paneId: number, action: PaneAction): Promise<CommandResponse>;
-}
-
+// [LAW:locality-or-seam] The router consumes tmux through two methods —
+// execute() for scrollback capture and setPaneAction() for pause/resume.
+// The router does NOT branch on "is there a client right now" — it asks
+// for the work; the connection routes to a client or rejects loudly. The
+// rejection-vs-success distinction becomes data the caller catches and
+// logs, not a control-flow gate.
 export interface OutputRouterDeps {
   onEvent<K extends keyof TmuxEventMap>(
     event: K,
@@ -39,7 +40,8 @@ export interface OutputRouterDeps {
   onConnectionState(
     listener: (s: ConnectionStateEvent) => void,
   ): () => void;
-  getClient(): OutputRouterClient | null;
+  execute(command: string): Promise<CommandResponse>;
+  setPaneAction(paneId: number, action: PaneAction): Promise<CommandResponse>;
 }
 
 interface WatcherEntry {
@@ -124,15 +126,14 @@ export class TmuxOutputRouter {
     this.sendState(paneId, "paused");
     // Auto-resume: the debug surface doesn't need backpressure.
     // pause-after=2 requires a continue command to resume output.
-    const client = this.deps.getClient();
-    if (client !== null) {
-      void client.setPaneAction(msg.paneId, PaneAction.Continue).catch((err) => {
+    void this.deps
+      .setPaneAction(msg.paneId, PaneAction.Continue)
+      .catch((err) => {
         console.error(
           `[output-router] auto-resume failed for pane %${msg.paneId}:`,
           err,
         );
       });
-    }
   };
 
   private handleContinue = (msg: { paneId: number }): void => {
@@ -177,11 +178,21 @@ export class TmuxOutputRouter {
   }
 
   private async captureScrollback(paneId: PaneId): Promise<void> {
-    const client = this.deps.getClient();
-    if (client === null) return;
-    const resp = await client.execute(
-      `capture-pane -t ${paneId} -p -e -J -S -500`,
-    );
+    let resp;
+    try {
+      resp = await this.deps.execute(
+        `capture-pane -t ${paneId} -p -e -J -S -500`,
+      );
+    } catch (err) {
+      // The mesh is empty (no sessions yet) or the call raced a disconnect.
+      // Surface the rejection — the next ready transition or onSnapshot
+      // re-trigger will reissue the capture.
+      console.error(
+        `[output-router] capture-pane for ${paneId} failed:`,
+        err,
+      );
+      return;
+    }
     if (!resp.success) return;
     const text = resp.output.join("\n");
     this.sendToPane(paneId, "tmux:output:chunk", { paneId, data: text });

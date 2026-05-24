@@ -30,6 +30,20 @@ type StubResp =
   | { success: boolean; output: string[] }
   | { throws: string };
 
+// CommandResponse requires commandNumber + timestamp; the fakeClient fills
+// them in monotonically so tests don't have to.
+function makeStubResponse(
+  resp: { success: boolean; output: string[] },
+  commandNumber: number,
+) {
+  return {
+    success: resp.success,
+    output: resp.output,
+    commandNumber,
+    timestamp: 0,
+  };
+}
+
 function fakeClient(responses: Record<string, StubResp>) {
   // Each call matches the longest registered key the issued command
   // starts with — keeps the test cases readable instead of matching
@@ -54,7 +68,7 @@ function fakeClient(responses: Record<string, StubResp>) {
         err.response = { output: [resp.throws] };
         throw err;
       }
-      return resp;
+      return makeStubResponse(resp, calls.length);
     }),
   };
   return { client, calls };
@@ -204,7 +218,7 @@ describe("spawnLaunch", () => {
       {
         registry,
         topology,
-        getClient: () => client as unknown as never,
+        execute: (cmd: string) => client.execute(cmd),
         getProxyPort: () => 53991,
         newLaunchId: () => "L-1" as LaunchId,
       },
@@ -238,7 +252,7 @@ describe("spawnLaunch", () => {
         {
           registry,
           topology: fakeTopology([]),
-          getClient: () => client as unknown as never,
+          execute: (cmd: string) => client.execute(cmd),
           getProxyPort: () => 53991,
         },
         commonSpec(),
@@ -253,18 +267,25 @@ describe("spawnLaunch", () => {
     expect(calls[0]).toMatch(/^has-session -t =/);
   });
 
-  it("throws when control connection is not ready", async () => {
+  it("propagates the mesh-empty rejection from execute()", async () => {
+    // With the mesh refactor, the spawn flow no longer asks "is the
+    // connection ready?" — it just calls execute(), and the connection's
+    // mesh dispatch rejects loudly when no sessions are observed. The
+    // spawn flow surfaces that rejection verbatim.
     await expect(
       spawnLaunch(
         {
           registry: makeRegistry(),
           topology: fakeTopology([]),
-          getClient: () => null,
+          execute: () =>
+            Promise.reject(
+              new Error("tmux control mesh is empty — no sessions observed"),
+            ),
           getProxyPort: () => 53991,
         },
         commonSpec(),
       ),
-    ).rejects.toThrow(/not ready/);
+    ).rejects.toThrow(/mesh is empty/);
   });
 
   it("marks the row exited when the tool does not appear within the timeout", async () => {
@@ -280,7 +301,7 @@ describe("spawnLaunch", () => {
         {
           registry,
           topology,
-          getClient: () => client as unknown as never,
+          execute: (cmd: string) => client.execute(cmd),
           getProxyPort: () => 53991,
           toolStartTimeoutMs: 20,
           newLaunchId: () => "L-2" as LaunchId,

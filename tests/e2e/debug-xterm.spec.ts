@@ -79,10 +79,10 @@ test.describe("/debug/tmux-control xterm rendering", () => {
 
   test.beforeEach(async ({}, testInfo) => {
     server = createTmuxServer(testInfo.workerIndex);
+    server.newSession(OWNED_SESSION);
     appHandle = await launchElectronApp({
       socket: server.socket,
       initialRoute: "/debug/tmux-control",
-      env: { PROMPTCTL_TMUX_SESSION: OWNED_SESSION },
     });
     // [LAW:verifiable-goals] Any uncaught renderer error fails the test —
     // including the silent ones that wouldn't disturb a DOM assertion. This
