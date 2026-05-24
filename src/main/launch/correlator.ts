@@ -3,11 +3,10 @@
 // correlator is the bridge. Two subscription channels feed in:
 //
 //  - Topology snapshots: pid correlation (pane.pid → launch.pid) and
-//    tool-exit detection (pane.toolKind reverts to "unknown" / shell,
-//    or the pane disappears from the snapshot entirely).
+//    exit detection (pane disappears from the snapshot entirely).
 //  - Tmux `window-close` / `unlinked-window-close` events: a launched
-//    window closing terminates its launch regardless of whether the
-//    tool ever exited cleanly.
+//    window closing terminates its launch regardless of whether tmux
+//    has refreshed the topology yet.
 //
 // Control-connection state transitions are deliberately NOT wired —
 // see the note at the bottom of startLaunchCorrelator: distinguishing
@@ -23,6 +22,16 @@
 // pipeline on every event: read current state, project to the affected
 // launch row, hand to the registry. No "is this a first-time signal"
 // branches — the registry's idempotent attach/markExited absorb repeats.
+//
+// [LAW:types-are-the-program] Exit detection is shaped around signals
+// that tmux emits uniformly across configurations: a pane disappearing
+// from the topology, and the `window-close` event. We deliberately do
+// NOT compare pane.toolKind against launch.toolKind: under shell-wrap
+// configurations pane_current_command reports the wrapping shell or
+// wrapper-script interpreter, which would make the predicate false
+// throughout the launch's life and force a phantom-exit on the first
+// snapshot. The strongest theorem we can write about "the launch has
+// exited" is "tmux no longer shows its pane."
 
 import type { TmuxEventMap } from "tmux-control-mode-js";
 import type { TmuxSnapshot, WindowId } from "../../shared/types";
@@ -59,32 +68,35 @@ export interface CorrelatorDeps {
 export function startLaunchCorrelator(deps: CorrelatorDeps): () => void {
   const disposers: (() => void)[] = [];
 
-  // [LAW:dataflow-not-control-flow] One reconciliation function used by
-  // every snapshot-driven trigger. The same loop body runs whether the
-  // edge came from topology, registry, or post-reconnect refresh —
-  // variability is the snapshot value, never which steps execute.
+  // [LAW:one-type-per-behavior] Two distinct triggers, two distinct
+  // functions — what feels like a single "reconcile" actually carries
+  // two unrelated meanings, and collapsing them produced phantom-exits
+  // under trust-spawn (the snapshot in hand at the moment markRunning
+  // fires can pre-date the new-session's window-add — making the pane
+  // legitimately absent from a stale view, NOT actually gone).
   //
-  // Three outcomes per running row, gated on data:
-  //   1. pane missing               → markExited "pane gone"
-  //   2. pane.toolKind ≠ expected   → markExited "tool exited"
-  //   3. otherwise                  → attach(pid) if newly known
+  //  - Topology edge → reconcileFromSnapshot:
+  //      The snapshot is the world's truth at the moment it fires
+  //      (it came from a list-panes triggered by a tmux topology
+  //      event). Absent pane in this snapshot is real exit.
   //
-  // The registry's mutations are idempotent (markExited is terminal;
-  // attach short-circuits on no-change), so duplicate snapshots don't
-  // produce duplicate events.
-  const reconcile = (snapshot: TmuxSnapshot): void => {
+  //  - Registry edge → attachFromSnapshot:
+  //      A launch row was just created/updated; the snapshot we have
+  //      may have been taken before the launch's pane existed. Use
+  //      this edge ONLY to attach late-arriving pid info; never to
+  //      decide exit. The next topology edge — which we have a real
+  //      reason to believe is post-spawn — owns exit detection.
+
+  // [LAW:dataflow-not-control-flow] reconcileFromSnapshot runs the same
+  // pipeline on every topology edge: read snapshot, project to running
+  // rows, two outcomes gated on data (pane missing → markExited; pane
+  // present → attach pid). Registry idempotency absorbs repeats.
+  const reconcileFromSnapshot = (snapshot: TmuxSnapshot): void => {
     for (const launch of deps.registry.listActive()) {
       if (launch.status !== "running") continue;
       const pane = snapshot.panes.find((p) => p.id === launch.paneId);
       if (!pane) {
         deps.registry.markExited(launch.launchId, "pane gone");
-        continue;
-      }
-      if (pane.toolKind !== launch.toolKind) {
-        // pane-cmd reverted to something other than the expected tool
-        // (most commonly the shell that tmux launches the command
-        // under). The tool process has exited.
-        deps.registry.markExited(launch.launchId, "tool exited");
         continue;
       }
       if (pane.pid > 0) {
@@ -93,20 +105,21 @@ export function startLaunchCorrelator(deps: CorrelatorDeps): () => void {
     }
   };
 
-  // ─── Snapshot-driven reconcile ────────────────────────────────────
-  //
-  // Two trigger edges feed the same function:
-  //   1. Topology edge: a snapshot arrives (new-window, pane-pid
-  //      subscription patch, refresh after reconnect). Walk running
-  //      launches.
-  //   2. Registry edge: a launch transitions to running. The relevant
-  //      topology snapshot may already have fired before the row
-  //      existed — pull the current snapshot now and reconcile.
-  disposers.push(deps.onTopologySnapshot(reconcile));
+  const attachFromSnapshot = (snapshot: TmuxSnapshot): void => {
+    for (const launch of deps.registry.listActive()) {
+      if (launch.status !== "running") continue;
+      const pane = snapshot.panes.find((p) => p.id === launch.paneId);
+      if (pane !== undefined && pane.pid > 0) {
+        deps.registry.attach(launch.launchId, { pid: pane.pid });
+      }
+    }
+  };
+
+  disposers.push(deps.onTopologySnapshot(reconcileFromSnapshot));
   disposers.push(
     deps.registry.on((evt) => {
       if (evt.kind !== "updated" && evt.kind !== "created") return;
-      reconcile(deps.getTopologySnapshot());
+      attachFromSnapshot(deps.getTopologySnapshot());
     }),
   );
 

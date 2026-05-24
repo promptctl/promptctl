@@ -213,16 +213,19 @@ describe("LaunchCorrelator pid correlation", () => {
 });
 
 describe("LaunchCorrelator exit detection", () => {
-  it("marks the launch exited when the pane reverts to a shell", () => {
+  it("does NOT mark exited when pane.toolKind reads as a wrapping shell", () => {
+    // [LAW:types-are-the-program] Under tmux default-shell wrapping or
+    // wrapper-script binaries, pane_current_command reports the shell
+    // (toolKind: "unknown") even while the launched binary is alive as a
+    // child. The prior toolKind-match exit predicate phantom-killed
+    // every wrapped launch on the first snapshot. The correlator now
+    // exits only on pane-gone / window-close — both of which are
+    // observable signals tmux emits uniformly across configurations.
     const h = harness();
     const id = makeRunningLaunch(h.registry);
-    // Same pane id, but toolKind is now "unknown" — the tool quit and
-    // the shell took over the foreground.
     h.pushSnapshot([makePane({ currentCommand: "zsh", toolKind: "unknown" })]);
     const after = h.registry.get(id);
-    expect(after?.status).toBe("exited");
-    if (after?.status === "exited")
-      expect(after.exitReason).toBe("tool exited");
+    expect(after?.status).toBe("running");
     h.dispose();
   });
 
@@ -277,9 +280,10 @@ describe("LaunchCorrelator exit detection", () => {
     expect(afterFirst?.status).toBe("exited");
     const firstReason =
       afterFirst?.status === "exited" ? afterFirst.exitReason : null;
-    // Then a snapshot showing pane reverted. The launch is already
-    // exited; the trigger should be a no-op.
-    h.pushSnapshot([makePane({ toolKind: "unknown" })]);
+    // Then a snapshot in which the pane is gone — another real exit
+    // trigger that would mark the launch exited if it were still
+    // running. The launch is already exited; the trigger is a no-op.
+    h.pushSnapshot([]);
     const afterSecond = h.registry.get(id);
     expect(afterSecond?.status).toBe("exited");
     if (afterSecond?.status === "exited") {
