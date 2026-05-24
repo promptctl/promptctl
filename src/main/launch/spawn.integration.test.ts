@@ -250,6 +250,92 @@ describe("launch identity env propagation (real tmux mesh)", () => {
   );
 
   it(
+    // Copilot's round-3 concern: if a binary crashes between spawn's
+    // list-panes returning and the launch being added to the registry,
+    // window-close might fire before the correlator sees the row, and
+    // the row stays in `running` indefinitely. This test reproduces the
+    // fast-exit scenario with a stub binary that immediately `exit 1`s
+    // — under correct behavior, the launch reaches running briefly
+    // and then transitions to exited via window-close before the
+    // assertion 500ms later.
+    "fast-exiting binary: launch is marked exited via window-close",
+    { timeout: 15000 },
+    async () => {
+      const tmpRoot = mkdtempSync(join(tmpdir(), "promptctl-spawn-fast-"));
+      try {
+        const stubBinary = join(tmpRoot, "stub-crash");
+        writeFileSync(
+          stubBinary,
+          ["#!/bin/sh", "exit 1", ""].join("\n"),
+        );
+        chmodSync(stubBinary, 0o755);
+
+        const conn = TmuxControlConnection.start({
+          socketPath: socket,
+          ...meshDepsFor(socket),
+          reconcileIntervalMs: 200,
+        });
+        await conn.ready;
+
+        const topology = new TmuxTopologyTracker({
+          onEvent: (event, handler) => conn.on(event, handler),
+          onConnectionState: (listener) => conn.onConnectionState(listener),
+          execute: (cmd) => conn.execute(cmd),
+          subscribeRaw: (name, what, format) =>
+            conn.subscribeRaw(name, what, format),
+        });
+        await waitFor(
+          () => topology.snapshot().panes.length > 0,
+          5000,
+          "initial topology populated",
+        );
+
+        const registry = new LaunchRegistry({ save: async () => undefined });
+        const disposeCorrelator = startLaunchCorrelator({
+          registry,
+          onTopologySnapshot: (listener) => topology.onSnapshot(listener),
+          getTopologySnapshot: () => topology.snapshot(),
+          onTmuxEvent: (event, handler) => conn.on(event, handler),
+          onConnectionState: (listener) => conn.onConnectionState(listener),
+        });
+
+        const targetSession = `fast-target-${Date.now()}`;
+        const launch = await spawnLaunch(
+          {
+            registry,
+            execute: (cmd) => conn.execute(cmd),
+            getProxyPort: () => 53991,
+            toolBinaries: {
+              claude: stubBinary,
+              codex: stubBinary,
+              gemini: stubBinary,
+            },
+            newLaunchId: () => "L-crash" as LaunchId,
+          },
+          {
+            toolKind: "claude",
+            cwd: tmpRoot,
+            sessionName: targetSession,
+          },
+        );
+        expect(launch.status).toBe("running");
+
+        // Wait for window-close to propagate through tmux events.
+        await waitFor(
+          () => registry.get(launch.launchId)?.status === "exited",
+          5000,
+          "fast-exiting binary marked exited",
+        );
+
+        disposeCorrelator();
+        topology.dispose();
+      } finally {
+        rmSync(tmpRoot, { recursive: true, force: true });
+      }
+    },
+  );
+
+  it(
     // Empirically: under a wrapper-script binary (a zsh script that
     // forks a child without exec'ing), tmux's pane_current_command
     // reports the wrapper's shell ("zsh") rather than the launched tool,
