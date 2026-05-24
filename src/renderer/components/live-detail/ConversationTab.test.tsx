@@ -22,21 +22,30 @@ afterEach(() => {
 function makeRequest(
   partial: Partial<RequestRecord> & { requestId: string },
 ): RequestRecord {
+  // [LAW:types-are-the-program] Default only when the caller omitted
+  // the field. Using `??` would shadow legitimate `null` values that
+  // the type explicitly allows; `key in partial` distinguishes
+  // "omitted" from "set to null".
+  const pick = <K extends keyof RequestRecord>(
+    key: K,
+    fallback: RequestRecord[K],
+  ): RequestRecord[K] =>
+    key in partial ? (partial[key] as RequestRecord[K]) : fallback;
   return {
     requestId: partial.requestId,
-    clientId: partial.clientId ?? "client-1",
-    method: partial.method ?? "POST",
-    url: partial.url ?? "https://api.anthropic.com/v1/messages",
-    status: partial.status ?? 200,
-    startedNs: partial.startedNs ?? 0,
-    firstByteNs: partial.firstByteNs ?? null,
-    completedNs: partial.completedNs ?? null,
-    endedNs: partial.endedNs ?? null,
-    requestBody: partial.requestBody ?? {},
-    assembledResponse: partial.assembledResponse ?? null,
-    error: partial.error ?? null,
-    state: partial.state ?? "complete",
-    events: partial.events ?? [],
+    clientId: pick("clientId", "client-1"),
+    method: pick("method", "POST"),
+    url: pick("url", "https://api.anthropic.com/v1/messages"),
+    status: pick("status", 200),
+    startedNs: pick("startedNs", 0),
+    firstByteNs: pick("firstByteNs", null),
+    completedNs: pick("completedNs", null),
+    endedNs: pick("endedNs", null),
+    requestBody: pick("requestBody", {}),
+    assembledResponse: pick("assembledResponse", null),
+    error: pick("error", null),
+    state: pick("state", "complete"),
+    events: pick("events", []),
   };
 }
 

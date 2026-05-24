@@ -94,7 +94,7 @@ export function ConversationTab({
       ) : (
         timeline.map((entry, idx) => (
           <TimelineRow
-            key={timelineRowKey(entry, idx)}
+            key={timelineRowKey(entry)}
             entry={entry}
             entryIndex={idx}
             selectedRequestId={selectedRequestId}
@@ -107,10 +107,15 @@ export function ConversationTab({
   );
 }
 
-function timelineRowKey(entry: TimelineEntry, index: number): string {
+// [LAW:one-source-of-truth] React keys are stable across re-renders.
+// message + assistant_response identities are unique per entry; the
+// boundary entry has exactly one row per requestId, so requestId
+// alone is sufficient and survives reordering (e.g. an earlier
+// in-flight tail completing and shifting subsequent entries' indices).
+function timelineRowKey(entry: TimelineEntry): string {
   if (entry.kind === "message") return `m:${entry.identity}`;
   if (entry.kind === "assistant_response") return `a:${entry.identity}`;
-  return `b:${entry.requestId}-${index}`;
+  return `b:${entry.requestId}`;
 }
 
 function TimelineRow({
@@ -386,10 +391,14 @@ function BlockWithToolLink({
 
   const toolUseId = isToolUse ? (rec.id as string) : null;
   const resultId = isToolResult ? (rec.tool_use_id as string) : null;
+  // For a tool_use block: is there a paired tool_result somewhere?
+  // For a tool_result block: is there a paired tool_use somewhere?
+  // Both maps are keyed by tool_use_id (the natural correlator);
+  // `.has(id)` cleanly answers each side's "do I have a counterpart".
   const hasResultLink =
-    toolUseId !== null && pairings.toolUseToResult.has(toolUseId);
+    toolUseId !== null && pairings.resultIndexByToolUseId.has(toolUseId);
   const hasUseLink =
-    resultId !== null && pairings.toolResultToUse.has(resultId);
+    resultId !== null && pairings.useIndexByToolUseId.has(resultId);
 
   return (
     <div

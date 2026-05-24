@@ -227,50 +227,62 @@ export function buildTimeline(chain: readonly RequestRecord[]): TimelineEntry[] 
 
 // ─── Tool pairing ─────────────────────────────────────────────────────────
 
-// Maps a tool_use block's id to the timeline-entry index of the message
-// (or assistant_response) that contains the matching tool_result. The
-// tool_result is in a later message in the chain; lookup is one-shot per
-// chain.
+// Builds two indexes — both keyed by `tool_use_id` (the natural
+// correlator Anthropic uses to link a tool_result back to its tool_use).
+// The names describe the VALUE (the location), not the key:
+//
+//   - `useIndexByToolUseId[X]`    → timeline index where the tool_use
+//                                    block with id X appears.
+//   - `resultIndexByToolUseId[X]` → timeline index where the tool_result
+//                                    block referencing tool_use_id X
+//                                    appears.
+//
+// Only pairs with BOTH halves present are recorded; an orphan tool_use
+// (no matching result) or an orphan tool_result is absent from both
+// maps, so `.has(id)` answers "is there a paired counterpart" cleanly.
 //
 // [LAW:single-enforcer] The pairing rule lives here; the ConversationTab
-// reads the map and renders scroll-anchored links. No callsite hand-rolls
-// "find tool_result for this tool_use".
+// reads the maps and renders scroll-anchored links. No callsite
+// hand-rolls "find tool_result for this tool_use".
 export function buildToolPairings(
   entries: readonly TimelineEntry[],
 ): {
-  toolUseToResult: Map<string, number>;
-  toolResultToUse: Map<string, number>;
+  useIndexByToolUseId: Map<string, number>;
+  resultIndexByToolUseId: Map<string, number>;
 } {
-  const toolUseToResult = new Map<string, number>();
-  const toolResultToUse = new Map<string, number>();
+  const useIndexByToolUseId = new Map<string, number>();
+  const resultIndexByToolUseId = new Map<string, number>();
   // First pass: index every tool_use's location.
-  const toolUseLocations = new Map<string, number>();
+  const allUseLocations = new Map<string, number>();
   for (let i = 0; i < entries.length; i += 1) {
     const entry = entries[i];
     const blocks = blocksOfEntry(entry);
     for (const block of blocks) {
       const rec = asRecord(block);
       if (rec?.type === "tool_use" && typeof rec.id === "string") {
-        toolUseLocations.set(rec.id, i);
+        allUseLocations.set(rec.id, i);
       }
     }
   }
-  // Second pass: index tool_results and resolve pairings.
+  // Second pass: when a tool_result references a known tool_use, record
+  // BOTH halves of the pair. Orphans (no matching tool_use) are
+  // silently dropped — `.has(id)` then cleanly answers "is there a
+  // paired counterpart".
   for (let i = 0; i < entries.length; i += 1) {
     const entry = entries[i];
     const blocks = blocksOfEntry(entry);
     for (const block of blocks) {
       const rec = asRecord(block);
       if (rec?.type === "tool_result" && typeof rec.tool_use_id === "string") {
-        const toolUseIdx = toolUseLocations.get(rec.tool_use_id);
-        if (toolUseIdx !== undefined) {
-          toolUseToResult.set(rec.tool_use_id, i);
-          toolResultToUse.set(rec.tool_use_id, toolUseIdx);
+        const useIdx = allUseLocations.get(rec.tool_use_id);
+        if (useIdx !== undefined) {
+          resultIndexByToolUseId.set(rec.tool_use_id, i);
+          useIndexByToolUseId.set(rec.tool_use_id, useIdx);
         }
       }
     }
   }
-  return { toolUseToResult, toolResultToUse };
+  return { useIndexByToolUseId, resultIndexByToolUseId };
 }
 
 function blocksOfEntry(entry: TimelineEntry): readonly unknown[] {
