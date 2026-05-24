@@ -9,12 +9,13 @@
 // dispatch. role badges, attribution chips, and tool-pair scroll anchors
 // live here.
 //
-// [LAW:one-source-of-truth] No timeline cache. useMemo keyed on the
-// joined requestIds re-derives when the chain shape changes; incoming
-// SSE deltas to an existing record's events array do not force a rebuild
-// because the chain shape is the same, but a state transition to
-// `complete` flips the chain reference in Live.tsx (via the buildChain
-// callsite) and the memo re-runs.
+// [LAW:one-source-of-truth] No timeline cache. The useMemo key is a
+// string built from (requestId, state, hasAssembledResponse) for each
+// record in the chain. Per-SSE-event mutations to `events[]` don't
+// touch any of those three, so the timeline isn't rebuilt on every
+// chunk. A state transition (e.g. `streaming → complete`) or the
+// arrival of `assembledResponse` flips the key and the projection
+// re-runs. See the inline comment on the useMemo for the full rationale.
 
 import { useEffect, useMemo, useRef } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";

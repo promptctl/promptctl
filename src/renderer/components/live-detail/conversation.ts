@@ -335,6 +335,12 @@ export function contentHash(value: unknown): string {
   return fnv1a64Hex(stableJson(value));
 }
 
+// Exported for golden-vector tests in conversation.test.ts. Keeping the
+// raw hash addressable lets the test pin canonical FNV-1a-64 outputs
+// against the bare-string inputs the algorithm is specified for,
+// independent of stableJson's JSON-quoting behavior.
+export { fnv1a64Hex };
+
 // FNV-1a 64-bit. Synchronous, deterministic, no external dependency.
 // Adequate collision resistance for the conversation/prompt/tools
 // content we'll feed it — far below the birthday-bound risk for any
@@ -345,9 +351,10 @@ export function contentHash(value: unknown): string {
 // counting the `<< 8` term). BigInt makes the math literally the
 // algorithm. The 16-char hex result is canonical FNV-1a output.
 //
-// Reference test vectors (pinned in `fnv1a64Hex matches canonical
-// FNV-1a-64 test vectors` in conversation.test.ts):
-//   ""       → cbf29ce484222325
+// Reference test vectors — directly asserted in
+// `fnv1a64Hex produces the canonical FNV-1a-64 reference vectors`
+// in conversation.test.ts:
+//   ""       → cbf29ce484222325   (the offset basis)
 //   "a"      → af63dc4c8601ec8c
 //   "foobar" → 85944171f73967e8
 function fnv1a64Hex(str: string): string {
