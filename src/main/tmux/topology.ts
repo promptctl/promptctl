@@ -113,7 +113,11 @@ export type TopologyListener = (snapshot: TmuxSnapshot) => void;
 type PanePatcher = (pane: TmuxPane, value: string) => TmuxPane;
 
 const PANE_PATCHERS: Record<string, PanePatcher> = {
-  "pane-cmd": (p, v) => ({ ...p, currentCommand: v, toolKind: detectToolKind(v) }),
+  "pane-cmd": (p, v) => ({
+    ...p,
+    currentCommand: v,
+    toolKind: detectToolKind(v),
+  }),
   "pane-cwd": (p, v) => ({ ...p, currentPath: v }),
   "pane-pid": (p, v) => ({ ...p, pid: parseInt(v, 10) || 0 }),
   "pane-active": (p, v) => ({ ...p, active: v === "1" }),
@@ -183,17 +187,22 @@ export class TmuxTopologyTracker {
 
   private onReady = async (): Promise<void> => {
     // [LAW:single-enforcer] Subscriptions register once; the connection
-    // re-applies them across topology-source transitions. The flag is the
-    // tracker's only piece of "have we set up" state, distinct from the
-    // connection's own sticky-subscriptions map.
+    // re-applies them across topology-source transitions. The flag flips
+    // to true only when every subscribe call resolves with success — a
+    // {success: false} response (tmux rejected the subscribe shape) does
+    // NOT consume the one-shot, so the next ready transition retries.
+    // safeAwait returns null on thrown errors, which is also a non-success.
     if (!this.subscriptionsRegistered) {
-      for (const sub of TOPOLOGY_SUBSCRIPTIONS) {
-        await safeAwait(
-          this.deps.subscribeRaw(sub.name, sub.what, sub.format),
-          `subscribe(${sub.name})`,
-        );
-      }
-      this.subscriptionsRegistered = true;
+      const results = await Promise.all(
+        TOPOLOGY_SUBSCRIPTIONS.map((sub) =>
+          safeAwait(
+            this.deps.subscribeRaw(sub.name, sub.what, sub.format),
+            `subscribe(${sub.name})`,
+          ),
+        ),
+      );
+      const allSucceeded = results.every((r) => r !== null && r.success);
+      if (allSucceeded) this.subscriptionsRegistered = true;
     }
     await this.refreshPanes();
   };
@@ -337,4 +346,3 @@ async function safeAwait<T>(p: Promise<T>, label: string): Promise<T | null> {
     return null;
   }
 }
-
