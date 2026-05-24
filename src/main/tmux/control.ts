@@ -365,10 +365,7 @@ export class TmuxControlConnection {
     handler: (ev: TmuxEventMap[K]) => void,
   ): void;
   off(event: "*", handler: (ev: EmitterMessage) => void): void;
-  off(
-    event: keyof TmuxEventMap | "*",
-    handler: (ev: unknown) => void,
-  ): void {
+  off(event: keyof TmuxEventMap | "*", handler: (ev: unknown) => void): void {
     // Find the matching entry by (event, handler) identity. Linear scan is
     // fine — listener counts are small (low single digits per consumer).
     for (let i = this.listeners.length - 1; i >= 0; i -= 1) {
@@ -541,16 +538,12 @@ export class TmuxControlConnection {
     this.setStatus("connecting");
     await this.reconcile();
     if (this.closed) return;
-    if (this.clients.size === 0) {
-      // [LAW:no-defensive-null-guards] no-sessions is honest: tmux is up,
-      // the connection is live, but there's nothing to attach to yet.
-      // Writes will throw; the periodic reconcile picks up new sessions.
-      this.setStatus("no-sessions");
-      this.readyResolve();
-    } else {
-      this.setStatus("ready");
-      this.readyResolve();
-    }
+    // [LAW:single-enforcer] reconcile() is the sole site that transitions
+    // status to ready / no-sessions / closed-on-failure. connect() doesn't
+    // re-derive the post-reconcile status from clients.size — that would
+    // overwrite a "closed" status reconcile set when enumeration failed
+    // with a misleading "no-sessions."
+    this.readyResolve();
     this.scheduleReconcile();
   }
 
@@ -571,10 +564,20 @@ export class TmuxControlConnection {
       try {
         ids = await this.enumerateSessions();
       } catch (err) {
-        // Enumeration can transiently fail (tmux server restarting, socket
-        // not yet writable). Leave the current mesh alone; the next tick
-        // retries. Log so persistent failures are observable.
-        console.error("[tmux-control] enumerate-sessions failed:", err);
+        // [LAW:no-defensive-null-guards] An enumerate failure is honest
+        // information, not "no sessions." It's the difference between
+        // "tmux says zero sessions exist" (legitimate empty mesh) and
+        // "tmux failed to answer" (binary missing, permission error,
+        // socket unreachable). The default enumerator already converts
+        // the benign "no server running" case into an empty result; any
+        // exception that surfaces here is fatal. Report it via status so
+        // the debug UI doesn't misrepresent it as no-sessions; the
+        // periodic timer keeps probing until the condition clears.
+        const reason = err instanceof Error ? err.message : String(err);
+        console.error(`[tmux-control] enumerate-sessions failed: ${reason}`);
+        if (!this.closed && this.status !== "closed") {
+          this.setStatus("closed", `enumerate failed: ${reason}`);
+        }
         return;
       }
       if (this.closed) return;
@@ -660,10 +663,7 @@ export class TmuxControlConnection {
     // output router auto-resumes via setPaneAction(Continue) routed to
     // the client whose session contains the pane.
     void client.setFlags(["pause-after=30"]).catch((err) => {
-      console.error(
-        `[tmux-control] setFlags for ${sessionId} failed:`,
-        err,
-      );
+      console.error(`[tmux-control] setFlags for ${sessionId} failed:`, err);
     });
 
     // [LAW:single-enforcer] Re-apply every sticky subscription to the new
@@ -804,9 +804,7 @@ export class TmuxControlConnection {
       // condition explicitly rather than getting a silent "success" or a
       // fallback to a privileged session.
       return Promise.reject(
-        new Error(
-          "tmux control mesh is empty — no sessions observed",
-        ),
+        new Error("tmux control mesh is empty — no sessions observed"),
       );
     }
     return op(client);
@@ -929,10 +927,7 @@ interface LooseEmitter {
 }
 
 function clientOn(client: TmuxClient, entry: RegisteredListener): void {
-  (client as unknown as LooseEmitter).on(
-    entry.event as string,
-    entry.handler,
-  );
+  (client as unknown as LooseEmitter).on(entry.event as string, entry.handler);
 }
 
 function clientOff(client: TmuxClient, entry: RegisteredListener): void {
