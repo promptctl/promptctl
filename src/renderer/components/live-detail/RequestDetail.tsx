@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";
+import { ConversationTab } from "./ConversationTab";
 import { DiffTab } from "./DiffTab";
 import { tabClass } from "./format";
 import type { LineageInfo } from "./lineage";
@@ -12,11 +13,22 @@ import { ChainSparkline } from "./ChainSparkline";
 import { useLiveTickNs } from "./latency";
 import { ChainStopReasonStrip, StopReasonChip } from "./stop-reason";
 
-type TabId = "overview" | "request" | "diff" | "response" | "timeline" | "raw";
+type TabId =
+  | "overview"
+  | "request"
+  | "conversation"
+  | "diff"
+  | "response"
+  | "timeline"
+  | "raw";
 
+// [LAW:one-source-of-truth] Tab order is defined here; the rendered
+// content map below mirrors it. Conversation sits between Request and
+// Diff per design doc §3.1.
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "request", label: "Request" },
+  { id: "conversation", label: "Conversation" },
   { id: "diff", label: "Diff" },
   { id: "response", label: "Response" },
   { id: "timeline", label: "SSE Timeline" },
@@ -92,6 +104,13 @@ export function RequestDetail({
         {activeTab === "overview" && <OverviewTab record={record} />}
         {activeTab === "request" && (
           <RequestTab requestBody={record.requestBody} />
+        )}
+        {activeTab === "conversation" && (
+          <ConversationTab
+            chain={chain}
+            selectedRequestId={record.requestId}
+            onSelectRequest={onSelectRequest}
+          />
         )}
         {activeTab === "diff" && <DiffTab record={record} lineage={lineage} />}
         {activeTab === "response" && <ResponseTab record={record} />}
