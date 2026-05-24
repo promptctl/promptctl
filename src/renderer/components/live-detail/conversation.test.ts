@@ -368,6 +368,67 @@ describe("buildTimeline — identity acceptance check", () => {
     ]);
   });
 
+  it("emits one assistant_response per request even when two requests have identical content", () => {
+    // [LAW:one-type-per-behavior] Per-request attribution and
+    // cross-request dedup are two distinct concerns. A naive
+    // role+content identity collapsed two responses that happened to
+    // emit the same text (e.g. both replying "OK"). The current shape
+    // uses requestId-scoped identity for the entry while seeding the
+    // role+content hash separately into seenIdentities so the NEXT
+    // request's re-send still collapses.
+    const sameContent = [{ type: "text", text: "OK" }];
+    const r1 = makeRequest({
+      requestId: "r1",
+      requestBody: { messages: [{ role: "user", content: "ping" }] },
+      assembledResponse: {
+        id: "asst-r1",
+        type: "message",
+        role: "assistant",
+        model: "claude-opus-4-7",
+        content: sameContent,
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    });
+    const r2 = makeRequest({
+      requestId: "r2",
+      requestBody: {
+        messages: [
+          { role: "user", content: "ping" },
+          { role: "assistant", content: sameContent },
+          { role: "user", content: "again" },
+        ],
+      },
+      // r2 produces an assembledResponse with IDENTICAL content to r1's.
+      assembledResponse: {
+        id: "asst-r2",
+        type: "message",
+        role: "assistant",
+        model: "claude-opus-4-7",
+        content: sameContent,
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 2, output_tokens: 1 },
+      },
+    });
+    const timeline = buildTimeline([r1, r2]);
+    const responses = timeline.filter((e) => e.kind === "assistant_response");
+    // Both requests get their own entry — content-identity dedup
+    // would have suppressed r2's.
+    expect(responses).toHaveLength(2);
+    expect(
+      responses.map((e) =>
+        e.kind === "assistant_response" ? e.producedByRequestId : null,
+      ),
+    ).toEqual(["r1", "r2"]);
+    // The re-sent assistant message in r2's messages[i] STILL collapses
+    // (we added the role+content hash to seenIdentities). Only the user
+    // message "again" appears as a NEW message entry from r2.
+    const messages = timeline.filter((e) => e.kind === "message");
+    expect(messages).toHaveLength(2); // "ping" + "again"
+  });
+
   it("[LAW:dataflow-not-control-flow] same chain projects identically when fed twice", () => {
     // Replay-vs-live equivalence at the projection layer: same input
     // (regardless of order of arrival or whether mutations happened

@@ -145,27 +145,38 @@ export function buildTimeline(chain: readonly RequestRecord[]): TimelineEntry[] 
 
     const response = record.assembledResponse;
     if (response !== null) {
-      // The assistant turn will reappear in the NEXT request's
-      // messages[] as `{ role: "assistant", content: ... }` — without
-      // the response.id field (Anthropic's wire format omits it from
-      // the re-send). For the dedup to collapse those two views of
-      // the same turn, both must hash identically. Use the same
-      // role+content identity rule the message walker uses.
-      // (See design doc §12 — the open question this answers.)
-      const identity = identityOf({
+      // [LAW:one-type-per-behavior] Two distinct concerns here, two
+      // separate pieces of data:
+      //
+      //   (a) Cross-request dedup of the re-sent assistant message in
+      //       the NEXT request's messages[]. Anthropic's wire format
+      //       omits response.id on the re-send, so the next request's
+      //       messages[i] (when it's the re-send of this assistant
+      //       turn) will hash as role+content alone. We seed
+      //       seenIdentities with that hash so the re-send collapses
+      //       into this assistant_response entry.
+      //
+      //   (b) Per-request attribution of THIS assistant turn. Two
+      //       requests with identical content ("OK") must still each
+      //       get their own assistant_response entry — otherwise the
+      //       second one is silently dropped from the timeline. The
+      //       entry's identity is therefore scoped to the requestId,
+      //       not the content.
+      //
+      // Conflating the two (the prior shape) is the bug; separating
+      // them keeps both invariants honest.
+      const contentIdentity = identityOf({
         role: "assistant",
         content: response.content,
       });
-      if (!seenIdentities.has(identity)) {
-        seenIdentities.add(identity);
-        entries.push({
-          kind: "assistant_response",
-          identity,
-          content: response.content,
-          producedByRequestId: record.requestId,
-          inFlight: false,
-        });
-      }
+      seenIdentities.add(contentIdentity);
+      entries.push({
+        kind: "assistant_response",
+        identity: `asst:${record.requestId}`,
+        content: response.content,
+        producedByRequestId: record.requestId,
+        inFlight: false,
+      });
     } else if (record.state === "in_flight" || record.state === "streaming") {
       // In-flight tail: render a placeholder. Identity is the requestId
       // so a subsequent transition to `complete` can replace this entry

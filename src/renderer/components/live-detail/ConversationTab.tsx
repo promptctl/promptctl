@@ -35,20 +35,28 @@ export function ConversationTab({
   selectedRequestId: string;
   onSelectRequest?: (requestId: string) => void;
 }) {
-  // Memo key is the joined request ids — same shape across renders means
-  // the projection is reused; a new request appended or removed forces a
-  // rebuild. We deliberately do NOT key on the record references; the
-  // SSE event arrays mutate on every chunk and we don't want a rebuild
-  // for that.
+  // [LAW:types-are-the-program] The memo key must encode every dimension
+  // of "did the projection result change". Three dimensions matter:
+  //
+  //   - requestId  → a request was added/removed from the chain
+  //   - state      → a request transitioned in_flight → streaming →
+  //                  complete → errored (changes whether the timeline
+  //                  shows an in-flight placeholder or a real
+  //                  assistant_response)
+  //   - has-response → a streaming request's assembledResponse arrived
+  //                    (covers the rare race where state stays the same
+  //                    across the transition that populates the field)
+  //
+  // What is deliberately NOT in the key: the record reference (changes
+  // on every SSE event, but the timeline projection doesn't), the
+  // events[] array (mutates on every chunk).
   const safeChain = chain ?? [];
-  const memoKey = safeChain.map((r) => r.requestId).join("|");
-  // [LAW:one-source-of-truth] Memoization key is the joined request ids
-  // (chain SHAPE), not the chain reference — the chain array is rebuilt
-  // upstream on every store update (SSE event arrival) but the
-  // dedup-result only changes when the request set changes. This avoids
-  // rebuilding the timeline on every event tick. Repo doesn't run
-  // react-hooks/exhaustive-deps so the "missing safeChain" warning is
-  // not enforced; the dependency on memoKey is intentional.
+  const memoKey = safeChain
+    .map(
+      (r) =>
+        `${r.requestId}:${r.state}:${r.assembledResponse !== null ? "1" : "0"}`,
+    )
+    .join("|");
   const timeline = useMemo(() => buildTimeline(safeChain), [memoKey]);
   const pairings = useMemo(
     () => buildToolPairings(timeline),
@@ -181,14 +189,12 @@ function BoundaryRow({
       >
         {style.label}
       </span>
-      <button
-        type="button"
-        onClick={() => onSelectRequest?.(entry.requestId)}
-        className="text-neutral-400 underline-offset-2 hover:underline"
-        data-testid="conversation-boundary-request-link"
-      >
-        {entry.requestId.slice(0, 8)}
-      </button>
+      <RequestIdLink
+        requestId={entry.requestId}
+        onSelectRequest={onSelectRequest}
+        className="text-neutral-400"
+        testId="conversation-boundary-request-link"
+      />
       {ttfbMs !== null ? (
         <span className="text-neutral-500" data-testid="conversation-boundary-ttfb">
           TTFB {ttfbMs}ms
@@ -345,14 +351,12 @@ function EntryShell({
         <span className="rounded bg-neutral-800 px-2 py-0.5 text-neutral-300">
           {role}
         </span>
-        <button
-          type="button"
-          onClick={() => onSelectRequest?.(introducedByRequestId)}
-          className="text-[10px] text-neutral-500 underline-offset-2 hover:underline"
-          data-testid="conversation-attribution-chip"
-        >
-          {introducedByRequestId.slice(0, 8)}
-        </button>
+        <RequestIdLink
+          requestId={introducedByRequestId}
+          onSelectRequest={onSelectRequest}
+          className="text-[10px] text-neutral-500"
+          testId="conversation-attribution-chip"
+        />
       </header>
       <div>{children}</div>
     </section>
@@ -410,6 +414,43 @@ function BlockWithToolLink({
   );
 }
 
+// [LAW:single-enforcer] One place that decides "interactive vs static"
+// for a request-id display. Renders as a `<button>` when a handler is
+// provided (the chip selects the linked request); renders as a `<span>`
+// when not (the chip is purely informational — no focus trap, no
+// clickable-but-does-nothing footgun). Matches the pattern StopReasonChip
+// uses for the same trade-off.
+function RequestIdLink({
+  requestId,
+  onSelectRequest,
+  className,
+  testId,
+}: {
+  requestId: string;
+  onSelectRequest?: (requestId: string) => void;
+  className: string;
+  testId: string;
+}) {
+  const short = requestId.slice(0, 8);
+  if (onSelectRequest === undefined) {
+    return (
+      <span data-testid={testId} className={className}>
+        {short}
+      </span>
+    );
+  }
+  return (
+    <button
+      type="button"
+      onClick={() => onSelectRequest(requestId)}
+      data-testid={testId}
+      className={`${className} underline-offset-2 hover:underline`}
+    >
+      {short}
+    </button>
+  );
+}
+
 function ToolJumpLink({
   target,
   label,
@@ -424,8 +465,17 @@ function ToolJumpLink({
       type="button"
       data-testid={testId}
       data-jump-target={target}
-      onClick={() => {
-        const el = document.querySelector(target);
+      // [LAW:locality-or-seam] The jump scope is the timeline container
+      // that hosts THIS button, not the whole document. Resolving the
+      // scope via `closest()` keeps the lookup local to the rendering
+      // tree even when multiple Conversation tabs / detail panes coexist
+      // in the same document (avoids cross-pane scroll on id collision).
+      onClick={(event) => {
+        const scope = event.currentTarget.closest(
+          '[data-testid="conversation-timeline"]',
+        );
+        if (scope === null) return;
+        const el = scope.querySelector(target);
         if (el instanceof HTMLElement && typeof el.scrollIntoView === "function") {
           el.scrollIntoView({ block: "nearest", behavior: "auto" });
         }

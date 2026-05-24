@@ -273,6 +273,74 @@ describe("ConversationTab", () => {
     ).toHaveTextContent("10↓ 5↑ tok");
   });
 
+  it("re-renders the timeline when a streaming request transitions to complete (memo invalidation)", () => {
+    // [LAW:types-are-the-program] The memo key must encode every
+    // dimension of "did the projection change". A streaming request
+    // transitioning to complete (assembledResponse becomes non-null,
+    // state flips) keeps the requestId set the same — the memo would
+    // not invalidate if keyed only on requestIds. Pin the corrected
+    // behavior: the in-flight placeholder is REPLACED by the assembled
+    // response on the next render.
+    const streaming = makeRequest({
+      requestId: "req-1",
+      requestBody: { messages: [{ role: "user", content: "go" }] },
+      assembledResponse: null,
+      state: "streaming",
+    });
+    const { rerender } = render(
+      <ConversationTab
+        chain={[streaming]}
+        selectedRequestId="req-1"
+        onSelectRequest={undefined}
+      />,
+    );
+    expect(screen.getByTestId("conversation-in-flight")).toBeInTheDocument();
+
+    // Same requestId, but the record completed.
+    const completed = makeRequest({
+      requestId: "req-1",
+      requestBody: { messages: [{ role: "user", content: "go" }] },
+      assembledResponse: makeAssistant("asst-1", [
+        { type: "text", text: "done" },
+      ]),
+      state: "complete",
+    });
+    rerender(
+      <ConversationTab
+        chain={[completed]}
+        selectedRequestId="req-1"
+        onSelectRequest={undefined}
+      />,
+    );
+    // The in-flight placeholder is gone; the assembled response is in.
+    expect(screen.queryByTestId("conversation-in-flight")).toBeNull();
+    const response = screen.getByTestId("conversation-assistant-response");
+    expect(response).toHaveTextContent("done");
+  });
+
+  it("renders boundary request-id as a static span when no onSelectRequest is provided", () => {
+    // [LAW:single-enforcer] A no-op button is a focus trap with no
+    // affordance — when there is no handler, render a static span so
+    // the DOM semantics match the actual behavior.
+    const rec = makeRequest({
+      requestId: "req-abcdef",
+      requestBody: { messages: [{ role: "user", content: "x" }] },
+      assembledResponse: makeAssistant("asst-1", [{ type: "text", text: "y" }]),
+    });
+    render(
+      <ConversationTab
+        chain={[rec]}
+        selectedRequestId="req-abcdef"
+        onSelectRequest={undefined}
+      />,
+    );
+    const link = screen.getByTestId("conversation-boundary-request-link");
+    expect(link.tagName).toBe("SPAN");
+    // And the attribution chip on the entry.
+    const chip = screen.getAllByTestId("conversation-attribution-chip")[0];
+    expect(chip.tagName).toBe("SPAN");
+  });
+
   it("[LAW:dataflow-not-control-flow] re-rendering with the same chain produces identical DOM", () => {
     // Live and replay flow into the same projection; rendering with the
     // same chain twice must produce the same DOM tree. (We're not
