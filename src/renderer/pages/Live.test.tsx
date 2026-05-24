@@ -61,7 +61,9 @@ describe("Live", () => {
     ).toHaveAttribute("data-share", String(7 / 42));
     // The list pane lives inside a ResizableSplit; its outer container carries the
     // explicit pixel width so users can drag it.
-    expect(screen.getByTestId("live-split-first")).toHaveStyle({ width: "800px" });
+    expect(screen.getByTestId("live-split-first")).toHaveStyle({
+      width: "800px",
+    });
     expect(screen.getAllByText(/req-a/)[0].closest("button")).toHaveClass(
       "grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_28rem]",
     );
@@ -140,8 +142,12 @@ describe("Live", () => {
     const taggedButton = screen.getByRole("button", { name: /Tagged client/ });
     expect(within(taggedButton).getByTestId("live-launch-marker")).toBeTruthy();
     // The untagged client renders without a marker.
-    const untaggedButton = screen.getByRole("button", { name: /Untagged client/ });
-    expect(within(untaggedButton).queryByTestId("live-launch-marker")).toBeNull();
+    const untaggedButton = screen.getByRole("button", {
+      name: /Untagged client/,
+    });
+    expect(
+      within(untaggedButton).queryByTestId("live-launch-marker"),
+    ).toBeNull();
   });
 });
 

@@ -34,7 +34,10 @@ export async function loadHarFile(filePath: string): Promise<HarEntry[]> {
 // [LAW:single-enforcer] All HAR-to-event synthesis lives here. Callers pass
 // entries (or a file path); they never compose ProxyEvents from HarEntry
 // shapes themselves.
-export function synthesizeEvents(entry: HarEntry, clientId = "replay-unknown"): ProxyEvent[] {
+export function synthesizeEvents(
+  entry: HarEntry,
+  clientId = "replay-unknown",
+): ProxyEvent[] {
   const requestId = entry._requestId ?? newRequestId();
   const envelope = () => makeEnvelope(requestId, clientId);
   const events: ProxyEvent[] = [];
@@ -188,7 +191,10 @@ function messageToSseEvents(msg: AnthropicMessage): SseEvent[] {
   return out;
 }
 
-function blockToSseEvents(block: AnthropicContentBlock, index: number): SseEvent[] {
+function blockToSseEvents(
+  block: AnthropicContentBlock,
+  index: number,
+): SseEvent[] {
   if (block.type === "text") {
     return [
       {
@@ -205,17 +211,29 @@ function blockToSseEvents(block: AnthropicContentBlock, index: number): SseEvent
     ];
   }
   if (block.type === "tool_use") {
-    const tu = block as { id: string; name: string; input: Record<string, unknown> };
+    const tu = block as {
+      id: string;
+      name: string;
+      input: Record<string, unknown>;
+    };
     return [
       {
         type: "content_block_start",
         index,
-        content_block: { type: "tool_use", id: tu.id, name: tu.name, input: {} },
+        content_block: {
+          type: "tool_use",
+          id: tu.id,
+          name: tu.name,
+          input: {},
+        },
       },
       {
         type: "content_block_delta",
         index,
-        delta: { type: "input_json_delta", partial_json: JSON.stringify(tu.input) },
+        delta: {
+          type: "input_json_delta",
+          partial_json: JSON.stringify(tu.input),
+        },
       },
       { type: "content_block_stop", index },
     ];

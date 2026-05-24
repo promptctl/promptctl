@@ -26,7 +26,9 @@ export function MessageView({
         <span className="rounded bg-neutral-800 px-2 py-0.5 text-xs text-neutral-300">
           {role}
         </span>
-        <span className="ml-2 text-neutral-500">{label ?? `message #${index}`}</span>
+        <span className="ml-2 text-neutral-500">
+          {label ?? `message #${index}`}
+        </span>
       </summary>
       <div className="border-t border-neutral-900">
         {Array.isArray(content) ? (

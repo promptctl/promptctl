@@ -3,14 +3,7 @@
 // Integration tests for the editor coordinator + version store + Claude adapter.
 // Replaces what would otherwise be manual electron app testing — every flow is
 // exercised end-to-end against real temp directories.
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  vi,
-} from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, writeFile, readFile, access } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";

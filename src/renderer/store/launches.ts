@@ -9,7 +9,13 @@
 // source of "which launches exist."
 
 import { create } from "zustand";
-import type { Launch, LaunchEvent, LaunchId, PaneId, WindowId } from "../../shared/types";
+import type {
+  Launch,
+  LaunchEvent,
+  LaunchId,
+  PaneId,
+  WindowId,
+} from "../../shared/types";
 
 interface LaunchStore {
   launches: Launch[];
@@ -28,9 +34,7 @@ export const useLaunchStore = create<LaunchStore>((set, get) => ({
   setLastEvent: (event) => set({ lastEvent: event }),
   byId: (id) => get().launches.find((l) => l.launchId === id),
   byPane: (paneId) =>
-    get().launches.find(
-      (l) => l.paneId === paneId && l.status !== "exited",
-    ),
+    get().launches.find((l) => l.paneId === paneId && l.status !== "exited"),
   byWindow: (windowId) =>
     get().launches.find(
       (l) => l.windowId === windowId && l.status !== "exited",

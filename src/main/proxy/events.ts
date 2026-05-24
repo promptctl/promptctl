@@ -29,7 +29,9 @@ class ProxyEventBus {
   }
 
   listClients(): ClientInfo[] {
-    return [...this.clients.values()].sort((a, b) => a.lastSeenNs - b.lastSeenNs);
+    return [...this.clients.values()].sort(
+      (a, b) => a.lastSeenNs - b.lastSeenNs,
+    );
   }
 
   // Returns an unsubscribe function (idiomatic; matches Zustand stores

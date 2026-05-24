@@ -1,22 +1,24 @@
 // @vitest-environment node
 //
-// Integration tests for TmuxTopologyTracker against a real tmux binary.
-// Run unconditionally with the default `npm test` — tmux is a hard project
-// requirement (README boundaries) and integration regressions must surface
-// in the same loop as unit regressions, not behind an opt-in env var.
-// Mirrors the isolation pattern from control.integration.test.ts (unique
-// `-L <socket>` per test, prefix `promptctl-tmux-topology-` so this suite
-// can run alongside the others).
+// Integration tests for TmuxTopologyTracker against a real tmux binary,
+// driven through the mesh-aware TmuxControlConnection. Run unconditionally
+// with the default `npm test`.
+//
+// Isolation: unique `-L <socket>` per test, prefix `promptctl-tmux-topology-`
+// so this suite can run alongside the others without colliding with the
+// developer's default tmux server.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
-import { spawnTmux } from "tmux-control-mode-js";
+import { spawnTmux, type TmuxTransport } from "tmux-control-mode-js";
 import { TmuxControlConnection } from "./control";
-import { ensureSession } from "./session";
 import { TmuxTopologyTracker } from "./topology";
-import type { TmuxSnapshot } from "../../shared/types";
+import { TmuxError, tmuxExec } from "./exec";
+import type { SessionId, TmuxSnapshot } from "../../shared/types";
 
-const OWNED = "promptctl-test-topo";
+// Session names the tests create externally before booting the connection.
+// The connection discovers them — there's no "owned" session here.
+const SEED_SESSION = "topo-seed";
 
 function uniqueSocket(): string {
   return `promptctl-tmux-topology-${Date.now()}-${Math.random()
@@ -32,9 +34,7 @@ function killServer(socket: string): void {
   try {
     execSync(tmuxCmd(socket, "kill-server"), { stdio: "ignore" });
   } catch {
-    // Server may already be gone — the test fixture is the destructive
-    // boundary, not us. Re-running kill-server on a dead server is the only
-    // documented "this is fine" case for failure here.
+    // Server may already be gone.
   }
 }
 
@@ -56,20 +56,66 @@ async function waitFor(
   }
 }
 
+function meshDepsFor(socket: string) {
+  const transportFactory = (sessionId: SessionId): TmuxTransport =>
+    spawnTmux(["attach-session", "-t", sessionId], { socketPath: socket });
+  const enumerateSessions = async (): Promise<SessionId[]> => {
+    try {
+      const stdout = await tmuxExec([
+        "-L",
+        socket,
+        "list-sessions",
+        "-F",
+        "#{session_id}",
+      ]);
+      return stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => line as SessionId);
+    } catch (err) {
+      if (
+        err instanceof TmuxError &&
+        /no server running|error connecting to/.test(err.stderr)
+      ) {
+        return [];
+      }
+      throw err;
+    }
+  };
+  return { transportFactory, enumerateSessions };
+}
+
+function startMeshAndTracker(socket: string): {
+  conn: TmuxControlConnection;
+  tracker: TmuxTopologyTracker;
+} {
+  const conn = TmuxControlConnection.start({
+    socketPath: socket,
+    ...meshDepsFor(socket),
+    reconcileIntervalMs: 200,
+  });
+  const tracker = new TmuxTopologyTracker({
+    onEvent: (event, handler) => conn.on(event, handler),
+    onConnectionState: (listener) => conn.onConnectionState(listener),
+    execute: (cmd) => conn.execute(cmd),
+    subscribeRaw: (name, what, format) => conn.subscribeRaw(name, what, format),
+  });
+  return { conn, tracker };
+}
+
 afterEach(() => {
   TmuxControlConnection.__resetForTesting();
 });
 
-describe("TmuxTopologyTracker (real tmux)", () => {
+describe("TmuxTopologyTracker (real tmux mesh)", () => {
   let socket: string;
 
   beforeEach(() => {
     socket = uniqueSocket();
-    // No initial session needed — bootstrap creates the owned one.
-
-    // Outer test timeout sits above the largest inner waitFor budget so a
-    // failure surfaces the descriptive "waitFor(<label>) timed out" error
-    // instead of vitest's generic "Test timed out in 5000ms".
+    execSync(tmuxCmd(socket, `new-session -d -s ${SEED_SESSION}`), {
+      stdio: "ignore",
+    });
     vi.setConfig({ testTimeout: 10000 });
   });
 
@@ -78,22 +124,9 @@ describe("TmuxTopologyTracker (real tmux)", () => {
   });
 
   it("seeds the snapshot from list-panes when the connection becomes ready", async () => {
-    const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-      sessionName: OWNED,
-      bootstrap: () => ensureSession(OWNED, socket),
-      reconnectDelayMs: 100,
-    });
-    const tracker = new TmuxTopologyTracker({
-      onEvent: (event, handler) => conn.on(event, handler),
-      onConnectionState: (listener) => conn.onConnectionState(listener),
-      getClient: () => conn.client,
-    });
-
+    const { conn, tracker } = startMeshAndTracker(socket);
     const seen: TmuxSnapshot[] = [];
-    tracker.onSnapshot((s) => {
-      seen.push(s);
-    });
+    tracker.onSnapshot((s) => seen.push(s));
 
     await conn.ready;
     await waitFor(
@@ -101,27 +134,15 @@ describe("TmuxTopologyTracker (real tmux)", () => {
       5000,
       "initial pane snapshot",
     );
-
-    const snapshot = seen[seen.length - 1];
-    expect(snapshot.panes.length).toBeGreaterThanOrEqual(1);
-    expect(snapshot.panes.some((p) => p.sessionName === OWNED)).toBe(true);
+    const last = seen[seen.length - 1];
+    expect(last.panes.some((p) => p.sessionName === SEED_SESSION)).toBe(true);
 
     tracker.dispose();
     conn.close();
   });
 
   it("reflects a new pane within one event tick of tmux split-window", async () => {
-    const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-      sessionName: OWNED,
-      bootstrap: () => ensureSession(OWNED, socket),
-      reconnectDelayMs: 100,
-    });
-    const tracker = new TmuxTopologyTracker({
-      onEvent: (event, handler) => conn.on(event, handler),
-      onConnectionState: (listener) => conn.onConnectionState(listener),
-      getClient: () => conn.client,
-    });
+    const { conn, tracker } = startMeshAndTracker(socket);
 
     await conn.ready;
     await waitFor(
@@ -131,12 +152,12 @@ describe("TmuxTopologyTracker (real tmux)", () => {
     );
     const before = tracker.snapshot().panes.length;
 
-    execSync(tmuxCmd(socket, `split-window -t ${OWNED}`), { stdio: "ignore" });
+    execSync(tmuxCmd(socket, `split-window -t ${SEED_SESSION}`), {
+      stdio: "ignore",
+    });
 
     await waitFor(
       () => tracker.snapshot().panes.length === before + 1,
-      // Well below the legacy 2s polling bound. Topology events arrive on
-      // the control connection within milliseconds.
       1500,
       "split adds a pane",
     );
@@ -145,10 +166,9 @@ describe("TmuxTopologyTracker (real tmux)", () => {
     conn.close();
   });
 
-  it("surfaces panes from other sessions on the same server", async () => {
-    // Pre-create a "user" session on the same server. This stands in for
-    // the user's existing tmux work — promptctl must surface its panes
-    // alongside its own, not hide them.
+  it("surfaces panes from every observed session simultaneously", async () => {
+    // Pre-create a second session before the connection boots — the mesh
+    // must surface both, with neither structurally privileged.
     execSync(tmuxCmd(socket, "new-session -d -s user-work"), {
       stdio: "ignore",
     });
@@ -156,52 +176,32 @@ describe("TmuxTopologyTracker (real tmux)", () => {
       stdio: "ignore",
     });
 
-    const conn = TmuxControlConnection.start({
-      transportFactory: () =>
-        spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-      sessionName: OWNED,
-      bootstrap: () => ensureSession(OWNED, socket),
-      reconnectDelayMs: 100,
-    });
-    const tracker = new TmuxTopologyTracker({
-      onEvent: (event, handler) => conn.on(event, handler),
-      onConnectionState: (listener) => conn.onConnectionState(listener),
-      getClient: () => conn.client,
-    });
+    const { conn, tracker } = startMeshAndTracker(socket);
 
     await conn.ready;
     await waitFor(
-      () =>
-        tracker.snapshot().panes.some((p) => p.sessionName === "user-work"),
+      () => tracker.snapshot().panes.some((p) => p.sessionName === "user-work"),
       5000,
       "user-work panes appear in snapshot",
     );
 
     const snap = tracker.snapshot();
-    expect(snap.panes.some((p) => p.sessionName === OWNED)).toBe(true);
-    expect(snap.panes.filter((p) => p.sessionName === "user-work")).toHaveLength(2);
+    expect(snap.panes.some((p) => p.sessionName === SEED_SESSION)).toBe(true);
+    expect(
+      snap.panes.filter((p) => p.sessionName === "user-work"),
+    ).toHaveLength(2);
 
     tracker.dispose();
     conn.close();
   });
 
   it("removes a pane within one event tick of tmux kill-window", async () => {
-    const conn = TmuxControlConnection.start({
-      transportFactory: () => spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-      sessionName: OWNED,
-      bootstrap: () => ensureSession(OWNED, socket),
-      reconnectDelayMs: 100,
-    });
-    const tracker = new TmuxTopologyTracker({
-      onEvent: (event, handler) => conn.on(event, handler),
-      onConnectionState: (listener) => conn.onConnectionState(listener),
-      getClient: () => conn.client,
-    });
+    const { conn, tracker } = startMeshAndTracker(socket);
 
     await conn.ready;
-    // Add a second window so we can kill it without taking the whole server
-    // down.
-    execSync(tmuxCmd(socket, `new-window -t ${OWNED}`), { stdio: "ignore" });
+    execSync(tmuxCmd(socket, `new-window -t ${SEED_SESSION}`), {
+      stdio: "ignore",
+    });
     await waitFor(
       () => tracker.snapshot().panes.length >= 2,
       5000,
@@ -209,7 +209,9 @@ describe("TmuxTopologyTracker (real tmux)", () => {
     );
     const before = tracker.snapshot().panes.length;
 
-    execSync(tmuxCmd(socket, `kill-window -t ${OWNED}:1`), { stdio: "ignore" });
+    execSync(tmuxCmd(socket, `kill-window -t ${SEED_SESSION}:1`), {
+      stdio: "ignore",
+    });
 
     await waitFor(
       () => tracker.snapshot().panes.length === before - 1,

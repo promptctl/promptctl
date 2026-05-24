@@ -35,10 +35,10 @@ test.describe("/debug/tmux-control reflects live topology", () => {
 
   test.beforeEach(async ({}, testInfo) => {
     server = createTmuxServer(testInfo.workerIndex);
+    server.newSession(OWNED_SESSION);
     appHandle = await launchElectronApp({
       socket: server.socket,
       initialRoute: "/debug/tmux-control",
-      env: { PROMPTCTL_TMUX_SESSION: OWNED_SESSION },
     });
   });
 

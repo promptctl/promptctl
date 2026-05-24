@@ -1,5 +1,9 @@
 import { useState } from "react";
-import type { DiffEntry, MessageSummary, VersionInfo } from "../../shared/types";
+import type {
+  DiffEntry,
+  MessageSummary,
+  VersionInfo,
+} from "../../shared/types";
 
 function formatTokens(tokens: number): string {
   if (tokens === 0) return "0";

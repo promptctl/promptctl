@@ -99,9 +99,7 @@ describe("buildChain", () => {
   it("returns a singleton chain for a root with no parent", () => {
     const a = record("a", "end_turn");
     const records = new Map([[a.requestId, a]]);
-    const lineage = new Map<string, LineageInfo>([
-      ["a", info(null, "a", 0)],
-    ]);
+    const lineage = new Map<string, LineageInfo>([["a", info(null, "a", 0)]]);
     expect(buildChain(a, lineage, records).map((r) => r.requestId)).toEqual([
       "a",
     ]);

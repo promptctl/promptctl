@@ -203,7 +203,9 @@ export function TmuxTree() {
         <button
           onClick={() => setViewMode(viewMode === "tree" ? "flat" : "tree")}
           className="shrink-0 rounded px-1.5 py-1 text-[10px] text-neutral-500 hover:bg-neutral-800 hover:text-neutral-300"
-          title={viewMode === "tree" ? "Switch to flat view" : "Switch to tree view"}
+          title={
+            viewMode === "tree" ? "Switch to flat view" : "Switch to tree view"
+          }
         >
           {viewMode === "tree" ? "≡" : "▤"}
         </button>

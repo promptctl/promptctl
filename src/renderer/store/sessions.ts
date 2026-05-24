@@ -174,7 +174,9 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     // Restore persisted selection
     const persisted = loadPersistedSelection();
     if (persisted) {
-      const project = projects.find((p) => p.projectRoot === persisted.projectKey);
+      const project = projects.find(
+        (p) => p.projectRoot === persisted.projectKey,
+      );
       if (project) {
         const expanded = new Set<string>([persisted.projectKey]);
         set({ expandedProjects: expanded });
@@ -338,8 +340,14 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     // Fetch raw and stringified content in parallel. [LAW:dataflow-not-control-flow]
     // Both travel together; the consumer picks the one it needs.
     const [content, raw] = await Promise.all([
-      window.electronAPI.invoke("session:message-content", index) as Promise<string>,
-      window.electronAPI.invoke("session:message-raw", index) as Promise<unknown>,
+      window.electronAPI.invoke(
+        "session:message-content",
+        index,
+      ) as Promise<string>,
+      window.electronAPI.invoke(
+        "session:message-raw",
+        index,
+      ) as Promise<unknown>,
     ]);
     set({ previewIndex: index, previewContent: content, previewRaw: raw });
   },

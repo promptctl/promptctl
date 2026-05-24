@@ -18,7 +18,9 @@ function formatTrigger(trigger: CommandTrigger): string {
       switch (s.kind) {
         case "interval": {
           const secs = s.intervalMs / 1000;
-          return secs < 60 ? `every ${secs}s` : `every ${Math.round(secs / 60)}m`;
+          return secs < 60
+            ? `every ${secs}s`
+            : `every ${Math.round(secs / 60)}m`;
         }
         case "idle":
           return `idle ${s.idleMs / 1000}s`;
@@ -66,7 +68,10 @@ export function CommandPanel() {
             <div className="min-w-0 flex-1">
               <p className="truncate text-sm text-neutral-200">{cmd.name}</p>
               <p className="text-xs text-neutral-500">
-                {cmd.action.kind} → {cmd.target.kind === "tmux-pane" ? cmd.target.paneId : cmd.target.kind}
+                {cmd.action.kind} →{" "}
+                {cmd.target.kind === "tmux-pane"
+                  ? cmd.target.paneId
+                  : cmd.target.kind}
                 {" · "}trigger: {formatTrigger(cmd.trigger)}
                 {" · "}runs: {cmd.runCount} · last: {formatTime(cmd.lastRun)}
               </p>
@@ -108,7 +113,8 @@ export function CommandPanel() {
                         : "text-neutral-500"
                   }`}
                 >
-                  {new Date(event.timestamp).toLocaleTimeString()} — {event.type}
+                  {new Date(event.timestamp).toLocaleTimeString()} —{" "}
+                  {event.type}
                   {event.detail ? `: ${event.detail.slice(0, 80)}` : ""}
                 </p>
               ))}
@@ -125,10 +131,13 @@ function AddCommandForm() {
 
   const [name, setName] = useState("");
   const [targetPaneId, setTargetPaneId] = useState("");
-  const [actionKind, setActionKind] = useState<CommandAction["kind"]>("send-command");
+  const [actionKind, setActionKind] =
+    useState<CommandAction["kind"]>("send-command");
   const [actionText, setActionText] = useState("");
-  const [triggerKind, setTriggerKind] = useState<CommandTrigger["kind"]>("manual");
-  const [scheduleKind, setScheduleKind] = useState<TaskSchedule["kind"]>("interval");
+  const [triggerKind, setTriggerKind] =
+    useState<CommandTrigger["kind"]>("manual");
+  const [scheduleKind, setScheduleKind] =
+    useState<TaskSchedule["kind"]>("interval");
   const [intervalMinutes, setIntervalMinutes] = useState(5);
   const [idleSeconds, setIdleSeconds] = useState(30);
   const [cronExpr, setCronExpr] = useState("*/5 * * * *");
@@ -210,7 +219,9 @@ function AddCommandForm() {
       <div className="flex items-center gap-3">
         <select
           value={actionKind}
-          onChange={(e) => setActionKind(e.target.value as CommandAction["kind"])}
+          onChange={(e) =>
+            setActionKind(e.target.value as CommandAction["kind"])
+          }
           className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-200 outline-none"
         >
           <option value="send-command">Send Command</option>
@@ -243,7 +254,9 @@ function AddCommandForm() {
       <div className="flex flex-wrap items-center gap-3">
         <select
           value={triggerKind}
-          onChange={(e) => setTriggerKind(e.target.value as CommandTrigger["kind"])}
+          onChange={(e) =>
+            setTriggerKind(e.target.value as CommandTrigger["kind"])
+          }
           className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-200 outline-none"
         >
           <option value="manual">Manual</option>
@@ -255,7 +268,9 @@ function AddCommandForm() {
           <>
             <select
               value={scheduleKind}
-              onChange={(e) => setScheduleKind(e.target.value as TaskSchedule["kind"])}
+              onChange={(e) =>
+                setScheduleKind(e.target.value as TaskSchedule["kind"])
+              }
               className="rounded border border-neutral-700 bg-neutral-950 px-2 py-1.5 text-sm text-neutral-200 outline-none"
             >
               <option value="interval">Interval</option>

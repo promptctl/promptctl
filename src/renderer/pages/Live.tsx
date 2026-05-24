@@ -10,7 +10,10 @@ import {
   stateClass,
   tabClass,
 } from "../components/live-detail/format";
-import { computeLineage, type LineageInfo } from "../components/live-detail/lineage";
+import {
+  computeLineage,
+  type LineageInfo,
+} from "../components/live-detail/lineage";
 import { buildChain } from "../components/live-detail/stop-reason";
 import { ResizableSplit } from "../components/ResizableSplit";
 import { useProxyStore, visibleRequests } from "../store/proxy";

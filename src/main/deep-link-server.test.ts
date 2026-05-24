@@ -1,12 +1,5 @@
 // @vitest-environment node
-import {
-  describe,
-  it,
-  expect,
-  beforeEach,
-  afterEach,
-  vi,
-} from "vitest";
+import { describe, it, expect, beforeEach, afterEach, vi } from "vitest";
 import { mkdtemp, rm, readFile, access } from "node:fs/promises";
 import path from "node:path";
 import os from "node:os";
@@ -72,11 +65,7 @@ describe("startDeepLinkServer", () => {
     if (!addr || typeof addr === "string") throw new Error("no addr");
 
     const url = "promptctl://open?provider=claude&sessionId=abc-123";
-    const res = await postJson(
-      addr.port,
-      "/open",
-      JSON.stringify({ url }),
-    );
+    const res = await postJson(addr.port, "/open", JSON.stringify({ url }));
 
     expect(res.status).toBe(200);
     expect(res.text).toBe("ok");
@@ -124,9 +113,8 @@ describe("startDeepLinkServer", () => {
 
 describe("stopDeepLinkServer", () => {
   it("removes the port file and closes the socket", async () => {
-    const { startDeepLinkServer, stopDeepLinkServer } = await import(
-      "./deep-link-server"
-    );
+    const { startDeepLinkServer, stopDeepLinkServer } =
+      await import("./deep-link-server");
     server = await startDeepLinkServer(noop);
     const portFile = path.join(tmpHome, ".promptctl", "deep-link-port");
 

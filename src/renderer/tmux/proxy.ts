@@ -29,6 +29,7 @@ export function getTmuxProxy(): TmuxClientProxy {
 const INITIAL_CONTROL_STATE: TmuxControlState = {
   status: "connecting",
   reconnectAttempts: 0,
+  observedSessions: 0,
 };
 
 // [LAW:dataflow-not-control-flow] Hook returns a single state value seeded by
@@ -43,11 +44,9 @@ export function useControlState(): TmuxControlState {
     const off = window.electronAPI.on("tmux:control-state", (event) => {
       if (alive) setState(event);
     });
-    void window.electronAPI
-      .invoke("tmux:control-state:get")
-      .then((current) => {
-        if (alive) setState(current);
-      });
+    void window.electronAPI.invoke("tmux:control-state:get").then((current) => {
+      if (alive) setState(current);
+    });
     return () => {
       alive = false;
       off();
@@ -90,10 +89,10 @@ export function useTopology(): TmuxSnapshot {
 // state unrepresentable at the call boundary.
 //
 // [LAW:single-enforcer] One stream per (pane, mount); the prior stream is
-// disposed before a fresh one is constructed. The attached session is NOT this
-// hook's to drive — tmux delivers %output only for the attached session, so the
-// renderer sends that intent to main (the lone owner across reconnects) and
-// constructs the stream; it never issues switch-client itself.
+// disposed before a fresh one is constructed. Output for every session flows
+// through the mesh in main (one control client per observed session), so the
+// renderer never has to drive attached-session selection — every pane's
+// %output reaches the bridge regardless of which one is focused.
 //
 // [LAW:types-are-the-program] The stream is created in an effect, so the `stream`
 // state lags the render that changed `paneId` by one tick. Pairing the stream
@@ -103,23 +102,10 @@ export function useTopology(): TmuxSnapshot {
 // during a fast switch. The matched-pane gate makes that mismatch unrepresentable.
 export function usePaneStream(pane: TmuxPane | null): PaneStream | null {
   const paneId = pane?.id ?? null;
-  const sessionId = pane?.sessionId ?? null;
   const [active, setActive] = useState<{
     paneId: PaneId;
     stream: PaneStream;
   } | null>(null);
-
-  // [LAW:dataflow-not-control-flow] The watch intent's only input is the
-  // session, so it fires only when the session changes — switching panes within
-  // one session never re-issues switch-client. The rejection is handled
-  // deliberately (not swallowed): main owns attach-failure recovery via reconnect
-  // and the control-state broadcast, so the renderer's sole duty is to keep a
-  // rejected intent from becoming an unhandled promise rejection.
-  useEffect(() => {
-    window.electronAPI
-      .invoke("tmux:watch-session", sessionId)
-      .catch((err) => console.error("tmux:watch-session rejected", err));
-  }, [sessionId]);
 
   useEffect(() => {
     if (paneId === null) {

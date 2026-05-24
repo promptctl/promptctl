@@ -71,7 +71,9 @@ export function useTaskSubscription(taskId: string | null): TaskState | null {
         } else if (evt.type === "done") {
           setState((s) => (s ? { ...s, status: "done" } : s));
         } else if (evt.type === "error") {
-          setState((s) => (s ? { ...s, status: "error", error: evt.error } : s));
+          setState((s) =>
+            s ? { ...s, status: "error", error: evt.error } : s,
+          );
         } else if (evt.type === "cancelled") {
           setState((s) => (s ? { ...s, status: "cancelled" } : s));
         }

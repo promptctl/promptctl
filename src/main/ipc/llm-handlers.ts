@@ -10,20 +10,23 @@ import { countTokens as anthropicCountTokens } from "../llm/anthropic-count";
 export function registerLlmHandlers(): void {
   // Test connectivity for the Anthropic count_tokens endpoint. Free to call;
   // used by the Settings page's "Test Connection" button to verify the key.
-  ipcMain.handle("anthropic:test-count-tokens", async (): Promise<{
-    ok: boolean;
-    tokens?: number;
-    error?: string;
-  }> => {
-    try {
-      const tokens = await anthropicCountTokens({
-        messages: [{ role: "user", content: "ping" }],
-      });
-      return { ok: true, tokens };
-    } catch (err) {
-      return { ok: false, error: (err as Error).message };
-    }
-  });
+  ipcMain.handle(
+    "anthropic:test-count-tokens",
+    async (): Promise<{
+      ok: boolean;
+      tokens?: number;
+      error?: string;
+    }> => {
+      try {
+        const tokens = await anthropicCountTokens({
+          messages: [{ role: "user", content: "ping" }],
+        });
+        return { ok: true, tokens };
+      } catch (err) {
+        return { ok: false, error: (err as Error).message };
+      }
+    },
+  );
 
   ipcMain.handle(
     "llm:suggest-compression",
@@ -48,9 +51,10 @@ export function registerLlmHandlers(): void {
       focusQuery: string,
     ): Promise<TopicSegment[]> => {
       const query = focusQuery.trim();
-      const label = query.length > 0
-        ? `Finding "${query}"`
-        : "Segmenting conversation into topics";
+      const label =
+        query.length > 0
+          ? `Finding "${query}"`
+          : "Segmenting conversation into topics";
       return runTask(
         taskId,
         { kind: "topic-focus", label, total: 2 },

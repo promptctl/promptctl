@@ -28,7 +28,9 @@ describe("client identity parsers", () => {
   });
 
   it("parses lsof pid/name pairs", () => {
-    expect(parseLsofEntries("p111\nn127.0.0.1:1->127.0.0.1:2\np222\nnB\n")).toEqual([
+    expect(
+      parseLsofEntries("p111\nn127.0.0.1:1->127.0.0.1:2\np222\nnB\n"),
+    ).toEqual([
       { pid: 111, name: "127.0.0.1:1->127.0.0.1:2" },
       { pid: 222, name: "B" },
     ]);
@@ -89,9 +91,7 @@ describe("walkToClientRoot", () => {
 
   it("stops at ppid <= 1 even with no shell in the chain", async () => {
     // Some kernel-launched daemons have init/launchd as their direct parent.
-    const reader = readerFor([
-      { pid: 5000, ppid: 1, comm: "weirdd" },
-    ]);
+    const reader = readerFor([{ pid: 5000, ppid: 1, comm: "weirdd" }]);
     const root = await walkToClientRoot(5000, reader);
     expect(root.pid).toBe(5000);
   });
@@ -100,15 +100,20 @@ describe("walkToClientRoot", () => {
     // ppid 9999 is missing from the table — simulates a parent that exited
     // between two ps reads. The walk returns the last known good row instead
     // of crashing.
-    const reader = readerFor([
-      { pid: 6000, ppid: 9999, comm: "claude" },
-    ]);
+    const reader = readerFor([{ pid: 6000, ppid: 9999, comm: "claude" }]);
     const root = await walkToClientRoot(6000, reader);
     expect(root.pid).toBe(6000);
   });
 
   it("treats tmux/login/sshd/launchd/init as walk stoppers", async () => {
-    for (const stopper of ["tmux", "login", "sshd", "launchd", "init", "screen"]) {
+    for (const stopper of [
+      "tmux",
+      "login",
+      "sshd",
+      "launchd",
+      "init",
+      "screen",
+    ]) {
       const reader = readerFor([
         { pid: 7000, ppid: 6000, comm: "claude" },
         { pid: 6000, ppid: 1, comm: stopper },
@@ -124,7 +129,9 @@ describe("readLaunchHeader", () => {
     return { headers } as unknown as http.IncomingMessage;
   }
   it("returns the trimmed launchId when present", () => {
-    expect(readLaunchHeader(req({ "x-promptctl-launch": "abc-123" }))).toBe("abc-123");
+    expect(readLaunchHeader(req({ "x-promptctl-launch": "abc-123" }))).toBe(
+      "abc-123",
+    );
   });
   it("returns null when absent", () => {
     expect(readLaunchHeader(req({}))).toBeNull();
@@ -133,7 +140,9 @@ describe("readLaunchHeader", () => {
     expect(readLaunchHeader(req({ "x-promptctl-launch": "   " }))).toBeNull();
   });
   it("returns the first value when the header is repeated", () => {
-    expect(readLaunchHeader(req({ "x-promptctl-launch": ["first", "second"] }))).toBe("first");
+    expect(
+      readLaunchHeader(req({ "x-promptctl-launch": ["first", "second"] })),
+    ).toBe("first");
   });
 });
 

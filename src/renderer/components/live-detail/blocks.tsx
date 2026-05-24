@@ -77,8 +77,7 @@ function ToolUseBlock(block: unknown): ReactNode {
 
 function ToolResultBlock(block: unknown): ReactNode {
   const rec = asRecord(block);
-  const toolUseId =
-    typeof rec?.tool_use_id === "string" ? rec.tool_use_id : "";
+  const toolUseId = typeof rec?.tool_use_id === "string" ? rec.tool_use_id : "";
   const isError = rec?.is_error === true;
   const content = rec?.content;
   return (

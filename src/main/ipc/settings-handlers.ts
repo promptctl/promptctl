@@ -6,8 +6,7 @@ import { loadSettings, saveSettings } from "../settings/store";
 export function registerSettingsHandlers(): void {
   ipcMain.handle("settings:load", () => loadSettings());
 
-  ipcMain.handle(
-    "settings:save",
-    (_e, updates: Partial<AppSettings>) => saveSettings(updates),
+  ipcMain.handle("settings:save", (_e, updates: Partial<AppSettings>) =>
+    saveSettings(updates),
   );
 }

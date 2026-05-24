@@ -3,8 +3,8 @@ import fs from "node:fs";
 import os from "node:os";
 import path from "node:path";
 import { createMainBridge } from "tmux-control-mode-js/electron/main";
+import type { TmuxClient } from "tmux-control-mode-js";
 import { TmuxControlConnection } from "./tmux/control";
-import { ownedSessionName } from "./tmux/session";
 import { TmuxTopologyTracker } from "./tmux/topology";
 import { CommandEngine } from "./command/engine";
 import { loadCommands } from "./command/persistence";
@@ -32,10 +32,7 @@ import { registerProvider } from "./sessions/registry";
 import { geminiAdapter } from "./sessions/gemini/adapter";
 import { claudeAdapter } from "./sessions/claude/adapter";
 import { findPromptctlUrlInArgv, promptctlUrlToHash } from "./deep-link";
-import {
-  startDeepLinkServer,
-  stopDeepLinkServer,
-} from "./deep-link-server";
+import { startDeepLinkServer, stopDeepLinkServer } from "./deep-link-server";
 import type { Server } from "node:http";
 
 // Handle Squirrel events for Windows installer
@@ -56,7 +53,9 @@ if (process.defaultApp) {
     const file = path.join(os.homedir(), ".promptctl", "cdp-port");
     fs.mkdirSync(path.dirname(file), { recursive: true });
     fs.writeFileSync(file, cdpPort, "utf-8");
-    console.log(`[deep-link] CDP enabled on port ${cdpPort} (port file: ${file})`);
+    console.log(
+      `[deep-link] CDP enabled on port ${cdpPort} (port file: ${file})`,
+    );
   } catch (err) {
     console.log(`[deep-link] CDP port file write failed: ${err}`);
   }
@@ -67,60 +66,49 @@ declare const MAIN_WINDOW_VITE_NAME: string;
 
 // [LAW:one-source-of-truth] The TmuxControlConnection is the single producer
 // of tmux server state and the single channel through which the rest of the
-// app drives tmux (send-keys, execute, capture-pane). The legacy polling
-// stack (state.ts / output.ts / client.ts / exec.ts / controllable.ts) is
-// gone as of 77e.1.9.
+// app drives tmux (send-keys, execute, capture-pane). It runs a flat mesh —
+// one control client per observed tmux session — so %output, command
+// dispatch, and topology subscriptions cover every session simultaneously.
 //
-// The session name is derived deterministically from the install path, so two
-// instances of the same install co-attach to the same session and different
-// installs (dev + prod) get different names without collision.
-// PROMPTCTL_TMUX_SESSION overrides the derived name — used by e2e tests to
-// pin a known target, and available to power users who want a custom name.
-const TMUX_SESSION_NAME =
-  process.env.PROMPTCTL_TMUX_SESSION ?? ownedSessionName(app.getAppPath());
-const tmuxControl = TmuxControlConnection.start({
-  sessionName: TMUX_SESSION_NAME,
-});
+// [LAW:one-type-per-behavior] No sessionName argument: the connection
+// discovers what tmux has and spawns a client per session. Promptctl does
+// not bootstrap an owned session by default — if zero sessions exist, the
+// connection sits in a "no-sessions" state until one appears.
+const tmuxControl = TmuxControlConnection.start();
 tmuxControl.onConnectionState((ev) => {
   console.log(
-    `[tmux-control] ${ev.status}${ev.reason ? `: ${ev.reason}` : ""}`,
+    `[tmux-control] ${ev.status} (sessions=${ev.observedSessions})${
+      ev.reason ? `: ${ev.reason}` : ""
+    }`,
   );
 });
 
-// [LAW:dataflow-not-control-flow] Bridge presence is a pure projection of the
-// connection's status: while `ready`, a bridge wraps the current TmuxClient;
-// otherwise the slot is free. The same state machine drives every transition,
-// so reconnects swap the underlying client without leaking handlers.
-//
-// The bridge holds a direct TmuxClient reference and forbids double-registration
-// on ipcMain (WeakSet guard inside the library), so we install/dispose in lock-
-// step with the connection's client lifecycle.
-let tmuxBridge: { dispose(): void } | null = null;
-tmuxControl.onConnectionState((ev) => {
-  if (ev.status === "ready" && tmuxBridge === null) {
-    const client = tmuxControl.client;
-    if (client !== null) {
-      tmuxBridge = createMainBridge(client, ipcMain);
-    }
-    return;
-  }
-  if (ev.status !== "ready" && tmuxBridge !== null) {
-    tmuxBridge.dispose();
-    tmuxBridge = null;
-  }
-});
+// [LAW:locality-or-seam] The library bridge installs once per process and
+// forwards every TmuxClient event to renderers. Our connection multiplexes
+// the mesh into a single TmuxClient-shaped surface — %output from every
+// session reaches the renderer through this single bridge install, no
+// per-session bridges required. Cast bridges the structural gap: the
+// connection implements the methods the bridge actually invokes, but TS
+// can't structurally match a class with private fields.
+const tmuxBridge = createMainBridge(
+  tmuxControl as unknown as TmuxClient,
+  ipcMain,
+);
 
 // [LAW:one-source-of-truth] Single tracker per process; the IPC handler
 // fans its snapshots out to every renderer.
 const tmuxTopology = new TmuxTopologyTracker({
   onEvent: (event, handler) => tmuxControl.on(event, handler),
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
-  getClient: () => tmuxControl.client,
+  execute: (cmd) => tmuxControl.execute(cmd),
+  subscribeRaw: (name, what, format) =>
+    tmuxControl.subscribeRaw(name, what, format),
 });
 const tmuxOutputRouter = new TmuxOutputRouter({
   onEvent: (event, handler) => tmuxControl.on(event, handler),
   onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
-  getClient: () => tmuxControl.client,
+  execute: (cmd) => tmuxControl.execute(cmd),
+  setPaneAction: (paneId, action) => tmuxControl.setPaneAction(paneId, action),
 });
 
 // [LAW:one-source-of-truth] Sole authoritative source of launch identity.
@@ -150,21 +138,13 @@ const commandEngine = new CommandEngine({
     };
   },
   sendKeys: async (target, keys) => {
-    const client = tmuxControl.client;
-    if (client === null) {
-      throw new Error("tmux control connection is not ready");
-    }
-    const resp = await client.sendKeys(target, keys);
+    const resp = await tmuxControl.sendKeys(target, keys);
     if (!resp.success) {
       throw new Error(`send-keys failed: ${resp.output.join("\n")}`);
     }
   },
   execute: async (command) => {
-    const client = tmuxControl.client;
-    if (client === null) {
-      throw new Error("tmux control connection is not ready");
-    }
-    const resp = await client.execute(command);
+    const resp = await tmuxControl.execute(command);
     if (!resp.success) {
       throw new Error(`tmux command failed: ${resp.output.join("\n")}`);
     }
@@ -249,9 +229,7 @@ const createWindow = (): void => {
   // open-url event (macOS fired before whenReady).
   const argvUrl = findPromptctlUrlInArgv(process.argv);
   const initialHash =
-    pendingDeepLinkHash ??
-    (argvUrl ? promptctlUrlToHash(argvUrl) : null) ??
-    "";
+    pendingDeepLinkHash ?? (argvUrl ? promptctlUrlToHash(argvUrl) : null) ?? "";
   pendingDeepLinkHash = null;
   console.log(
     `[deep-link] createWindow argv=${JSON.stringify(process.argv)} initialHash=${JSON.stringify(initialHash)}`,
@@ -316,7 +294,7 @@ app.whenReady().then(async () => {
     registry: launchRegistry,
     spawn: {
       topology: tmuxTopology,
-      getClient: () => tmuxControl.client,
+      execute: (cmd) => tmuxControl.execute(cmd),
       // [LAW:one-source-of-truth] Proxy port comes from the proxy manager
       // at call time — settings are the canonical input but the actual
       // listening port can differ (e.g. when the configured port was
@@ -395,10 +373,7 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", async () => {
   commandEngine.stop();
-  if (tmuxBridge !== null) {
-    tmuxBridge.dispose();
-    tmuxBridge = null;
-  }
+  tmuxBridge.dispose();
   tmuxTopology.dispose();
   tmuxOutputRouter.dispose();
   tmuxControl.close();

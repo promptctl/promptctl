@@ -39,10 +39,13 @@ test.describe("/loops on @promptctl/pane-terminal", () => {
 
   test.beforeEach(async ({}, testInfo) => {
     server = createTmuxServer(testInfo.workerIndex);
+    // The mesh discovers existing sessions — we create the one this test
+    // exercises BEFORE launching Electron so the connection sees it on
+    // first enumeration.
+    server.newSession(OWNED_SESSION);
     appHandle = await launchElectronApp({
       socket: server.socket,
       initialRoute: "/loops",
-      env: { PROMPTCTL_TMUX_SESSION: OWNED_SESSION },
     });
     // [LAW:verifiable-goals] pageerror + console.error are part of the gate.
     // The two-Reacts crash that bit chunk A renders nothing visible but fires

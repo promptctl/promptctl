@@ -17,7 +17,12 @@ vi.mock("electron", () => ({
 }));
 
 // Import after the mock is wired so runner binds to mocked webContents.
-import { runTask, cancelTask, TaskCancelledError, __resetTasksForTesting } from "./runner";
+import {
+  runTask,
+  cancelTask,
+  TaskCancelledError,
+  __resetTasksForTesting,
+} from "./runner";
 
 beforeEach(() => {
   emitted.length = 0;
@@ -46,7 +51,12 @@ describe("runTask — happy path", () => {
       label: "doing a thing",
       total: 2,
     });
-    expect(emitted[1]).toMatchObject({ type: "progress", done: 1, total: 2, message: "halfway" });
+    expect(emitted[1]).toMatchObject({
+      type: "progress",
+      done: 1,
+      total: 2,
+      message: "halfway",
+    });
   });
 });
 

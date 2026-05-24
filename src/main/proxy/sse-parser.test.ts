@@ -22,7 +22,8 @@ describe("parseSseFrame", () => {
   });
 
   it("strips a single space after the colon", () => {
-    const frame = 'event:content_block_delta\ndata:{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}';
+    const frame =
+      'event:content_block_delta\ndata:{"type":"content_block_delta","index":0,"delta":{"type":"text_delta","text":"hi"}}';
     const ev = parseSseFrame(frame);
     expect(ev?.type).toBe("content_block_delta");
   });
@@ -52,12 +53,12 @@ describe("SseParser stream", () => {
     parser.on("data", (ev: SseEvent) => events.push(ev));
 
     const wire =
-      'event: message_start\n' +
+      "event: message_start\n" +
       'data: {"type":"message_start","message":{"id":"x","type":"message","role":"assistant","model":"m","stop_reason":null,"stop_sequence":null,"usage":{"input_tokens":1,"output_tokens":0}}}\n' +
-      '\n' +
-      'event: message_stop\n' +
+      "\n" +
+      "event: message_stop\n" +
       'data: {"type":"message_stop"}\n' +
-      '\n';
+      "\n";
 
     parser.write(wire);
     parser.end();
@@ -74,8 +75,7 @@ describe("SseParser stream", () => {
     parser.on("data", (ev: SseEvent) => events.push(ev));
 
     // Split a single frame across many tiny chunks.
-    const wire =
-      'event: message_stop\ndata: {"type":"message_stop"}\n\n';
+    const wire = 'event: message_stop\ndata: {"type":"message_stop"}\n\n';
     for (const ch of wire) parser.write(ch);
     parser.end();
     await new Promise((resolve) => parser.on("end", resolve));
@@ -89,7 +89,7 @@ describe("SseParser stream", () => {
     // multiple `data:` lines that are joined by \n. We don't have a public
     // event with multi-line data; verify the parser join logic via parseFrame.
     const frame =
-      'event: message_start\n' +
+      "event: message_start\n" +
       'data: {"type":"message_start","message":{"id":"x","type":"message",\n' +
       'data: "role":"assistant","model":"m","stop_reason":null,"stop_sequence":null,\n' +
       'data: "usage":{"input_tokens":1,"output_tokens":0}}}';
@@ -110,6 +110,8 @@ describe("SseParser stream", () => {
     parser.write('event: bogus\ndata: {"type":"bogus"}\n\n');
     await new Promise((r) => setImmediate(r));
     expect(caught).not.toBeNull();
-    expect((caught as Error | null)?.message ?? "").toMatch(/Unknown SSE event type/);
+    expect((caught as Error | null)?.message ?? "").toMatch(
+      /Unknown SSE event type/,
+    );
   });
 });

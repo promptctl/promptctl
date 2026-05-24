@@ -57,7 +57,13 @@ export async function runTask<T>(
   controllers.set(id, controller);
 
   const total = meta.total ?? 0;
-  broadcast({ type: "started", taskId: id, kind: meta.kind, label: meta.label, total });
+  broadcast({
+    type: "started",
+    taskId: id,
+    kind: meta.kind,
+    label: meta.label,
+    total,
+  });
 
   const handle: TaskHandle = {
     id,
@@ -83,7 +89,9 @@ export async function runTask<T>(
   } catch (err) {
     if (err instanceof TaskCancelledError || controller.signal.aborted) {
       broadcast({ type: "cancelled", taskId: id });
-      throw err instanceof TaskCancelledError ? err : new TaskCancelledError(id);
+      throw err instanceof TaskCancelledError
+        ? err
+        : new TaskCancelledError(id);
     }
     broadcast({ type: "error", taskId: id, error: (err as Error).message });
     throw err;

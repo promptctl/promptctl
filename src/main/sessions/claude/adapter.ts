@@ -23,7 +23,11 @@ export type { ClaudeLine, ClaudeContentBlock } from "./types";
 
 // --- Internal helpers ---
 
-const CLAUDE_PROJECTS = path.join(process.env.HOME ?? "", ".claude", "projects");
+const CLAUDE_PROJECTS = path.join(
+  process.env.HOME ?? "",
+  ".claude",
+  "projects",
+);
 
 // Which JSONL line types are visible as messages in the editor
 const VISIBLE_TYPES = new Set(["user", "assistant", "system"]);
@@ -96,7 +100,11 @@ function extractFormattedText(line: ClaudeLine): string {
   if (!msg) return "";
 
   const role =
-    line.type === "user" ? "User" : line.type === "assistant" ? "Assistant" : line.type;
+    line.type === "user"
+      ? "User"
+      : line.type === "assistant"
+        ? "Assistant"
+        : line.type;
   const parts: string[] = [];
 
   if (typeof msg.content === "string") {
@@ -269,9 +277,7 @@ function buildExtras(line: ClaudeLine): Record<string, string> {
   if (line.type === "assistant" && msg) {
     if (msg.model) {
       // Shorten model name for display
-      extras.model = msg.model
-        .replace("claude-", "")
-        .replace(/-\d{8}$/, "");
+      extras.model = msg.model.replace("claude-", "").replace(/-\d{8}$/, "");
     }
     if (msg.usage) {
       // Total input = input_tokens + cache_creation + cache_read
@@ -432,7 +438,6 @@ function computeSaveContent(indicesToRemove: number[]): string {
   const trimmedLines = loadedLines.filter((_, i) => !physicalToRemove.has(i));
   return trimmedLines.join("\n");
 }
-
 
 // --- Adapter implementation ---
 
@@ -602,9 +607,7 @@ export const claudeAdapter: ProviderAdapter = {
             if (previewMessages.length < 3) {
               const text = userTextContent(parsed);
               if (text !== null && text.length > 5) {
-                previewMessages.push(
-                  text.slice(0, 200).replace(/\n/g, " "),
-                );
+                previewMessages.push(text.slice(0, 200).replace(/\n/g, " "));
               }
             }
           }
@@ -720,7 +723,10 @@ export const claudeAdapter: ProviderAdapter = {
     const toRemove = new Set<number>();
     for (let i = 0; i < loadedParsed.length; i++) {
       const parsed = loadedParsed[i];
-      const flags = analyzeFlags(parsed, sumChunks(extractBillableChunks(parsed)));
+      const flags = analyzeFlags(
+        parsed,
+        sumChunks(extractBillableChunks(parsed)),
+      );
       if (flags.includes("repetitive")) toRemove.add(i);
       if (flags.includes("system-noise")) toRemove.add(i);
     }
@@ -878,8 +884,14 @@ export const claudeAdapter: ProviderAdapter = {
     const newVisible = parseVisibleMessages(newContent);
 
     // Build UUID maps for fast lookup. Lines without UUIDs fall back to position-based id.
-    const oldByKey = new Map<string, { parsed: ClaudeLine; physIdx: number; pos: number }>();
-    const newByKey = new Map<string, { parsed: ClaudeLine; physIdx: number; pos: number }>();
+    const oldByKey = new Map<
+      string,
+      { parsed: ClaudeLine; physIdx: number; pos: number }
+    >();
+    const newByKey = new Map<
+      string,
+      { parsed: ClaudeLine; physIdx: number; pos: number }
+    >();
     const keyOf = (parsed: ClaudeLine, pos: number): string =>
       parsed.uuid ?? `pos:${pos}`;
 

@@ -30,7 +30,8 @@ describe("client identity integration", () => {
     unsubscribe = proxyEventBus.subscribe((event) => events.push(event));
     upstream = await startUpstream();
     const addr = upstream.address();
-    if (typeof addr !== "object" || addr === null) throw new Error("upstream addr");
+    if (typeof addr !== "object" || addr === null)
+      throw new Error("upstream addr");
 
     proxy = await startServer({
       port: 0,
@@ -38,10 +39,7 @@ describe("client identity integration", () => {
       onEntry: () => undefined,
     });
 
-    const child = spawn(process.execPath, [
-      "-e",
-      childPostScript(proxy.port),
-    ], {
+    const child = spawn(process.execPath, ["-e", childPostScript(proxy.port)], {
       stdio: ["ignore", "pipe", "pipe"],
     });
     const childPid = child.pid;
@@ -52,7 +50,9 @@ describe("client identity integration", () => {
     expect(exit.code).toBe(0);
     expect(exit.stderr).toBe("");
 
-    const requestEvent = events.find((event) => event.kind === "request_headers");
+    const requestEvent = events.find(
+      (event) => event.kind === "request_headers",
+    );
     expect(requestEvent).toBeDefined();
     expect(requestEvent?.clientId.startsWith("socket-")).toBe(false);
     expect(

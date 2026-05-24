@@ -124,11 +124,7 @@ Set "relevant": true for every segment — the reader is not filtering, just bro
     ? `Focus query: "${query}"\n\nConversation (${messages.length} messages):\n\n${lines.join("\n")}`
     : `Conversation (${messages.length} messages):\n\n${lines.join("\n")}`;
 
-  const response = await chatComplete(
-    systemPrompt,
-    userPrompt,
-    handle?.signal,
-  );
+  const response = await chatComplete(systemPrompt, userPrompt, handle?.signal);
   handle?.throwIfCancelled();
   handle?.reportProgress(1, 2, "Parsing segments");
 

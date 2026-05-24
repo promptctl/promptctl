@@ -5,7 +5,11 @@
 import path from "node:path";
 import { homedir } from "node:os";
 
-import type { ClientInfo, HarEntry, ProxyStatus } from "../../shared/proxy-events";
+import type {
+  ClientInfo,
+  HarEntry,
+  ProxyStatus,
+} from "../../shared/proxy-events";
 import type { Launch, LaunchId } from "../../shared/types";
 import { HarRecorder } from "./har-recorder";
 import { replayHarFile } from "./har-replayer";
@@ -26,7 +30,11 @@ class ProxyManager {
   private server: RunningServer | null = null;
   private recorder: HarRecorder | null = null;
   private upstreamTarget = "https://api.anthropic.com";
-  private recordingsDir = path.join(homedir(), ".promptctl", "proxy-recordings");
+  private recordingsDir = path.join(
+    homedir(),
+    ".promptctl",
+    "proxy-recordings",
+  );
 
   async start(opts: ProxyStartOptions): Promise<ProxyStatus> {
     if (this.server !== null) {

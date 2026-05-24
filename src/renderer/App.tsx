@@ -22,13 +22,7 @@ import { initCommandSubscription } from "./store/command";
 import { initLaunchSubscription } from "./store/launches";
 import { initProxySubscription } from "./store/proxy";
 
-function TopTab({
-  to,
-  children,
-}: {
-  to: string;
-  children: React.ReactNode;
-}) {
+function TopTab({ to, children }: { to: string; children: React.ReactNode }) {
   const location = useLocation();
   const active = location.pathname.startsWith(to);
 
@@ -57,13 +51,7 @@ function TopTabBar() {
   );
 }
 
-function NavLink({
-  to,
-  children,
-}: {
-  to: string;
-  children: React.ReactNode;
-}) {
+function NavLink({ to, children }: { to: string; children: React.ReactNode }) {
   const location = useLocation();
   const active = location.pathname === to;
 
@@ -113,9 +101,7 @@ function Sidebar() {
         <TmuxTree />
       </div>
 
-      {showLaunch && (
-        <LaunchToolDialog onClose={() => setShowLaunch(false)} />
-      )}
+      {showLaunch && <LaunchToolDialog onClose={() => setShowLaunch(false)} />}
     </nav>
   );
 }
@@ -147,7 +133,9 @@ function RouteRestorer() {
   // Persist route on every navigation after restore
   useEffect(() => {
     if (!restored.current) return;
-    window.electronAPI.invoke("settings:save", { lastRoute: location.pathname });
+    window.electronAPI.invoke("settings:save", {
+      lastRoute: location.pathname,
+    });
   }, [location.pathname]);
 
   return null;

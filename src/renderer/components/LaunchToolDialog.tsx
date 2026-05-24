@@ -7,11 +7,7 @@ const TOOLS: { kind: ToolLaunchKind; label: string }[] = [
   { kind: "gemini", label: "Gemini CLI" },
 ];
 
-export function LaunchToolDialog({
-  onClose,
-}: {
-  onClose: () => void;
-}) {
+export function LaunchToolDialog({ onClose }: { onClose: () => void }) {
   const [kind, setKind] = useState<ToolLaunchKind>("claude");
   const [sessionName, setSessionName] = useState("");
   const [cwd, setCwd] = useState("/");

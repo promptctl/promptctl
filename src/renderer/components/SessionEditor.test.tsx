@@ -1,6 +1,12 @@
 import "@testing-library/jest-dom/vitest";
 import { describe, it, expect, beforeEach, vi } from "vitest";
-import { render, screen, cleanup, waitFor, fireEvent } from "@testing-library/react";
+import {
+  render,
+  screen,
+  cleanup,
+  waitFor,
+  fireEvent,
+} from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import { SessionEditor } from "./SessionEditor";
 import { useSessionStore } from "../store/sessions";
@@ -188,14 +194,18 @@ describe("Undo button", () => {
   it("is disabled when versionHead is 1 (already at first version)", async () => {
     setStoreLoaded({ versions: makeVersions(1), versionHead: 1 });
     render(<SessionEditor />);
-    expect((screen.getByTestId("undo-button") as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByTestId("undo-button") as HTMLButtonElement).disabled,
+    ).toBe(true);
     cleanup();
   });
 
   it("is enabled when versionHead > 1", async () => {
     setStoreLoaded({ versions: makeVersions(3), versionHead: 3 });
     render(<SessionEditor />);
-    expect((screen.getByTestId("undo-button") as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByTestId("undo-button") as HTMLButtonElement).disabled,
+    ).toBe(false);
     cleanup();
   });
 
@@ -227,14 +237,18 @@ describe("Redo button", () => {
   it("is disabled when versionHead is at tip", async () => {
     setStoreLoaded({ versions: makeVersions(3), versionHead: 3 });
     render(<SessionEditor />);
-    expect((screen.getByTestId("redo-button") as HTMLButtonElement).disabled).toBe(true);
+    expect(
+      (screen.getByTestId("redo-button") as HTMLButtonElement).disabled,
+    ).toBe(true);
     cleanup();
   });
 
   it("is enabled when versionHead < tip", async () => {
     setStoreLoaded({ versions: makeVersions(3), versionHead: 1 });
     render(<SessionEditor />);
-    expect((screen.getByTestId("redo-button") as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByTestId("redo-button") as HTMLButtonElement).disabled,
+    ).toBe(false);
     cleanup();
   });
 
@@ -275,7 +289,9 @@ describe("History button", () => {
   it("is always enabled (even with no versions)", async () => {
     setStoreLoaded({ versions: [], versionHead: 0 });
     render(<SessionEditor />);
-    expect((screen.getByTestId("history-button") as HTMLButtonElement).disabled).toBe(false);
+    expect(
+      (screen.getByTestId("history-button") as HTMLButtonElement).disabled,
+    ).toBe(false);
     cleanup();
   });
 
@@ -740,7 +756,9 @@ describe("Topic Focus — segment-only vs focus-and-mark", () => {
   });
 
   it("clicking Topic Focus runs segmentation with an empty focus query and renders segment chips without marking anything", async () => {
-    setStoreLoaded({ messages: [makeMessage(0), makeMessage(1), makeMessage(2)] });
+    setStoreLoaded({
+      messages: [makeMessage(0), makeMessage(1), makeMessage(2)],
+    });
     const segmentCalls: unknown[][] = [];
 
     setInvokeHandlers(api, {
@@ -792,7 +810,9 @@ describe("Topic Focus — segment-only vs focus-and-mark", () => {
   });
 
   it("submitting a focus query runs segmentation with the query and auto-marks off-topic messages", async () => {
-    setStoreLoaded({ messages: [makeMessage(0), makeMessage(1), makeMessage(2)] });
+    setStoreLoaded({
+      messages: [makeMessage(0), makeMessage(1), makeMessage(2)],
+    });
     const segmentCalls: unknown[][] = [];
 
     setInvokeHandlers(api, {
@@ -943,7 +963,10 @@ describe("Toolbar restructure — Save button always visible", () => {
     function nearestFlexRow(el: HTMLElement): HTMLElement | null {
       let cur: HTMLElement | null = el.parentElement;
       while (cur) {
-        if (cur.className.includes("flex") && !cur.className.includes("flex-col")) {
+        if (
+          cur.className.includes("flex") &&
+          !cur.className.includes("flex-col")
+        ) {
           return cur;
         }
         cur = cur.parentElement;

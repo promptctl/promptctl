@@ -14,19 +14,13 @@ import type { TmuxOutputRouter } from "../tmux/output-router";
 export function registerTmuxOutputHandlers(
   router: TmuxOutputRouter,
 ): () => void {
-  ipcMain.handle(
-    "tmux:output:subscribe",
-    (event, paneId: string) => {
-      router.subscribe(paneId as PaneId, event.sender);
-    },
-  );
+  ipcMain.handle("tmux:output:subscribe", (event, paneId: string) => {
+    router.subscribe(paneId as PaneId, event.sender);
+  });
 
-  ipcMain.handle(
-    "tmux:output:unsubscribe",
-    (event, paneId: string) => {
-      router.unsubscribe(paneId as PaneId, event.sender);
-    },
-  );
+  ipcMain.handle("tmux:output:unsubscribe", (event, paneId: string) => {
+    router.unsubscribe(paneId as PaneId, event.sender);
+  });
 
   return () => {
     ipcMain.removeHandler("tmux:output:subscribe");

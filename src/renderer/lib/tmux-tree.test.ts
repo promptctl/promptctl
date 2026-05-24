@@ -68,12 +68,21 @@ describe("filterPanes", () => {
 
 describe("flatLabel", () => {
   it("omits pane index when single pane in window", () => {
-    const pane = makePane({ sessionName: "dev", windowIndex: 0, windowName: "code" });
+    const pane = makePane({
+      sessionName: "dev",
+      windowIndex: 0,
+      windowName: "code",
+    });
     expect(flatLabel(pane, 1)).toBe("dev > 0:code");
   });
 
   it("includes pane index when multiple panes", () => {
-    const pane = makePane({ sessionName: "dev", windowIndex: 0, windowName: "code", paneIndex: 1 });
+    const pane = makePane({
+      sessionName: "dev",
+      windowIndex: 0,
+      windowName: "code",
+      paneIndex: 1,
+    });
     expect(flatLabel(pane, 2)).toBe("dev > 0:code > pane 1");
   });
 });

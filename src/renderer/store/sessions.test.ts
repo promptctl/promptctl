@@ -1,6 +1,10 @@
 import { describe, it, expect, beforeEach } from "vitest";
 import { useSessionStore } from "./sessions";
-import { installElectronMock, setInvokeHandlers, type MockElectronAPI } from "../../test/electron-mock";
+import {
+  installElectronMock,
+  setInvokeHandlers,
+  type MockElectronAPI,
+} from "../../test/electron-mock";
 import type {
   MessageSummary,
   VersionMeta,
@@ -34,7 +38,11 @@ function resetStore() {
   });
 }
 
-function makeMessage(index: number, type = "user", preview = ""): MessageSummary {
+function makeMessage(
+  index: number,
+  type = "user",
+  preview = "",
+): MessageSummary {
   return {
     index,
     id: `msg-${index}`,
@@ -342,8 +350,8 @@ describe("selectSessionById", () => {
 
     expect(ok).toBe(true);
     // session:find was never invoked
-    expect(
-      api.invoke.mock.calls.some((c) => c[0] === "session:find"),
-    ).toBe(false);
+    expect(api.invoke.mock.calls.some((c) => c[0] === "session:find")).toBe(
+      false,
+    );
   });
 });

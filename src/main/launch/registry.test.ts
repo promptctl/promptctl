@@ -3,7 +3,11 @@
 // injected fakes. Real-disk round-trips live in registry.integration.test.ts.
 
 import { describe, expect, it } from "vitest";
-import { LaunchRegistry, deterministicIdSequence, launchEnvBlock } from "./registry";
+import {
+  LaunchRegistry,
+  deterministicIdSequence,
+  launchEnvBlock,
+} from "./registry";
 import type {
   Launch,
   LaunchEvent,
@@ -39,7 +43,11 @@ function makeCreateInputs() {
     toolKind: "claude",
   });
   return {
-    spec: { toolKind: "claude" as const, cwd: "/repo/foo", sessionName: "feature-x" },
+    spec: {
+      toolKind: "claude" as const,
+      cwd: "/repo/foo",
+      sessionName: "feature-x",
+    },
     paneId: PANE,
     sessionId: SESS,
     windowId: WIN,
@@ -60,7 +68,9 @@ describe("LaunchRegistry.create", () => {
     expect(row.startedAt).toBe(1_700_000_000_000);
     expect(row.env.PROMPTCTL_LAUNCH_ID).toBe("launch-1");
     expect(row.env.ANTHROPIC_BASE_URL).toBe("http://127.0.0.1:53991");
-    expect(row.env.ANTHROPIC_CUSTOM_HEADERS).toBe("X-Promptctl-Launch: launch-1");
+    expect(row.env.ANTHROPIC_CUSTOM_HEADERS).toBe(
+      "X-Promptctl-Launch: launch-1",
+    );
     expect(row.env.PROMPTCTL_LAUNCH_TOOL).toBe("claude");
   });
 
@@ -113,12 +123,17 @@ describe("LaunchRegistry.attach", () => {
     const { reg, events } = makeRegistry();
     const pending = reg.create(makeCreateInputs());
     reg.markRunning(pending.launchId);
-    const next = reg.attach(pending.launchId, { pid: 1234, proxyClientId: "5678" });
+    const next = reg.attach(pending.launchId, {
+      pid: 1234,
+      proxyClientId: "5678",
+    });
     expect(next?.pid).toBe(1234);
     expect(next?.proxyClientId).toBe("5678");
     expect(next?.sessionFilePath).toBeNull();
     // Second attach: another late-binding field.
-    const next2 = reg.attach(pending.launchId, { sessionFilePath: "/x/session.jsonl" });
+    const next2 = reg.attach(pending.launchId, {
+      sessionFilePath: "/x/session.jsonl",
+    });
     expect(next2?.pid).toBe(1234); // preserved
     expect(next2?.sessionFilePath).toBe("/x/session.jsonl");
     // Created + markRunning + 2 × attach = 4 events total.

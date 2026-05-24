@@ -11,8 +11,7 @@ export function registerProvider(adapter: ProviderAdapter): void {
 
 export function getProvider(id: ProviderKind): ProviderAdapter {
   const adapter = adapters.get(id);
-  if (!adapter)
-    throw new Error(`No adapter registered for provider: ${id}`);
+  if (!adapter) throw new Error(`No adapter registered for provider: ${id}`);
   return adapter;
 }
 

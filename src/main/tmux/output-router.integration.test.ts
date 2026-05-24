@@ -1,22 +1,28 @@
 // @vitest-environment node
 //
-// Integration tests for TmuxOutputRouter against a real tmux binary.
-// Run unconditionally with the default `npm test` — tmux is a hard project
-// requirement (README boundaries) and integration regressions must surface
-// in the same loop as unit regressions, not behind an opt-in env var.
-// Mirrors the isolation pattern from topology.integration.test.ts (unique
-// `-L <socket>` per test).
+// Integration tests for TmuxOutputRouter against a real tmux binary,
+// driven through the mesh-aware TmuxControlConnection. The router's
+// shape is unchanged by the mesh refactor — it consumes execute() +
+// setPaneAction() through the connection, which transparently routes
+// to any ready client in the mesh.
+//
+// Isolation: unique `-L <socket>` per test, prefix `promptctl-tmux-output-`.
 
 import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import { execSync } from "node:child_process";
-import { spawnTmux } from "tmux-control-mode-js";
+import { spawnTmux, type TmuxTransport } from "tmux-control-mode-js";
 import { TmuxControlConnection } from "./control";
-import { ensureSession } from "./session";
 import { TmuxOutputRouter } from "./output-router";
-import type { PaneId, TmuxOutputChunk, TmuxOutputStateEvent } from "../../shared/types";
+import { TmuxError, tmuxExec } from "./exec";
+import type {
+  PaneId,
+  SessionId,
+  TmuxOutputChunk,
+  TmuxOutputStateEvent,
+} from "../../shared/types";
 import type { WebContentsLike } from "./output-router";
 
-const OWNED = "promptctl-test-output";
+const SEED_SESSION = "output-seed";
 
 function uniqueSocket(): string {
   return `promptctl-tmux-output-${Date.now()}-${Math.random()
@@ -54,19 +60,103 @@ async function waitFor(
   }
 }
 
+function meshDepsFor(socket: string) {
+  const transportFactory = (sessionId: SessionId): TmuxTransport =>
+    spawnTmux(["attach-session", "-t", sessionId], { socketPath: socket });
+  const enumerateSessions = async (): Promise<SessionId[]> => {
+    try {
+      const stdout = await tmuxExec([
+        "-L",
+        socket,
+        "list-sessions",
+        "-F",
+        "#{session_id}",
+      ]);
+      return stdout
+        .split("\n")
+        .map((line) => line.trim())
+        .filter((line) => line.length > 0)
+        .map((line) => line as SessionId);
+    } catch (err) {
+      if (
+        err instanceof TmuxError &&
+        /no server running|error connecting to/.test(err.stderr)
+      ) {
+        return [];
+      }
+      throw err;
+    }
+  };
+  return { transportFactory, enumerateSessions };
+}
+
+function startMeshAndRouter(socket: string): {
+  conn: TmuxControlConnection;
+  router: TmuxOutputRouter;
+} {
+  const conn = TmuxControlConnection.start({
+    socketPath: socket,
+    ...meshDepsFor(socket),
+    reconcileIntervalMs: 200,
+  });
+  const router = new TmuxOutputRouter({
+    onEvent: (event, handler) => conn.on(event, handler),
+    onConnectionState: (listener) => conn.onConnectionState(listener),
+    execute: (cmd) => conn.execute(cmd),
+    setPaneAction: (paneId, action) => conn.setPaneAction(paneId, action),
+  });
+  return { conn, router };
+}
+
+interface FakeWc {
+  sent: { channel: string; payload: unknown }[];
+  destroyed: boolean;
+  destroyListeners: Set<() => void>;
+  send(channel: string, payload: unknown): void;
+  once(event: string, listener: () => void): void;
+  removeListener(event: string, listener: () => void): void;
+  isDestroyed(): boolean;
+}
+
+function makeFakeWc(
+  chunks: TmuxOutputChunk[],
+  states: TmuxOutputStateEvent[],
+): FakeWc {
+  return {
+    sent: [],
+    destroyed: false,
+    destroyListeners: new Set(),
+    send(channel: string, payload: unknown) {
+      this.sent.push({ channel, payload });
+      if (channel === "tmux:output:chunk")
+        chunks.push(payload as TmuxOutputChunk);
+      if (channel === "tmux:output:state")
+        states.push(payload as TmuxOutputStateEvent);
+    },
+    once(_event: string, listener: () => void) {
+      this.destroyListeners.add(listener);
+    },
+    removeListener(_event: string, listener: () => void) {
+      this.destroyListeners.delete(listener);
+    },
+    isDestroyed() {
+      return this.destroyed;
+    },
+  };
+}
+
 afterEach(() => {
   TmuxControlConnection.__resetForTesting();
 });
 
-describe("TmuxOutputRouter (real tmux)", () => {
+describe("TmuxOutputRouter (real tmux mesh)", () => {
   let socket: string;
 
   beforeEach(() => {
     socket = uniqueSocket();
-
-    // Outer test timeout sits above the largest inner waitFor budget so a
-    // failure surfaces the descriptive "waitFor(<label>) timed out" error
-    // instead of vitest's generic "Test timed out in 5000ms".
+    execSync(tmuxCmd(socket, `new-session -d -s ${SEED_SESSION}`), {
+      stdio: "ignore",
+    });
     vi.setConfig({ testTimeout: 10000 });
   });
 
@@ -75,68 +165,29 @@ describe("TmuxOutputRouter (real tmux)", () => {
   });
 
   it("receives output bytes from a pane running a command", async () => {
-    const conn = TmuxControlConnection.start({
-      transportFactory: () =>
-        spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-      sessionName: OWNED,
-      bootstrap: () => ensureSession(OWNED, socket),
-      reconnectDelayMs: 100,
-    });
-
-    const router = new TmuxOutputRouter({
-      onEvent: (event, handler) => conn.on(event, handler),
-      onConnectionState: (listener) => conn.onConnectionState(listener),
-      getClient: () => conn.client,
-    });
+    const { conn, router } = startMeshAndRouter(socket);
 
     const chunks: TmuxOutputChunk[] = [];
     const states: TmuxOutputStateEvent[] = [];
-
-    // Minimal fake WebContents for the integration test.
-    const fakeWc = {
-      sent: [] as { channel: string; payload: unknown }[],
-      destroyed: false,
-      destroyListeners: new Set<() => void>(),
-      send(channel: string, payload: unknown) {
-        this.sent.push({ channel, payload });
-        if (channel === "tmux:output:chunk") {
-          chunks.push(payload as TmuxOutputChunk);
-        }
-        if (channel === "tmux:output:state") {
-          states.push(payload as TmuxOutputStateEvent);
-        }
-      },
-      once(_event: string, listener: () => void) {
-        this.destroyListeners.add(listener);
-      },
-      removeListener(_event: string, listener: () => void) {
-        this.destroyListeners.delete(listener);
-      },
-      isDestroyed() {
-        return this.destroyed;
-      },
-    };
+    const fakeWc = makeFakeWc(chunks, states);
 
     await conn.ready;
     await delay(100);
 
-    // Get the pane ID from the running session.
     const listOutput = execSync(
-      tmuxCmd(socket, `list-panes -t ${OWNED} -F "#{pane_id}"`),
+      tmuxCmd(socket, `list-panes -t ${SEED_SESSION} -F "#{pane_id}"`),
       { encoding: "utf-8" },
     );
     const paneId = listOutput.trim().split("\n")[0] as PaneId;
 
     router.subscribe(paneId, fakeWc as unknown as WebContentsLike);
 
-    // Wait for scrollback capture.
     await waitFor(
       () => chunks.length >= 1 || states.length >= 1,
       2000,
       "scrollback or streaming state",
     );
 
-    // Run a command that produces output.
     execSync(
       tmuxCmd(
         socket,
@@ -144,67 +195,95 @@ describe("TmuxOutputRouter (real tmux)", () => {
       ),
     );
 
-    // Wait for the output to arrive.
     await waitFor(
       () => chunks.some((c) => c.data.includes("HELLO_ROUTER")),
       3000,
       "HELLO_ROUTER in output",
     );
 
-    // At least the command output should have arrived.
     const allText = chunks.map((c) => c.data).join("");
     expect(allText).toContain("HELLO_ROUTER");
     expect(allText).toContain("LINE_TWO");
-
-    // Streaming state should have been sent.
     expect(states.some((s) => s.state === "streaming")).toBe(true);
 
     router.dispose();
     conn.close();
   });
 
-  it("stops delivering after unsubscribe", async () => {
-    const conn = TmuxControlConnection.start({
-      transportFactory: () =>
-        spawnTmux(["attach-session", "-t", OWNED], { socketPath: socket }),
-      sessionName: OWNED,
-      bootstrap: () => ensureSession(OWNED, socket),
-      reconnectDelayMs: 100,
+  it("delivers output from multiple sessions simultaneously through the mesh", async () => {
+    // [LAW:one-type-per-behavior] The router doesn't care which session
+    // a pane belongs to — every observed session is in the mesh and emits
+    // %output the same way. This test asserts the "Done when" criterion
+    // from ticket 77e.3.7: %output flows from both panes simultaneously
+    // without any session being structurally privileged.
+    execSync(tmuxCmd(socket, "new-session -d -s other-session"), {
+      stdio: "ignore",
     });
 
-    const router = new TmuxOutputRouter({
-      onEvent: (event, handler) => conn.on(event, handler),
-      onConnectionState: (listener) => conn.onConnectionState(listener),
-      getClient: () => conn.client,
-    });
+    const { conn, router } = startMeshAndRouter(socket);
 
     const chunks: TmuxOutputChunk[] = [];
-    const fakeWc = {
-      sent: [] as { channel: string; payload: unknown }[],
-      destroyed: false,
-      destroyListeners: new Set<() => void>(),
-      send(channel: string, payload: unknown) {
-        this.sent.push({ channel, payload });
-        if (channel === "tmux:output:chunk") {
-          chunks.push(payload as TmuxOutputChunk);
-        }
-      },
-      once(_event: string, listener: () => void) {
-        this.destroyListeners.add(listener);
-      },
-      removeListener(_event: string, listener: () => void) {
-        this.destroyListeners.delete(listener);
-      },
-      isDestroyed() {
-        return this.destroyed;
-      },
-    };
+    const states: TmuxOutputStateEvent[] = [];
+    const fakeWc = makeFakeWc(chunks, states);
+
+    await conn.ready;
+    await delay(100);
+
+    const seedPaneId = execSync(
+      tmuxCmd(socket, `list-panes -t ${SEED_SESSION} -F "#{pane_id}"`),
+      { encoding: "utf-8" },
+    )
+      .trim()
+      .split("\n")[0] as PaneId;
+    const otherPaneId = execSync(
+      tmuxCmd(socket, `list-panes -t other-session -F "#{pane_id}"`),
+      { encoding: "utf-8" },
+    )
+      .trim()
+      .split("\n")[0] as PaneId;
+
+    router.subscribe(seedPaneId, fakeWc as unknown as WebContentsLike);
+    router.subscribe(otherPaneId, fakeWc as unknown as WebContentsLike);
+    await delay(200);
+    chunks.length = 0;
+
+    execSync(
+      tmuxCmd(
+        socket,
+        `send-keys -t ${seedPaneId} 'printf "FROM_SEED\\n"' Enter`,
+      ),
+    );
+    execSync(
+      tmuxCmd(
+        socket,
+        `send-keys -t ${otherPaneId} 'printf "FROM_OTHER\\n"' Enter`,
+      ),
+    );
+
+    await waitFor(
+      () =>
+        chunks.some((c) => c.data.includes("FROM_SEED")) &&
+        chunks.some((c) => c.data.includes("FROM_OTHER")),
+      3000,
+      "output from both sessions",
+    );
+
+    router.dispose();
+    conn.close();
+  });
+
+  it("stops delivering after unsubscribe", async () => {
+    const { conn, router } = startMeshAndRouter(socket);
+
+    const chunks: TmuxOutputChunk[] = [];
+    const states: TmuxOutputStateEvent[] = [];
+    const fakeWc = makeFakeWc(chunks, states);
 
     await conn.ready;
     await delay(100);
 
     const listOutput = execSync(
-      tmuxCmd(socket, `list-panes -t ${OWNED} -F "#{pane_id}"`),
+      tmuxCmd(socket, `list-panes -t ${SEED_SESSION} -F "#{pane_id}"`),
       { encoding: "utf-8" },
     );
     const paneId = listOutput.trim().split("\n")[0] as PaneId;
@@ -220,7 +299,6 @@ describe("TmuxOutputRouter (real tmux)", () => {
     );
     await delay(1000);
 
-    // No new chunks should have arrived.
     expect(chunks.length).toBe(chunkCountBefore);
 
     router.dispose();

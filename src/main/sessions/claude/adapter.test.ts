@@ -44,13 +44,16 @@ function assistantText(text: string, opts: Record<string, unknown> = {}) {
       role: "assistant",
       content: [{ type: "text", text }],
       model: "claude-sonnet-4-20250514",
-      ...(opts.message as Record<string, unknown> ?? {}),
+      ...((opts.message as Record<string, unknown>) ?? {}),
     },
     ...opts,
   };
 }
 
-function assistantThinking(thinking: string, opts: Record<string, unknown> = {}) {
+function assistantThinking(
+  thinking: string,
+  opts: Record<string, unknown> = {},
+) {
   return {
     type: "assistant",
     uuid: opts.uuid ?? crypto.randomUUID(),
@@ -87,7 +90,9 @@ function assistantToolUse(name: string, input: unknown) {
     timestamp: "2025-01-01T00:01:00Z",
     message: {
       role: "assistant",
-      content: [{ type: "tool_use", name, input, id: `tool_${crypto.randomUUID()}` }],
+      content: [
+        { type: "tool_use", name, input, id: `tool_${crypto.randomUUID()}` },
+      ],
       model: "claude-sonnet-4-20250514",
     },
   };
@@ -124,7 +129,9 @@ function systemMessage(text: string) {
 
 let tmpDir: string;
 
-async function writeSession(...lines: Record<string, unknown>[]): Promise<string> {
+async function writeSession(
+  ...lines: Record<string, unknown>[]
+): Promise<string> {
   const filePath = path.join(tmpDir, "test-session.jsonl");
   await writeFile(filePath, jsonl(...lines), "utf-8");
   return filePath;
@@ -239,9 +246,7 @@ describe("flags", () => {
   });
 
   it("flags tool calls as tool-output", async () => {
-    const fp = await writeSession(
-      assistantToolUse("Bash", { command: "ls" }),
-    );
+    const fp = await writeSession(assistantToolUse("Bash", { command: "ls" }));
     const msgs = await claudeAdapter.loadSession(fp);
 
     expect(msgs[0].flags).toContain("tool-output");
@@ -532,10 +537,7 @@ describe("compressToolResults — truncate path", () => {
     const originalTokens = msgs[targetIdx].tokens;
     expect(originalTokens).toBeGreaterThan(1000);
 
-    const result = await compress(
-      [targetIdx],
-      TRUNCATE_ONLY,
-    );
+    const result = await compress([targetIdx], TRUNCATE_ONLY);
 
     expect(result.updated).toHaveLength(1);
     expect(result.updated[0].index).toBe(targetIdx);
@@ -595,10 +597,7 @@ describe("compressToolResults — truncate path", () => {
     await claudeAdapter.loadSession(fp);
 
     // Try to clear all 5; expect tr3-tr5 (last 3) to be protected
-    const result = await compress(
-      [0, 1, 2, 3, 4],
-      TRUNCATE_ONLY,
-    );
+    const result = await compress([0, 1, 2, 3, 4], TRUNCATE_ONLY);
     // 2 should be modified (tr1, tr2); 3 should be protected (tr3, tr4, tr5)
     expect(result.updated).toHaveLength(2);
     expect(result.skippedProtected).toBe(3);
@@ -631,10 +630,7 @@ describe("compressToolResults — truncate path", () => {
 describe("compressToolResults — summarize path", () => {
   it("replaces large tool results with LLM summary", async () => {
     // Mock the LLM client
-    const mockChat = vi.spyOn(
-      await import("../../llm/client"),
-      "chatComplete",
-    );
+    const mockChat = vi.spyOn(await import("../../llm/client"), "chatComplete");
     mockChat.mockResolvedValue("3 test files found, all passing.");
 
     const largeOutput = "test result output\n".repeat(2000);
@@ -669,10 +665,7 @@ describe("compressToolResults — summarize path", () => {
 
 describe("compressToolResults — threshold dispatch", () => {
   it("summarizes large items, truncates medium items, skips small ones in one call", async () => {
-    const mockChat = vi.spyOn(
-      await import("../../llm/client"),
-      "chatComplete",
-    );
+    const mockChat = vi.spyOn(await import("../../llm/client"), "chatComplete");
     mockChat.mockResolvedValue("summarized content");
 
     // Build sizes with headroom so the GPT-4o tokenizer's BPE merges don't
@@ -694,14 +687,11 @@ describe("compressToolResults — threshold dispatch", () => {
     );
     await claudeAdapter.loadSession(fp);
 
-    const result = await compress(
-      [0, 1, 2],
-      {
-        summarizeThreshold: 3000,
-        truncateThreshold: 200,
-        keepLastN: 3,
-      },
-    );
+    const result = await compress([0, 1, 2], {
+      summarizeThreshold: 3000,
+      truncateThreshold: 200,
+      keepLastN: 3,
+    });
 
     expect(result.summarizedCount).toBe(1);
     expect(result.truncatedCount).toBe(1);
@@ -768,9 +758,9 @@ describe("compressToolResults — threshold dispatch", () => {
       },
     };
 
-    await expect(
-      compress([0, 1, 2], TRUNCATE_ONLY, handle),
-    ).rejects.toThrow("cancelled");
+    await expect(compress([0, 1, 2], TRUNCATE_ONLY, handle)).rejects.toThrow(
+      "cancelled",
+    );
     // At least one item was processed; the loop exited before all three.
     expect(processed).toBeGreaterThanOrEqual(1);
     expect(processed).toBeLessThan(3);
@@ -937,42 +927,36 @@ describe("diffContent", () => {
 
   it("modified message produces a modified entry with before/after", () => {
     // Same UUID, different content
-    const before = jsonl(
-      userMessage("hello", { uuid: "u1" }),
-      {
-        type: "user",
-        uuid: "tr1",
-        timestamp: "2025-01-01T00:01:30Z",
-        message: {
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: "x",
-              content: "ORIGINAL_FULL_OUTPUT",
-            },
-          ],
-        },
+    const before = jsonl(userMessage("hello", { uuid: "u1" }), {
+      type: "user",
+      uuid: "tr1",
+      timestamp: "2025-01-01T00:01:30Z",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "x",
+            content: "ORIGINAL_FULL_OUTPUT",
+          },
+        ],
       },
-    );
-    const after = jsonl(
-      userMessage("hello", { uuid: "u1" }),
-      {
-        type: "user",
-        uuid: "tr1",
-        timestamp: "2025-01-01T00:01:30Z",
-        message: {
-          role: "user",
-          content: [
-            {
-              type: "tool_result",
-              tool_use_id: "x",
-              content: "TRUNCATED_OUTPUT",
-            },
-          ],
-        },
+    });
+    const after = jsonl(userMessage("hello", { uuid: "u1" }), {
+      type: "user",
+      uuid: "tr1",
+      timestamp: "2025-01-01T00:01:30Z",
+      message: {
+        role: "user",
+        content: [
+          {
+            type: "tool_result",
+            tool_use_id: "x",
+            content: "TRUNCATED_OUTPUT",
+          },
+        ],
       },
-    );
+    });
     const diff = claudeAdapter.diffContent(before, after);
 
     const modified = diff.find((d) => d.kind === "modified");

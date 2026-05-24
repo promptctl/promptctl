@@ -16,10 +16,7 @@ export function ValidationViolationsDialog({
   onForceSave: () => void;
   saving: boolean;
 }) {
-  const total = result.violations.reduce(
-    (n, v) => n + v.offenders.length,
-    0,
-  );
+  const total = result.violations.reduce((n, v) => n + v.offenders.length, 0);
 
   return (
     <div className="fixed inset-0 z-50 flex items-center justify-center bg-black/60">
@@ -29,9 +26,10 @@ export function ValidationViolationsDialog({
             Save would produce a structurally broken session
           </h2>
           <p className="text-sm text-neutral-400">
-            The Anthropic API will likely reject this session on resume.{" "}
-            {total} structural violation{total === 1 ? "" : "s"} across{" "}
-            {result.violations.length} rule{result.violations.length === 1 ? "" : "s"}.
+            The Anthropic API will likely reject this session on resume. {total}{" "}
+            structural violation{total === 1 ? "" : "s"} across{" "}
+            {result.violations.length} rule
+            {result.violations.length === 1 ? "" : "s"}.
           </p>
         </div>
 
@@ -42,7 +40,9 @@ export function ValidationViolationsDialog({
               className="rounded-lg border border-neutral-800 bg-neutral-950/50 p-3"
             >
               <div className="flex items-center justify-between">
-                <code className="text-xs text-neutral-400">{v.invariantId}</code>
+                <code className="text-xs text-neutral-400">
+                  {v.invariantId}
+                </code>
                 <span className="text-xs text-neutral-500">
                   {v.offenders.length} offender
                   {v.offenders.length === 1 ? "" : "s"}

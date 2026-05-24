@@ -19,7 +19,9 @@ export function launchesPath(): string {
   return LAUNCHES_FILE;
 }
 
-export async function loadLaunches(path: string = LAUNCHES_FILE): Promise<Launch[]> {
+export async function loadLaunches(
+  path: string = LAUNCHES_FILE,
+): Promise<Launch[]> {
   try {
     const content = await readFile(path, "utf-8");
     const parsed = JSON.parse(content);
@@ -69,7 +71,14 @@ export function validateLaunchShape(candidate: unknown): string | null {
     return "row is not an object";
   }
   const row = candidate as Record<string, unknown>;
-  for (const key of ["launchId", "toolKind", "paneId", "sessionId", "windowId", "cwd"]) {
+  for (const key of [
+    "launchId",
+    "toolKind",
+    "paneId",
+    "sessionId",
+    "windowId",
+    "cwd",
+  ]) {
     if (typeof row[key] !== "string") return `missing/non-string ${key}`;
   }
   if (typeof row.startedAt !== "number") return "missing/non-number startedAt";
@@ -81,10 +90,7 @@ export function validateLaunchShape(candidate: unknown): string | null {
     if (row.pid !== null && typeof row.pid !== "number") {
       return "running/exited pid must be number or null";
     }
-    if (
-      row.proxyClientId !== null &&
-      typeof row.proxyClientId !== "string"
-    ) {
+    if (row.proxyClientId !== null && typeof row.proxyClientId !== "string") {
       return "running/exited proxyClientId must be string or null";
     }
     if (
@@ -94,8 +100,10 @@ export function validateLaunchShape(candidate: unknown): string | null {
       return "running/exited sessionFilePath must be string or null";
     }
     if (status === "exited") {
-      if (typeof row.exitedAt !== "number") return "exited row missing exitedAt";
-      if (typeof row.exitReason !== "string") return "exited row missing exitReason";
+      if (typeof row.exitedAt !== "number")
+        return "exited row missing exitedAt";
+      if (typeof row.exitReason !== "string")
+        return "exited row missing exitReason";
     }
     return null;
   }

@@ -17,7 +17,8 @@ function statusText(state: TaskState): string {
   if (state.message) return state.message;
   if (state.status === "done") return "Done";
   if (state.status === "cancelled") return "Cancelled";
-  if (state.status === "error") return state.error ? `Error: ${state.error}` : "Error";
+  if (state.status === "error")
+    return state.error ? `Error: ${state.error}` : "Error";
   if (state.total > 0) return `${state.label} (${state.done}/${state.total})`;
   return state.label || "Working…";
 }
@@ -29,7 +30,11 @@ function barColor(status: TaskState["status"]): string {
   return "bg-violet-500";
 }
 
-export function TaskToast({ taskId, state, onClose }: Props): ReactElement | null {
+export function TaskToast({
+  taskId,
+  state,
+  onClose,
+}: Props): ReactElement | null {
   if (!taskId || !state) return null;
 
   const running = state.status === "running";

@@ -17,11 +17,16 @@ export const usePromptStore = create<PromptStore>((set) => ({
   setPrompts: (prompts) => set({ prompts }),
   select: (id) => set({ selectedId: id }),
   load: async () => {
-    const prompts = (await window.electronAPI.invoke("prompt:list")) as Prompt[];
+    const prompts = (await window.electronAPI.invoke(
+      "prompt:list",
+    )) as Prompt[];
     set({ prompts });
   },
   save: async (prompt) => {
-    const prompts = (await window.electronAPI.invoke("prompt:save", prompt)) as Prompt[];
+    const prompts = (await window.electronAPI.invoke(
+      "prompt:save",
+      prompt,
+    )) as Prompt[];
     set({ prompts });
   },
   remove: async (filename) => {

@@ -212,10 +212,7 @@ export class CommandEngine {
     for (const [id, command] of this.commands) {
       if (!command.enabled) continue;
       if (command.trigger.kind !== "matcher") continue;
-      if (
-        command.trigger.paneId !== null &&
-        command.trigger.paneId !== paneId
-      )
+      if (command.trigger.paneId !== null && command.trigger.paneId !== paneId)
         continue;
 
       const regex = this.compiled.get(id);

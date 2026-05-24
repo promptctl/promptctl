@@ -14,7 +14,10 @@ beforeEach(() => {
 describe("proxy store request projection", () => {
   it("folds a request event sequence into one complete RequestRecord", () => {
     const events = requestEvents("req-a", "client-a");
-    const records = events.reduce(foldRequests, new Map<string, RequestRecord>());
+    const records = events.reduce(
+      foldRequests,
+      new Map<string, RequestRecord>(),
+    );
     const record = records.get("req-a");
 
     expect(records.size).toBe(1);
@@ -50,14 +53,21 @@ describe("proxy store request projection", () => {
 
   it("updates clients and filters by selected client", () => {
     const store = useProxyStore.getState();
-    for (const event of [...requestEvents("req-a", "client-a"), ...requestEvents("req-b", "client-b")]) {
+    for (const event of [
+      ...requestEvents("req-a", "client-a"),
+      ...requestEvents("req-b", "client-b"),
+    ]) {
       store.appendEvent(event);
     }
     useProxyStore.getState().selectClient("client-a");
 
     const state = useProxyStore.getState();
     expect([...state.clients.keys()].sort()).toEqual(["client-a", "client-b"]);
-    expect([...state.requests.values()].filter((r) => r.clientId === state.selectedClientId)).toHaveLength(1);
+    expect(
+      [...state.requests.values()].filter(
+        (r) => r.clientId === state.selectedClientId,
+      ),
+    ).toHaveLength(1);
   });
 
   it("clears selectedRequestId when request trimming evicts the selected record", () => {
@@ -67,7 +77,9 @@ describe("proxy store request projection", () => {
 
     for (let i = 1; i <= 1000; i += 1) {
       const event = requestEvents(`req-${i}`, "client-a")[0];
-      useProxyStore.getState().appendEvent({ ...event, globalSeq: i + 1, recvNs: i + 1 });
+      useProxyStore
+        .getState()
+        .appendEvent({ ...event, globalSeq: i + 1, recvNs: i + 1 });
     }
 
     const state = useProxyStore.getState();

@@ -37,8 +37,7 @@ const STYLES: Record<string, StopReasonStyle> = {
 
 const IN_FLIGHT: StopReasonStyle = {
   label: "in flight",
-  className:
-    "bg-neutral-900 text-neutral-400 border-neutral-700 animate-pulse",
+  className: "bg-neutral-900 text-neutral-400 border-neutral-700 animate-pulse",
 };
 
 export function stopReasonStyle(stopReason: string | null): StopReasonStyle {

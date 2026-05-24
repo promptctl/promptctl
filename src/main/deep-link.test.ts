@@ -27,11 +27,7 @@ describe("parsePromptctlUrl", () => {
     ],
     ["missing sessionId", "promptctl://open?provider=claude", null],
     ["missing provider", "promptctl://open?sessionId=abc", null],
-    [
-      "wrong host",
-      "promptctl://elsewhere?provider=claude&sessionId=abc",
-      null,
-    ],
+    ["wrong host", "promptctl://elsewhere?provider=claude&sessionId=abc", null],
     ["wrong scheme", "http://open?provider=claude&sessionId=abc", null],
     ["garbage", "not-a-url", null],
     ["empty", "", null],

@@ -74,11 +74,7 @@ describe("ChainSparkline", () => {
   });
 });
 
-function record(
-  id: string,
-  stopReason: string,
-  ttfbNs: number,
-): RequestRecord {
+function record(id: string, stopReason: string, ttfbNs: number): RequestRecord {
   return {
     requestId: id,
     clientId: "c",

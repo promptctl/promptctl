@@ -1,6 +1,9 @@
 import { act, render, screen, waitFor } from "@testing-library/react";
 import { afterEach, beforeEach, describe, expect, it } from "vitest";
-import { installElectronMock, setInvokeHandlers } from "../../test/electron-mock";
+import {
+  installElectronMock,
+  setInvokeHandlers,
+} from "../../test/electron-mock";
 import type { TmuxSnapshot } from "../../shared/types";
 import type { TmuxControlState } from "../env";
 import { TmuxControlDebug } from "./TmuxControlDebug";
@@ -16,6 +19,7 @@ beforeEach(() => {
       status: "closed",
       reason: "no tmux server",
       reconnectAttempts: 0,
+      observedSessions: 0,
     }),
     "tmux:topology:get": (): TmuxSnapshot => EMPTY_TOPOLOGY,
   });
@@ -46,6 +50,7 @@ describe("TmuxControlDebug", () => {
       "tmux:control-state:get": (): TmuxControlState => ({
         status: "connecting",
         reconnectAttempts: 0,
+        observedSessions: 0,
       }),
       "tmux:topology:get": (): TmuxSnapshot => EMPTY_TOPOLOGY,
     });
@@ -62,6 +67,7 @@ describe("TmuxControlDebug", () => {
       api.emit("tmux:control-state", {
         status: "ready",
         reconnectAttempts: 0,
+        observedSessions: 0,
       } satisfies TmuxControlState);
     });
 
@@ -73,6 +79,7 @@ describe("TmuxControlDebug", () => {
         status: "closed",
         reason: "transport closed",
         reconnectAttempts: 3,
+        observedSessions: 0,
       } satisfies TmuxControlState);
     });
 
@@ -91,6 +98,7 @@ describe("TmuxControlDebug", () => {
       "tmux:control-state:get": (): TmuxControlState => ({
         status: "ready",
         reconnectAttempts: 0,
+        observedSessions: 0,
       }),
       "tmux:topology:get": (): TmuxSnapshot => EMPTY_TOPOLOGY,
     });
