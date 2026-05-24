@@ -190,19 +190,32 @@ export function buildTimeline(chain: readonly RequestRecord[]): TimelineEntry[] 
       });
     }
 
+    // [LAW:single-enforcer] stop_reason fallback matches the rule
+    // ChainStopReasonStrip uses elsewhere — a `complete` state with no
+    // explicit stop_reason renders as "end_turn", not as the animated
+    // in-flight chip. The two surfaces would otherwise drift.
+    //
+    // durationNs uses `endedNs ?? completedNs` to match
+    // computeLatency() in latency.ts — errored requests populate
+    // endedNs but not completedNs, and the boundary should still show
+    // their duration honestly. We don't import computeLatency directly
+    // because buildTimeline is a pure projection (no nowNs / no
+    // useLiveTickNs); the snapshot ttfb/duration is what the boundary
+    // renders, and in-flight requests render null (the UI hides the
+    // slot, same as before).
+    const endNs = record.endedNs ?? record.completedNs;
     entries.push({
       kind: "request_boundary",
       requestId: record.requestId,
-      stopReason: response?.stop_reason ?? null,
+      stopReason:
+        response?.stop_reason ??
+        (record.state === "complete" ? "end_turn" : null),
       usage: response?.usage ?? null,
       ttfbNs:
         record.firstByteNs !== null
           ? record.firstByteNs - record.startedNs
           : null,
-      durationNs:
-        record.completedNs !== null
-          ? record.completedNs - record.startedNs
-          : null,
+      durationNs: endNs !== null ? endNs - record.startedNs : null,
     });
   }
 
@@ -323,27 +336,28 @@ export function contentHash(value: unknown): string {
 }
 
 // FNV-1a 64-bit. Synchronous, deterministic, no external dependency.
-// Adequate collision resistance for the conversation/prompt/tools content
-// we'll feed it — far below the birthday-bound risk for any realistic
-// session size.
+// Adequate collision resistance for the conversation/prompt/tools
+// content we'll feed it — far below the birthday-bound risk for any
+// realistic session size.
+//
+// Implemented with BigInt rather than split 32-bit limbs. The earlier
+// limb-based version had a subtle prime-multiplication bug (double-
+// counting the `<< 8` term). BigInt makes the math literally the
+// algorithm. The 16-char hex result is canonical FNV-1a output.
+//
+// Reference test vectors (pinned in `fnv1a64Hex matches canonical
+// FNV-1a-64 test vectors` in conversation.test.ts):
+//   ""       → cbf29ce484222325
+//   "a"      → af63dc4c8601ec8c
+//   "foobar" → 85944171f73967e8
 function fnv1a64Hex(str: string): string {
-  // 64-bit constants, split into high/low 32-bit halves so we don't lean
-  // on BigInt for hot-path hashing.
-  let hi = 0xcbf29ce4; // offset basis high
-  let lo = 0x84222325; // offset basis low
+  const OFFSET = 0xcbf29ce484222325n;
+  const PRIME = 0x100000001b3n;
+  const MASK = 0xffffffffffffffffn;
+  let hash = OFFSET;
   for (let i = 0; i < str.length; i += 1) {
-    const c = str.charCodeAt(i);
-    lo = (lo ^ c) >>> 0;
-    // multiply by FNV prime 0x100000001b3 = 2^40 + 2^8 + 0xb3
-    const lo2 = Math.imul(lo, 0x1b3);
-    const lo1 = Math.imul(hi, 0x1b3);
-    const lo3 = (lo << 8) >>> 0; // lo * 2^8
-    const hi3 = (hi << 8) | (lo >>> 24);
-    const hi4 = lo & 0xff; // lo * 2^40 -> contributes to hi side
-    const tmpLo = (lo2 + lo3) >>> 0;
-    const carryFromLo = tmpLo < lo2 ? 1 : 0;
-    hi = (lo1 + hi3 + hi4 + carryFromLo) >>> 0;
-    lo = tmpLo;
+    hash = (hash ^ BigInt(str.charCodeAt(i))) & MASK;
+    hash = (hash * PRIME) & MASK;
   }
-  return hi.toString(16).padStart(8, "0") + lo.toString(16).padStart(8, "0");
+  return hash.toString(16).padStart(16, "0");
 }
