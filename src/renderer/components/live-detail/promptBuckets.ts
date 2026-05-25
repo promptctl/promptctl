@@ -100,27 +100,53 @@ function toBucket(acc: BucketAccumulator): PromptBucket {
 }
 
 // Returns a short, human-readable preview of a system prompt for
-// the bucket card. Works on both string and array shapes.
+// the bucket card. Works on both string and array shapes. Trims
+// surrounding whitespace because the preview is a tidy at-a-glance
+// summary, not a fidelity reproduction.
 export function systemPreview(system: unknown, maxChars = 160): string {
-  const text = systemToText(system);
+  const text = systemToText(system, { trim: true });
   if (text.length <= maxChars) return text;
   return text.slice(0, maxChars).trimEnd() + "…";
 }
 
-function systemToText(system: unknown): string {
-  if (typeof system === "string") return system.trim();
+// Returns a best-effort plain-text rendering of the system prompt.
+// Preserves intra-block and surrounding whitespace (in contrast to
+// systemPreview, which trims for tidiness). For array-form `system`,
+// this concatenates the text fields of each text-typed block with
+// "\n" separators — non-text blocks are dropped, and the synthetic
+// "\n" separator is not present in the captured JSON. The expanded
+// card uses this view so the user sees the prompt content with
+// significant whitespace intact; for full structural fidelity, the
+// Request tab on the detail pane shows the raw request body.
+export function fullPromptText(system: unknown): string {
+  return systemToText(system, { trim: false });
+}
+
+function systemToText(
+  system: unknown,
+  { trim }: { trim: boolean },
+): string {
+  if (typeof system === "string") return trim ? system.trim() : system;
   if (!Array.isArray(system)) return "";
   const parts: string[] = [];
   for (const block of system) {
+    // [LAW:types-are-the-program] Match Anthropic's documented
+    // system-block shape literally: { type: "text", text: string }.
+    // Permissively accepting any object-with-a-text-field would
+    // surface text from future non-text block shapes the renderer
+    // hasn't accounted for.
     if (
       block !== null &&
       typeof block === "object" &&
+      (block as { type?: unknown }).type === "text" &&
       typeof (block as { text?: unknown }).text === "string"
     ) {
-      parts.push(((block as { text: string }).text || "").trim());
+      const text = (block as { text: string }).text;
+      parts.push(trim ? text.trim() : text);
     }
   }
-  return parts.join("\n").trim();
+  const joined = parts.join("\n");
+  return trim ? joined.trim() : joined;
 }
 
 // Returns the tool names from a tools array (best-effort). Used by

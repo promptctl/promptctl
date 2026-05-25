@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bucketBySystemPrompt,
+  fullPromptText,
   systemPreview,
   toolNames,
 } from "./promptBuckets";
@@ -137,6 +138,53 @@ describe("systemPreview", () => {
     const preview = systemPreview(long, 50);
     expect(preview.length).toBe(51); // 50 chars + ellipsis
     expect(preview.endsWith("…")).toBe(true);
+  });
+});
+
+describe("fullPromptText", () => {
+  it("returns the full string without truncation", () => {
+    const long = "x".repeat(2000);
+    expect(fullPromptText(long).length).toBe(2000);
+    expect(fullPromptText(long).endsWith("…")).toBe(false);
+  });
+
+  it("joins array-form blocks without truncation", () => {
+    expect(
+      fullPromptText([
+        { type: "text", text: "A" },
+        { type: "text", text: "B" },
+      ]),
+    ).toBe("A\nB");
+  });
+
+  it("returns an empty string for missing system", () => {
+    expect(fullPromptText(null)).toBe("");
+    expect(fullPromptText(undefined)).toBe("");
+  });
+
+  it("preserves literal whitespace — does not trim", () => {
+    // Whitespace around the prompt or inside blocks can be
+    // semantically meaningful when inspecting what was actually sent.
+    expect(fullPromptText("  hello  ")).toBe("  hello  ");
+    expect(
+      fullPromptText([
+        { type: "text", text: "  A  " },
+        { type: "text", text: " B\n" },
+      ]),
+    ).toBe("  A  \n B\n");
+  });
+
+  it("drops blocks whose type is not 'text', even if they have a text field", () => {
+    // Anthropic's documented system-block shape is { type: "text",
+    // text: string }. A future non-text block with a stray text
+    // field should not appear in the rendered prompt.
+    expect(
+      fullPromptText([
+        { type: "text", text: "REAL" },
+        { type: "image", text: "GHOST" },
+        { type: "cache_control", text: "MARKER" },
+      ]),
+    ).toBe("REAL");
   });
 });
 
