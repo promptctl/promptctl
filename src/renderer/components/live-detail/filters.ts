@@ -111,20 +111,32 @@ export function passesFilters(
   record: RequestRecord,
   filters: RequestFilters,
 ): boolean {
+  // [LAW:dataflow-not-control-flow] Every call site invokes the same
+  // `matches` shape; the *data* (Set size) decides whether the
+  // extractor runs. Lazy invocation matters because `sizeBucketOf`
+  // pays a JSON.stringify per record — when the sizeBuckets filter
+  // is empty (the common case), we skip that cost without changing
+  // the code path.
   return (
-    matches(filters.models, EXTRACTORS.models(record)) &&
-    matches(filters.statuses, EXTRACTORS.statuses(record)) &&
-    matches(filters.toolUse, EXTRACTORS.toolUse(record)) &&
-    matches(filters.errors, EXTRACTORS.errors(record)) &&
-    matches(filters.sizeBuckets, EXTRACTORS.sizeBuckets(record))
+    matches(filters.models, record, EXTRACTORS.models) &&
+    matches(filters.statuses, record, EXTRACTORS.statuses) &&
+    matches(filters.toolUse, record, EXTRACTORS.toolUse) &&
+    matches(filters.errors, record, EXTRACTORS.errors) &&
+    matches(filters.sizeBuckets, record, EXTRACTORS.sizeBuckets)
   );
 }
 
-function matches<V>(selected: Set<V>, value: V | null): boolean {
-  // Empty set is the no-op identity for AND composition. A record
-  // whose extractor returned null can never match a non-empty set —
-  // there is no value to ask the set about.
+function matches<V>(
+  selected: Set<V>,
+  record: RequestRecord,
+  extract: (r: RequestRecord) => V | null,
+): boolean {
+  // Empty set is the no-op identity for AND composition — and we
+  // never invoke the extractor when there is no constraint to check
+  // against. A record whose extractor returned null can never match
+  // a non-empty set — there is no value to ask the set about.
   if (selected.size === 0) return true;
+  const value = extract(record);
   if (value === null) return false;
   return selected.has(value);
 }

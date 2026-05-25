@@ -194,6 +194,35 @@ describe("passesFilters composition", () => {
     ).toBe(false);
   });
 
+  it("does not invoke an extractor when its filter set is empty", () => {
+    // [LAW:dataflow-not-control-flow] The set being empty is a
+    // value-level instruction not to invoke the extractor. The
+    // common-case `sizeBucketOf` calls JSON.stringify per record;
+    // re-running it 1000 times per render is the cost the lazy
+    // matcher exists to avoid. If we ever regress to eager
+    // evaluation, the JSON.stringify spy fires.
+    let stringifyCalls = 0;
+    const original = JSON.stringify;
+    JSON.stringify = ((value: unknown, replacer?: never, space?: never) => {
+      stringifyCalls += 1;
+      return original(value, replacer, space);
+    }) as typeof JSON.stringify;
+    try {
+      // 1000 records, no filters: 0 JSON.stringify calls.
+      for (let i = 0; i < 1000; i += 1) {
+        passesFilters(record({ requestId: `r${i}` }), emptyFilters());
+      }
+      expect(stringifyCalls).toBe(0);
+
+      // Activating sizeBuckets re-enables the extractor — same
+      // dataflow, just driven by a different value.
+      passesFilters(record(), filters({ sizeBuckets: new Set(["small"]) }));
+      expect(stringifyCalls).toBe(1);
+    } finally {
+      JSON.stringify = original;
+    }
+  });
+
   it("tool-use and size filters compose against the same record", () => {
     const f = filters({
       toolUse: new Set(["yes"]),
