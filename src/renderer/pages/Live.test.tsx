@@ -21,6 +21,7 @@ beforeEach(() => {
     clients: new Map(),
     selectedClientId: null,
     selectedRequestId: null,
+    selectedPromptHash: null,
   });
 });
 
@@ -149,6 +150,61 @@ describe("Live", () => {
       within(untaggedButton).queryByTestId("live-launch-marker"),
     ).toBeNull();
   });
+
+  it("Prompts toggle reveals system-prompt buckets and clicking a bucket filters the list", async () => {
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    // Three requests across two distinct system prompts → two buckets.
+    for (const event of [
+      ...promptEvents("req-1", "client-a", "System Prompt Alpha", 10),
+      ...promptEvents("req-2", "client-a", "System Prompt Alpha", 20),
+      ...promptEvents("req-3", "client-a", "System Prompt Beta", 30),
+    ]) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+
+    // Panel is hidden by default.
+    expect(screen.queryByTestId("prompts-panel")).toBeNull();
+
+    // Click the toggle.
+    await userEvent.click(screen.getByTestId("prompts-toggle"));
+
+    // Panel renders both buckets, most recent first (Beta started at 30).
+    const panel = screen.getByTestId("prompts-panel");
+    const cards = within(panel).getAllByTestId("prompt-bucket-card");
+    expect(cards).toHaveLength(2);
+    expect(cards[0].textContent).toContain("System Prompt Beta");
+    expect(cards[1].textContent).toContain("System Prompt Alpha");
+    // Alpha covers 2 requests; Beta covers 1.
+    expect(cards[1].textContent).toMatch(/used by 2 requests/);
+    expect(cards[0].textContent).toMatch(/used by 1 request/);
+
+    // Three rows visible before any filter.
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(3);
+
+    // Filter to Alpha (the second card).
+    await userEvent.click(
+      within(cards[1]).getByTestId("prompt-bucket-filter"),
+    );
+
+    // Only the two Alpha rows remain visible.
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
+    // Filter indicator appears on the toggle.
+    expect(screen.getByTestId("prompts-filter-dot")).toBeTruthy();
+
+    // Click again to clear.
+    const alphaCardAfter = within(
+      screen.getByTestId("prompts-panel"),
+    ).getAllByTestId("prompt-bucket-card")[1];
+    await userEvent.click(
+      within(alphaCardAfter).getByTestId("prompt-bucket-filter"),
+    );
+
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(3);
+    expect(screen.queryByTestId("prompts-filter-dot")).toBeNull();
+  });
 });
 
 function chainEvents(): ProxyEvent[] {
@@ -201,6 +257,38 @@ function chainEvents(): ProxyEvent[] {
     });
   }
   return events;
+}
+
+function promptEvents(
+  requestId: string,
+  clientId: string,
+  systemPrompt: string,
+  recvNs: number,
+): ProxyEvent[] {
+  return [
+    {
+      requestId,
+      clientId,
+      globalSeq: recvNs,
+      recvNs,
+      kind: "request_headers",
+      method: "POST",
+      url: `https://api.example.test/${requestId}`,
+      headers: {},
+    },
+    {
+      requestId,
+      clientId,
+      globalSeq: recvNs + 1,
+      recvNs: recvNs + 1,
+      kind: "request_body",
+      body: {
+        model: "claude-test",
+        system: systemPrompt,
+        messages: [{ role: "user", content: `hello ${requestId}` }],
+      },
+    },
+  ];
 }
 
 function client(clientId: string, displayName: string): ClientInfo {

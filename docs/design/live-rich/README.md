@@ -212,14 +212,14 @@ Lit ticket: `ac1.6.5` <a id="system-prompt"></a>
 
 ### 6.1 Hash function
 
-Shared with `ac1.6.8`. New file `src/renderer/components/live-detail/promptHash.ts`:
+Shared with `ac1.6.8`. File `src/renderer/components/live-detail/promptHash.ts`:
 
 ```ts
-export function systemPromptHash(body: unknown): string;
-export function toolsHash(body: unknown): string;
+export function systemPromptHash(body: unknown): string | null;
+export function toolsHash(body: unknown): string | null;
 ```
 
-Both use `sha1(stable_json(...))` over the relevant request-body slice. `systemPromptHash` accepts both string-form and array-of-blocks-form `system`.
+Both delegate to `contentHash` from `conversation.ts` (FNV-1a-64 over stable-JSON, 16-char lowercase hex). `[LAW:one-source-of-truth]` — using the same hash function as the dedup-by-message-identity projection means buckets and timelines agree by construction. `systemPromptHash` accepts both string-form and array-of-blocks-form `system`. Both return `null` when the field is absent or empty so the type carries "no bucket" by construction — `[LAW:types-are-the-program]`.
 
 ### 6.2 Placement
 
