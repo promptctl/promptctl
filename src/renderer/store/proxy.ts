@@ -44,8 +44,12 @@ interface ProxyStore {
 }
 
 // Type helper — pulls the value type out of a Set-typed slice. Keeps
-// toggleFilter typed end-to-end so callers can't pass `"large"` to
-// `models` (or any other category mismatch).
+// toggleFilter typed end-to-end for categories whose value type is a
+// closed enum: `toggleFilter("sizeBuckets", "success")` is a compile
+// error because "success" is not assignable to SizeBucketValue. Models
+// are intentionally `string` (model names are open-set — Anthropic
+// publishes new ones, users alias their own), so no per-call type
+// constraint exists for `toggleFilter("models", ...)` beyond `string`.
 type FilterValue<K extends FilterKey> = RequestFilters[K] extends Set<infer V>
   ? V
   : never;

@@ -7,9 +7,12 @@
 // this component is a pure projection. The store's toggleFilter is
 // the only mutation path.
 //
-// [LAW:types-are-the-program] FilterKey + FilterValue<K> keep
-// toggleFilter typed end-to-end — passing "large" to the models chip
-// is a compile error.
+// [LAW:types-are-the-program] FilterKey + RequestFilters keep
+// toggleFilter typed end-to-end for closed-enum categories —
+// `toggleFilter("sizeBuckets", "success")` is a compile error.
+// Models are intentionally `string` (open-set: model names come from
+// the upstream provider and user aliases), so the per-call type
+// constraint there is just `string`.
 
 import { useEffect, useRef, useState } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";
