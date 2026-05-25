@@ -129,6 +129,12 @@ function BucketCard({
             onClick={onToggleExpanded}
             data-testid="prompt-bucket-hash"
             aria-expanded={expanded}
+            aria-controls={`prompt-bucket-preview-${bucket.hash}`}
+            aria-label={
+              expanded
+                ? `Collapse system prompt #${shortHash(bucket.hash)}`
+                : `Open full system prompt #${shortHash(bucket.hash)}`
+            }
             className="font-mono text-cyan-300 underline-offset-2 hover:underline"
             title={
               expanded
@@ -161,6 +167,7 @@ function BucketCard({
         prop driving one className path. The pre always renders; the
         text content and overflow behavior change with the data. */}
       <pre
+        id={`prompt-bucket-preview-${bucket.hash}`}
         data-testid="prompt-bucket-preview"
         className={`mt-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-neutral-300 ${
           expanded ? "max-h-96 overflow-y-auto" : "max-h-32 overflow-hidden"

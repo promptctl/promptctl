@@ -100,22 +100,29 @@ function toBucket(acc: BucketAccumulator): PromptBucket {
 }
 
 // Returns a short, human-readable preview of a system prompt for
-// the bucket card. Works on both string and array shapes.
+// the bucket card. Works on both string and array shapes. Trims
+// surrounding whitespace because the preview is a tidy at-a-glance
+// summary, not a fidelity reproduction.
 export function systemPreview(system: unknown, maxChars = 160): string {
-  const text = systemToText(system);
+  const text = systemToText(system, { trim: true });
   if (text.length <= maxChars) return text;
   return text.slice(0, maxChars).trimEnd() + "…";
 }
 
-// Returns the full prompt text — no truncation. Same join semantics
-// as systemPreview so the expanded card shows the same content the
-// preview is a prefix of.
+// Returns the prompt text exactly as it was captured — no trimming,
+// no normalization. The expanded card view shows this so the user
+// sees the literal bytes that were sent (leading/trailing whitespace
+// can be semantically meaningful, e.g. around cache_control markers
+// or block boundaries).
 export function fullPromptText(system: unknown): string {
-  return systemToText(system);
+  return systemToText(system, { trim: false });
 }
 
-function systemToText(system: unknown): string {
-  if (typeof system === "string") return system.trim();
+function systemToText(
+  system: unknown,
+  { trim }: { trim: boolean },
+): string {
+  if (typeof system === "string") return trim ? system.trim() : system;
   if (!Array.isArray(system)) return "";
   const parts: string[] = [];
   for (const block of system) {
@@ -124,10 +131,12 @@ function systemToText(system: unknown): string {
       typeof block === "object" &&
       typeof (block as { text?: unknown }).text === "string"
     ) {
-      parts.push(((block as { text: string }).text || "").trim());
+      const text = (block as { text: string }).text;
+      parts.push(trim ? text.trim() : text);
     }
   }
-  return parts.join("\n").trim();
+  const joined = parts.join("\n");
+  return trim ? joined.trim() : joined;
 }
 
 // Returns the tool names from a tools array (best-effort). Used by

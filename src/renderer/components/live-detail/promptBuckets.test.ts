@@ -161,6 +161,18 @@ describe("fullPromptText", () => {
     expect(fullPromptText(null)).toBe("");
     expect(fullPromptText(undefined)).toBe("");
   });
+
+  it("preserves literal whitespace — does not trim", () => {
+    // Whitespace around the prompt or inside blocks can be
+    // semantically meaningful when inspecting what was actually sent.
+    expect(fullPromptText("  hello  ")).toBe("  hello  ");
+    expect(
+      fullPromptText([
+        { type: "text", text: "  A  " },
+        { type: "text", text: " B\n" },
+      ]),
+    ).toBe("  A  \n B\n");
+  });
 });
 
 describe("toolNames", () => {
