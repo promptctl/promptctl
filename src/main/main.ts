@@ -122,19 +122,37 @@ let launchRegistry: LaunchRegistry | null = null;
 // surfaces; this adapter is the seam between the engine and the singleton
 // control connection. No tmux imports inside CommandEngine — the type is
 // the only thing it knows.
-const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
+//
+// [LAW:single-enforcer] Per-pane streaming UTF-8 decoder. tmux emits %output
+// frames at arbitrary byte boundaries, so any non-streaming decoder folds
+// the trailing partial of every multi-byte sequence into U+FFFD / latin1
+// mojibake — breaking the patterns the engine matches against. A shared
+// decoder across panes would additionally cross-contaminate one pane's
+// partial bytes into another pane's chunk. Each pane gets its own decoder
+// with `{ stream: true }` so partial bytes carry forward only within that
+// pane's stream.
 const toPaneId = (n: number): PaneId => `%${n}` as PaneId;
+const paneDecoders = new Map<number, TextDecoder>();
+const decodePaneChunk = (paneId: number, bytes: Uint8Array): string => {
+  let dec = paneDecoders.get(paneId);
+  if (dec === undefined) {
+    dec = new TextDecoder("utf-8", { fatal: false });
+    paneDecoders.set(paneId, dec);
+  }
+  return dec.decode(bytes, { stream: true });
+};
 const commandEngine = new CommandEngine({
   onOutput: (handler) => {
     const offOutput = tmuxControl.on("output", (msg) =>
-      handler(toPaneId(msg.paneId), utf8Decoder.decode(msg.data)),
+      handler(toPaneId(msg.paneId), decodePaneChunk(msg.paneId, msg.data)),
     );
     const offExtended = tmuxControl.on("extended-output", (msg) =>
-      handler(toPaneId(msg.paneId), utf8Decoder.decode(msg.data)),
+      handler(toPaneId(msg.paneId), decodePaneChunk(msg.paneId, msg.data)),
     );
     return () => {
       offOutput();
       offExtended();
+      paneDecoders.clear();
     };
   },
   sendKeys: async (target, keys) => {

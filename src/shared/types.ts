@@ -136,11 +136,23 @@ export interface PaneOutputChunk {
 }
 
 // Output router types — per-pane byte stream from tmux control mode.
-// [LAW:one-type-per-behavior] These carry decoded UTF-8 text for the debug
-// surface; PaneOutputChunk (above) carries the legacy pipe-pane path.
+//
+// [LAW:single-enforcer] xterm.js is the *single* byte→text decoder. The
+// library decoded the octal escapes on the way in and hands consumers a raw
+// `Uint8Array`; the wire type out of the main process is the same shape.
+// Pre-decoding here would install a second decode authority and would
+// fragment every multi-byte UTF-8 sequence that lands across a `%output`
+// chunk boundary into U+FFFD / latin1 mojibake.
+//
+// [LAW:one-source-of-truth] This mirrors the library's `OutputMessage.data:
+// Uint8Array` — promptctl's IPC payload is a transparent passthrough, never
+// a second representation of pane bytes that can drift.
+//
+// [LAW:one-type-per-behavior] Carries raw bytes for the debug surface;
+// PaneOutputChunk (above) carries the legacy pipe-pane path.
 export interface TmuxOutputChunk {
   readonly paneId: PaneId;
-  readonly data: string;
+  readonly data: Uint8Array;
 }
 
 export type TmuxOutputState = "streaming" | "paused" | "disconnected";
