@@ -109,11 +109,15 @@ export function systemPreview(system: unknown, maxChars = 160): string {
   return text.slice(0, maxChars).trimEnd() + "…";
 }
 
-// Returns the prompt text exactly as it was captured — no trimming,
-// no normalization. The expanded card view shows this so the user
-// sees the literal bytes that were sent (leading/trailing whitespace
-// can be semantically meaningful, e.g. around cache_control markers
-// or block boundaries).
+// Returns a best-effort plain-text rendering of the system prompt.
+// Preserves intra-block and surrounding whitespace (in contrast to
+// systemPreview, which trims for tidiness). For array-form `system`,
+// this concatenates the text fields of each text-typed block with
+// "\n" separators — non-text blocks are dropped, and the synthetic
+// "\n" separator is not present in the captured JSON. The expanded
+// card uses this view so the user sees the prompt content with
+// significant whitespace intact; for full structural fidelity, the
+// Request tab on the detail pane shows the raw request body.
 export function fullPromptText(system: unknown): string {
   return systemToText(system, { trim: false });
 }
