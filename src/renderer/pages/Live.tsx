@@ -3,6 +3,7 @@
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RequestDetail } from "../components/live-detail";
 import { LatencyBadges } from "../components/live-detail/LatencyBadges";
+import { PromptsPanel } from "../components/live-detail/PromptsPanel";
 import { UsageAggregate } from "../components/live-detail/UsageAggregate";
 import { UsageBadges } from "../components/live-detail/UsageBadges";
 import {
@@ -23,13 +24,27 @@ export function Live() {
   const state = useProxyStore();
   const clearEvents = useProxyStore((s) => s.clearEvents);
   const selectClient = useProxyStore((s) => s.selectClient);
+  const selectPromptHash = useProxyStore((s) => s.selectPromptHash);
   const toggleRequest = useProxyStore((s) => s.toggleRequest);
   const clearInactiveClients = useProxyStore((s) => s.clearInactiveClients);
   const [follow, setFollow] = useState(true);
+  const [promptsOpen, setPromptsOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
   const requests = useMemo(
     () => visibleRequests(state),
+    [state.requests, state.selectedClientId, state.selectedPromptHash],
+  );
+  // Prompts panel sources from the client-scoped, unfiltered-by-prompt
+  // list so that activating a prompt filter doesn't collapse the panel
+  // to a single bucket. Client selection still narrows the universe.
+  const promptsSourceRequests = useMemo(
+    () =>
+      state.selectedClientId === null
+        ? [...state.requests.values()]
+        : [...state.requests.values()].filter(
+            (r) => r.clientId === state.selectedClientId,
+          ),
     [state.requests, state.selectedClientId],
   );
   const lineage = useMemo(() => computeLineage(requests), [requests]);
@@ -101,9 +116,19 @@ export function Live() {
         clients={[...state.clients.values()]}
         selectedClientId={state.selectedClientId}
         activeClientIds={activeClientIds}
+        promptsOpen={promptsOpen}
+        promptFiltered={state.selectedPromptHash !== null}
         onSelect={selectClient}
+        onTogglePrompts={() => setPromptsOpen((open) => !open)}
         onClearInactive={clearInactiveClients}
       />
+      {promptsOpen && (
+        <PromptsPanel
+          requests={promptsSourceRequests}
+          selectedHash={state.selectedPromptHash}
+          onSelectHash={selectPromptHash}
+        />
+      )}
       {loadError && (
         <div className="border-b border-red-900 bg-red-950 px-4 py-2 text-xs text-red-300">
           Failed to load HAR: {loadError}
@@ -240,13 +265,19 @@ function ClientTabs({
   clients,
   selectedClientId,
   activeClientIds,
+  promptsOpen,
+  promptFiltered,
   onSelect,
+  onTogglePrompts,
   onClearInactive,
 }: {
   clients: ClientInfo[];
   selectedClientId: string | null;
   activeClientIds: Set<string>;
+  promptsOpen: boolean;
+  promptFiltered: boolean;
   onSelect: (clientId: string | null) => void;
+  onTogglePrompts: () => void;
   onClearInactive: () => void;
 }) {
   const sorted = [...clients].sort((a, b) => b.lastSeenNs - a.lastSeenNs);
@@ -285,8 +316,26 @@ function ClientTabs({
         );
       })}
       <button
+        onClick={onTogglePrompts}
+        data-testid="prompts-toggle"
+        aria-pressed={promptsOpen}
+        className={`ml-auto ${tabClass(promptsOpen)}`}
+        title="Show distinct system prompts captured so far"
+      >
+        <span className="inline-flex items-center gap-1.5">
+          Prompts
+          {promptFiltered && (
+            <span
+              data-testid="prompts-filter-dot"
+              className="h-1.5 w-1.5 rounded-full bg-cyan-400"
+              title="A prompt filter is active"
+            />
+          )}
+        </span>
+      </button>
+      <button
         onClick={onClearInactive}
-        className="ml-auto rounded px-2 py-0.5 text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
+        className="rounded px-2 py-0.5 text-neutral-500 hover:bg-neutral-900 hover:text-neutral-300"
       >
         Clear inactive
       </button>

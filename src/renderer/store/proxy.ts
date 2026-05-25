@@ -1,6 +1,7 @@
 // [LAW:one-source-of-truth] ProxyEvent remains the canonical IPC contract;
 // RequestRecord and client maps are renderer-side projections derived here.
 import { create } from "zustand";
+import { systemPromptHash } from "../components/live-detail/promptHash";
 import type {
   ClientInfo,
   ProxyEvent,
@@ -17,11 +18,17 @@ interface ProxyStore {
   clients: Map<string, ClientInfo>;
   selectedClientId: string | null;
   selectedRequestId: string | null;
+  // [LAW:single-enforcer] One filter slice; visibleRequests is the
+  // single consumer that composes selectedClientId AND selectedPromptHash
+  // into the displayed list. No other code path filters the request
+  // list — every component reads through visibleRequests.
+  selectedPromptHash: string | null;
   setStatus: (status: ProxyStatus) => void;
   appendEvent: (event: ProxyEvent) => void;
   upsertClient: (info: ClientInfo) => void;
   setClients: (infos: ClientInfo[]) => void;
   selectClient: (clientId: string | null) => void;
+  selectPromptHash: (hash: string | null) => void;
   toggleRequest: (requestId: string) => void;
   clearInactiveClients: () => void;
   clearEvents: () => void;
@@ -41,6 +48,7 @@ export const useProxyStore = create<ProxyStore>((set) => ({
   clients: new Map(),
   selectedClientId: null,
   selectedRequestId: null,
+  selectedPromptHash: null,
   setStatus: (status) => set({ status }),
   appendEvent: (event) =>
     set((state) => {
@@ -73,6 +81,14 @@ export const useProxyStore = create<ProxyStore>((set) => ({
     }),
   selectClient: (clientId) =>
     set({ selectedClientId: clientId, selectedRequestId: null }),
+  // Toggle semantics match selectClient: re-selecting the active hash
+  // clears the filter. selectedRequestId clears so a row that's no
+  // longer visible can't stay "selected" in stale state.
+  selectPromptHash: (hash) =>
+    set((state) => ({
+      selectedPromptHash: state.selectedPromptHash === hash ? null : hash,
+      selectedRequestId: null,
+    })),
   toggleRequest: (requestId) =>
     set((state) => ({
       selectedRequestId:
@@ -97,7 +113,12 @@ export const useProxyStore = create<ProxyStore>((set) => ({
             : state.selectedClientId,
       };
     }),
-  clearEvents: () => set({ requests: new Map(), selectedRequestId: null }),
+  clearEvents: () =>
+    set({
+      requests: new Map(),
+      selectedRequestId: null,
+      selectedPromptHash: null,
+    }),
 }));
 
 export function initProxySubscription(): () => void {
@@ -127,11 +148,23 @@ export function initProxySubscription(): () => void {
 }
 
 export function visibleRequests(state: ProxyStore): RequestRecord[] {
-  return sortedRequests(state.requests).filter((record) =>
-    state.selectedClientId === null
-      ? true
-      : record.clientId === state.selectedClientId,
-  );
+  // [LAW:single-enforcer] All filter dimensions compose here. Adding a
+  // new dimension (search, model, status) means adding a predicate to
+  // this list — never branching elsewhere.
+  return sortedRequests(state.requests).filter((record) => {
+    if (
+      state.selectedClientId !== null &&
+      record.clientId !== state.selectedClientId
+    ) {
+      return false;
+    }
+    if (state.selectedPromptHash !== null) {
+      if (systemPromptHash(record.requestBody) !== state.selectedPromptHash) {
+        return false;
+      }
+    }
+    return true;
+  });
 }
 
 export function foldRequests(
