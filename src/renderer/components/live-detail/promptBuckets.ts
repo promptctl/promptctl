@@ -130,9 +130,15 @@ function systemToText(
   if (!Array.isArray(system)) return "";
   const parts: string[] = [];
   for (const block of system) {
+    // [LAW:types-are-the-program] Match Anthropic's documented
+    // system-block shape literally: { type: "text", text: string }.
+    // Permissively accepting any object-with-a-text-field would
+    // surface text from future non-text block shapes the renderer
+    // hasn't accounted for.
     if (
       block !== null &&
       typeof block === "object" &&
+      (block as { type?: unknown }).type === "text" &&
       typeof (block as { text?: unknown }).text === "string"
     ) {
       const text = (block as { text: string }).text;

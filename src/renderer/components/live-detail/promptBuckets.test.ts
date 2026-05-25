@@ -173,6 +173,19 @@ describe("fullPromptText", () => {
       ]),
     ).toBe("  A  \n B\n");
   });
+
+  it("drops blocks whose type is not 'text', even if they have a text field", () => {
+    // Anthropic's documented system-block shape is { type: "text",
+    // text: string }. A future non-text block with a stray text
+    // field should not appear in the rendered prompt.
+    expect(
+      fullPromptText([
+        { type: "text", text: "REAL" },
+        { type: "image", text: "GHOST" },
+        { type: "cache_control", text: "MARKER" },
+      ]),
+    ).toBe("REAL");
+  });
 });
 
 describe("toolNames", () => {
