@@ -125,6 +125,7 @@ function BucketCard({
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-[11px]">
           <button
+            type="button"
             onClick={onToggleExpanded}
             data-testid="prompt-bucket-hash"
             aria-expanded={expanded}
@@ -144,6 +145,7 @@ function BucketCard({
           </span>
         </div>
         <button
+          type="button"
           onClick={onSelect}
           data-testid="prompt-bucket-filter"
           className={`rounded px-2 py-0.5 text-[11px] ${
