@@ -5,6 +5,7 @@
 import { describe, expect, it } from "vitest";
 import {
   bucketBySystemPrompt,
+  fullPromptText,
   systemPreview,
   toolNames,
 } from "./promptBuckets";
@@ -137,6 +138,28 @@ describe("systemPreview", () => {
     const preview = systemPreview(long, 50);
     expect(preview.length).toBe(51); // 50 chars + ellipsis
     expect(preview.endsWith("…")).toBe(true);
+  });
+});
+
+describe("fullPromptText", () => {
+  it("returns the full string without truncation", () => {
+    const long = "x".repeat(2000);
+    expect(fullPromptText(long).length).toBe(2000);
+    expect(fullPromptText(long).endsWith("…")).toBe(false);
+  });
+
+  it("joins array-form blocks without truncation", () => {
+    expect(
+      fullPromptText([
+        { type: "text", text: "A" },
+        { type: "text", text: "B" },
+      ]),
+    ).toBe("A\nB");
+  });
+
+  it("returns an empty string for missing system", () => {
+    expect(fullPromptText(null)).toBe("");
+    expect(fullPromptText(undefined)).toBe("");
   });
 });
 

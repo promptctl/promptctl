@@ -205,6 +205,44 @@ describe("Live", () => {
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(3);
     expect(screen.queryByTestId("prompts-filter-dot")).toBeNull();
   });
+
+  it("clicking the hash badge expands the bucket to show the full prompt", async () => {
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    // A prompt longer than the 480-char collapsed preview cap.
+    const longPrompt = "PROMPT_HEAD " + "x".repeat(700) + " PROMPT_TAIL";
+    for (const event of [
+      ...promptEvents("req-1", "client-a", longPrompt, 10),
+    ]) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+    await userEvent.click(screen.getByTestId("prompts-toggle"));
+
+    const card = screen.getByTestId("prompt-bucket-card");
+    const preview = within(card).getByTestId("prompt-bucket-preview");
+
+    // Collapsed: head visible, tail hidden (truncated past 480 chars).
+    expect(preview.textContent).toContain("PROMPT_HEAD");
+    expect(preview.textContent).not.toContain("PROMPT_TAIL");
+    expect(card.getAttribute("data-expanded")).toBe("false");
+
+    // Click the hash badge to expand.
+    await userEvent.click(within(card).getByTestId("prompt-bucket-hash"));
+
+    expect(card.getAttribute("data-expanded")).toBe("true");
+    const expandedPreview = within(card).getByTestId("prompt-bucket-preview");
+    expect(expandedPreview.textContent).toContain("PROMPT_HEAD");
+    expect(expandedPreview.textContent).toContain("PROMPT_TAIL");
+
+    // Click again to collapse.
+    await userEvent.click(within(card).getByTestId("prompt-bucket-hash"));
+    expect(card.getAttribute("data-expanded")).toBe("false");
+    expect(
+      within(card).getByTestId("prompt-bucket-preview").textContent,
+    ).not.toContain("PROMPT_TAIL");
+  });
 });
 
 function chainEvents(): ProxyEvent[] {

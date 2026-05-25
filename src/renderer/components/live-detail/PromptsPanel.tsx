@@ -10,15 +10,20 @@
 // over has a non-null hash by construction (see promptBuckets.ts).
 // The component never branches on "is this a real bucket?".
 
-import { useMemo } from "react";
+import { useMemo, useState } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";
 import {
   bucketBySystemPrompt,
+  fullPromptText,
   systemPreview,
   toolNames,
   type PromptBucket,
 } from "./promptBuckets";
 import { shortHash } from "./promptHash";
+
+// Chars shown when a bucket card is collapsed. The full prompt is
+// available on click — see BucketCard.
+const COLLAPSED_PREVIEW_CHARS = 480;
 
 interface PromptsPanelProps {
   requests: readonly RequestRecord[];
@@ -32,6 +37,11 @@ export function PromptsPanel({
   onSelectHash,
 }: PromptsPanelProps) {
   const buckets = useMemo(() => bucketBySystemPrompt(requests), [requests]);
+  // Expansion is a per-card UI affordance, not a filter — keep it local
+  // to the panel rather than promoting it to the store. Multiple cards
+  // can be expanded simultaneously; the set is keyed by hash so a
+  // bucket's expansion survives re-renders when requests stream in.
+  const [expanded, setExpanded] = useState<Set<string>>(() => new Set());
 
   if (buckets.length === 0) {
     return (
@@ -66,7 +76,11 @@ export function PromptsPanel({
             key={bucket.hash}
             bucket={bucket}
             selected={selectedHash === bucket.hash}
+            expanded={expanded.has(bucket.hash)}
             onSelect={() => onSelectHash(bucket.hash)}
+            onToggleExpanded={() =>
+              setExpanded((prev) => toggleSet(prev, bucket.hash))
+            }
           />
         ))}
       </div>
@@ -74,14 +88,25 @@ export function PromptsPanel({
   );
 }
 
+function toggleSet(prev: Set<string>, key: string): Set<string> {
+  const next = new Set(prev);
+  if (next.has(key)) next.delete(key);
+  else next.add(key);
+  return next;
+}
+
 function BucketCard({
   bucket,
   selected,
+  expanded,
   onSelect,
+  onToggleExpanded,
 }: {
   bucket: PromptBucket;
   selected: boolean;
+  expanded: boolean;
   onSelect: () => void;
+  onToggleExpanded: () => void;
 }) {
   const tools = toolNames(bucket.sampleTools);
   const visibleTools = tools.slice(0, 6);
@@ -90,6 +115,7 @@ function BucketCard({
     <div
       data-testid="prompt-bucket-card"
       data-prompt-hash={bucket.hash}
+      data-expanded={expanded ? "true" : "false"}
       className={`rounded border px-3 py-2 ${
         selected
           ? "border-cyan-500 bg-cyan-950/30"
@@ -98,12 +124,19 @@ function BucketCard({
     >
       <div className="flex items-center justify-between gap-3">
         <div className="flex items-center gap-2 text-[11px]">
-          <span
-            className="font-mono text-cyan-300"
-            title={`systemPromptHash: ${bucket.hash}`}
+          <button
+            onClick={onToggleExpanded}
+            data-testid="prompt-bucket-hash"
+            aria-expanded={expanded}
+            className="font-mono text-cyan-300 underline-offset-2 hover:underline"
+            title={
+              expanded
+                ? `Collapse · systemPromptHash: ${bucket.hash}`
+                : `Open full prompt · systemPromptHash: ${bucket.hash}`
+            }
           >
             #{shortHash(bucket.hash)}
-          </span>
+          </button>
           <span className="text-neutral-500">
             used by {bucket.count} request{bucket.count === 1 ? "" : "s"} ·{" "}
             {bucket.clientIds.length} client
@@ -122,8 +155,18 @@ function BucketCard({
           {selected ? "Clear filter" : "Filter list to this prompt"}
         </button>
       </div>
-      <pre className="mt-2 max-h-32 overflow-hidden whitespace-pre-wrap break-words text-[11px] leading-snug text-neutral-300">
-        {systemPreview(bucket.sampleSystem, 480)}
+      {/* [LAW:dataflow-not-control-flow] Expanded-vs-collapsed is one
+        prop driving one className path. The pre always renders; the
+        text content and overflow behavior change with the data. */}
+      <pre
+        data-testid="prompt-bucket-preview"
+        className={`mt-2 whitespace-pre-wrap break-words text-[11px] leading-snug text-neutral-300 ${
+          expanded ? "max-h-96 overflow-y-auto" : "max-h-32 overflow-hidden"
+        }`}
+      >
+        {expanded
+          ? fullPromptText(bucket.sampleSystem)
+          : systemPreview(bucket.sampleSystem, COLLAPSED_PREVIEW_CHARS)}
       </pre>
       {tools.length > 0 && (
         <div className="mt-2 flex flex-wrap items-center gap-1 text-[10px]">

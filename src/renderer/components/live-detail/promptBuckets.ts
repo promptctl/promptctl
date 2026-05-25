@@ -107,6 +107,13 @@ export function systemPreview(system: unknown, maxChars = 160): string {
   return text.slice(0, maxChars).trimEnd() + "…";
 }
 
+// Returns the full prompt text — no truncation. Same join semantics
+// as systemPreview so the expanded card shows the same content the
+// preview is a prefix of.
+export function fullPromptText(system: unknown): string {
+  return systemToText(system);
+}
+
 function systemToText(system: unknown): string {
   if (typeof system === "string") return system.trim();
   if (!Array.isArray(system)) return "";
