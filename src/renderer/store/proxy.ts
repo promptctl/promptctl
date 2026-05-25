@@ -1,6 +1,12 @@
 // [LAW:one-source-of-truth] ProxyEvent remains the canonical IPC contract;
 // RequestRecord and client maps are renderer-side projections derived here.
 import { create } from "zustand";
+import {
+  emptyFilters,
+  passesFilters,
+  type FilterKey,
+  type RequestFilters,
+} from "../components/live-detail/filters";
 import { systemPromptHash } from "../components/live-detail/promptHash";
 import type {
   ClientInfo,
@@ -20,19 +26,29 @@ interface ProxyStore {
   selectedRequestId: string | null;
   // [LAW:single-enforcer] One filter slice; visibleRequests is the
   // single consumer that composes selectedClientId AND selectedPromptHash
-  // into the displayed list. No other code path filters the request
-  // list — every component reads through visibleRequests.
+  // AND filters into the displayed list. No other code path filters
+  // the request list — every component reads through visibleRequests.
   selectedPromptHash: string | null;
+  filters: RequestFilters;
   setStatus: (status: ProxyStatus) => void;
   appendEvent: (event: ProxyEvent) => void;
   upsertClient: (info: ClientInfo) => void;
   setClients: (infos: ClientInfo[]) => void;
   selectClient: (clientId: string | null) => void;
   selectPromptHash: (hash: string | null) => void;
+  toggleFilter: <K extends FilterKey>(key: K, value: FilterValue<K>) => void;
+  clearFilters: () => void;
   toggleRequest: (requestId: string) => void;
   clearInactiveClients: () => void;
   clearEvents: () => void;
 }
+
+// Type helper — pulls the value type out of a Set-typed slice. Keeps
+// toggleFilter typed end-to-end so callers can't pass `"large"` to
+// `models` (or any other category mismatch).
+type FilterValue<K extends FilterKey> = RequestFilters[K] extends Set<infer V>
+  ? V
+  : never;
 
 const INITIAL_STATUS: ProxyStatus = {
   running: false,
@@ -49,6 +65,7 @@ export const useProxyStore = create<ProxyStore>((set) => ({
   selectedClientId: null,
   selectedRequestId: null,
   selectedPromptHash: null,
+  filters: emptyFilters(),
   setStatus: (status) => set({ status }),
   appendEvent: (event) =>
     set((state) => {
@@ -89,6 +106,26 @@ export const useProxyStore = create<ProxyStore>((set) => ({
       selectedPromptHash: state.selectedPromptHash === hash ? null : hash,
       selectedRequestId: null,
     })),
+  // Toggle one value within one category. Membership is the source of
+  // truth — `[LAW:types-are-the-program]`: empty Set is the no-filter
+  // identity, so no separate "active?" flag is needed. selectedRequestId
+  // clears so a row that drops out of the filter can't stay "selected".
+  toggleFilter: (key, value) =>
+    set((state) => {
+      const current = state.filters[key];
+      const next = new Set(current) as typeof current;
+      // Cast scope is one line — `value` is `FilterValue<K>` and
+      // `current` is `Set<FilterValue<K>>`; the TS inference loses
+      // that link across the union of K, so we collapse it here.
+      if (next.has(value as never)) next.delete(value as never);
+      else next.add(value as never);
+      return {
+        filters: { ...state.filters, [key]: next },
+        selectedRequestId: null,
+      };
+    }),
+  clearFilters: () =>
+    set({ filters: emptyFilters(), selectedRequestId: null }),
   toggleRequest: (requestId) =>
     set((state) => ({
       selectedRequestId:
@@ -118,8 +155,10 @@ export const useProxyStore = create<ProxyStore>((set) => ({
       requests: new Map(),
       selectedRequestId: null,
       selectedPromptHash: null,
+      filters: emptyFilters(),
     }),
 }));
+
 
 export function initProxySubscription(): () => void {
   const unsubEvent = window.electronAPI.on("proxy:event", (event) => {
@@ -163,7 +202,7 @@ export function visibleRequests(state: ProxyStore): RequestRecord[] {
         return false;
       }
     }
-    return true;
+    return passesFilters(record, state.filters);
   });
 }
 
