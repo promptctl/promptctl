@@ -79,6 +79,17 @@ export function FilterChips({
     return () => document.removeEventListener("mousedown", onDocClick);
   }, [openKey]);
 
+  // [LAW:types-are-the-program] An open chip whose underlying data
+  // makes it disabled is an inconsistent state — the button would
+  // sit with aria-expanded="true" while the popup is suppressed by
+  // `{isOpen && !disabled && ...}`, and the disabled button can't be
+  // clicked to close itself. Today only Model is disablable (the
+  // closed-enum categories always have options), so we reconcile
+  // here. New disablable categories add a clause to the boolean.
+  useEffect(() => {
+    if (openKey === "models" && !hasModelOptions) setOpenKey(null);
+  }, [openKey, hasModelOptions]);
+
   function chipProps<K extends FilterKey>(key: K) {
     return {
       isOpen: openKey === key,

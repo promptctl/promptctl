@@ -188,6 +188,39 @@ describe("FilterChips", () => {
     expect(error.getAttribute("aria-checked")).toBe("false");
   });
 
+  it("auto-closes the Model chip when records dry up so aria-expanded stays consistent", async () => {
+    // Start with records → Model chip is enabled.
+    const { rerender } = render(
+      <FilterChips
+        records={[record({ requestBody: { model: "claude-sonnet" } })]}
+        filters={emptyFilters()}
+        onToggle={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+    const chip = screen.getByTestId("filter-chip-model");
+    expect(chip).not.toBeDisabled();
+    await userEvent.click(chip);
+    expect(screen.getByTestId("filter-chip-menu-model")).toBeTruthy();
+    expect(chip.getAttribute("aria-expanded")).toBe("true");
+
+    // Records vanish — chip becomes disabled. The effect must close
+    // the open menu so aria-expanded and the suppressed popup don't
+    // disagree, and so the now-unclickable button isn't stuck.
+    rerender(
+      <FilterChips
+        records={[]}
+        filters={emptyFilters()}
+        onToggle={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+    const chipAfter = screen.getByTestId("filter-chip-model");
+    expect(chipAfter).toBeDisabled();
+    expect(chipAfter.getAttribute("aria-expanded")).toBe("false");
+    expect(screen.queryByTestId("filter-chip-menu-model")).toBeNull();
+  });
+
   it("clicking outside the chip strip closes any open menu", async () => {
     render(
       <div>

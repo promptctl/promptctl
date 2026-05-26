@@ -4,14 +4,19 @@
 //
 // [LAW:one-type-per-behavior] Every filter category — model, status,
 // tool-use, error, size — is a Set<V> whose empty state means "any".
-// One predicate shape (`set.size === 0 || set.has(extract(r))`) covers
-// every category, so the composer is `.every()` over the categories.
+// One `matches(set, record, extract)` shape covers every category, so
+// the composer is a fixed-shape AND chain over the five categories.
 // No tri-state sentinels, no per-category branches.
 //
-// [LAW:dataflow-not-control-flow] Each extractor runs unconditionally
-// against every record. The Set state decides whether its value
-// matches; control flow is identical for in-flight, streaming,
-// complete, and errored records.
+// [LAW:dataflow-not-control-flow] Same code path runs every time; the
+// Set state — a value, not a flag — decides whether each extractor is
+// invoked. `matches` short-circuits to `true` when its Set is empty
+// (the no-constraint case) and only invokes its extractor when there
+// is a constraint to check against. The chain shape is identical
+// regardless of which categories are active or which record state
+// (in-flight, streaming, complete, errored) is flowing through. Lazy
+// per-category invocation is the dataflow instruction "skip work
+// when there is no question to answer," not a special-case branch.
 
 import type { AnthropicMessage, RequestRecord } from "../../../shared/proxy-events";
 
