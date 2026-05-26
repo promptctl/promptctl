@@ -34,6 +34,22 @@ function tmuxCmd(socket: string, args: string): string {
   return `tmux -L ${socket} ${args}`;
 }
 
+// [LAW:single-enforcer] One decode site for the test side. Concatenating
+// the raw chunks before decoding mirrors how a real consumer (xterm.js)
+// accumulates the byte stream, so any chunk-boundary split of a multi-byte
+// UTF-8 sequence still produces the correct text.
+function joinChunks(chunks: readonly TmuxOutputChunk[]): string {
+  let total = 0;
+  for (const c of chunks) total += c.data.byteLength;
+  const out = new Uint8Array(total);
+  let off = 0;
+  for (const c of chunks) {
+    out.set(c.data, off);
+    off += c.data.byteLength;
+  }
+  return new TextDecoder("utf-8").decode(out);
+}
+
 function killServer(socket: string): void {
   try {
     execSync(tmuxCmd(socket, "kill-server"), { stdio: "ignore" });
@@ -196,12 +212,12 @@ describe("TmuxOutputRouter (real tmux mesh)", () => {
     );
 
     await waitFor(
-      () => chunks.some((c) => c.data.includes("HELLO_ROUTER")),
+      () => joinChunks(chunks).includes("HELLO_ROUTER"),
       3000,
       "HELLO_ROUTER in output",
     );
 
-    const allText = chunks.map((c) => c.data).join("");
+    const allText = joinChunks(chunks);
     expect(allText).toContain("HELLO_ROUTER");
     expect(allText).toContain("LINE_TWO");
     expect(states.some((s) => s.state === "streaming")).toBe(true);
@@ -261,9 +277,10 @@ describe("TmuxOutputRouter (real tmux mesh)", () => {
     );
 
     await waitFor(
-      () =>
-        chunks.some((c) => c.data.includes("FROM_SEED")) &&
-        chunks.some((c) => c.data.includes("FROM_OTHER")),
+      () => {
+        const text = joinChunks(chunks);
+        return text.includes("FROM_SEED") && text.includes("FROM_OTHER");
+      },
       3000,
       "output from both sessions",
     );

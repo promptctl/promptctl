@@ -171,6 +171,13 @@ async function flush(): Promise<void> {
 }
 
 const encoder = new TextEncoder();
+const decoder = new TextDecoder("utf-8");
+// [LAW:behavior-not-structure] Tests assert pane-output bytes survive the
+// wire byte-for-byte. Decoding *inside* the test (after the wire crossing)
+// is fine — what matters is that the router did NOT decode on the way out,
+// so any cross-chunk multi-byte sequence would stay intact for the consumer.
+const dataAsText = (payload: { data: Uint8Array }): string =>
+  decoder.decode(payload.data);
 
 describe("TmuxOutputRouter", () => {
   it("captures scrollback on first subscribe and sends streaming state", async () => {
@@ -195,7 +202,7 @@ describe("TmuxOutputRouter", () => {
     const chunks = wc.sent.filter((s) => s.channel === "tmux:output:chunk");
     const states = wc.sent.filter((s) => s.channel === "tmux:output:state");
     expect(chunks).toHaveLength(1);
-    expect((chunks[0].payload as { data: string }).data).toBe(
+    expect(dataAsText(chunks[0].payload as { data: Uint8Array })).toBe(
       "line1\nline2\nline3",
     );
     expect(states).toHaveLength(1);
@@ -228,7 +235,9 @@ describe("TmuxOutputRouter", () => {
 
     expect(wc1.sent).toHaveLength(1);
     expect(wc1.sent[0].channel).toBe("tmux:output:chunk");
-    expect((wc1.sent[0].payload as { data: string }).data).toBe("hello pane 1");
+    expect(dataAsText(wc1.sent[0].payload as { data: Uint8Array })).toBe(
+      "hello pane 1",
+    );
     expect(wc2.sent).toHaveLength(0);
 
     // Output for pane %2 goes only to wc2.
@@ -239,7 +248,9 @@ describe("TmuxOutputRouter", () => {
     });
 
     expect(wc2.sent).toHaveLength(1);
-    expect((wc2.sent[0].payload as { data: string }).data).toBe("hello pane 2");
+    expect(dataAsText(wc2.sent[0].payload as { data: Uint8Array })).toBe(
+      "hello pane 2",
+    );
   });
 
   it("forwards extended-output the same as output", async () => {
@@ -263,7 +274,9 @@ describe("TmuxOutputRouter", () => {
     });
 
     expect(wc.sent).toHaveLength(1);
-    expect((wc.sent[0].payload as { data: string }).data).toBe("extended data");
+    expect(dataAsText(wc.sent[0].payload as { data: Uint8Array })).toBe(
+      "extended data",
+    );
   });
 
   it("auto-resumes and sends paused state on pause event", async () => {

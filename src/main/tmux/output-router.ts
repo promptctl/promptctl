@@ -113,10 +113,13 @@ export class TmuxOutputRouter {
 
   private onPaneOutput(paneIdNum: number, data: Uint8Array): void {
     const paneId = `%${paneIdNum}` as PaneId;
-    this.sendToPane(paneId, "tmux:output:chunk", {
-      paneId,
-      data: new TextDecoder("utf-8", { fatal: false }).decode(data),
-    });
+    // [LAW:single-enforcer] Bytes-on-the-wire. xterm.js is the only byte→text
+    // decoder. A TextDecoder here would (a) double-decode (xterm decodes too)
+    // and (b) fragment cross-chunk UTF-8 sequences into U+FFFD / latin1
+    // mojibake — pane output frames split bytes at arbitrary offsets.
+    // [LAW:dataflow-not-control-flow] Same shape every chunk; the bytes
+    // decide what the consumer sees, not any branching here.
+    this.sendToPane(paneId, "tmux:output:chunk", { paneId, data });
   }
 
   private handlePause = (msg: { paneId: number }): void => {
@@ -185,8 +188,19 @@ export class TmuxOutputRouter {
         return null;
       });
     if (resp === null || !resp.success) return;
+    // [LAW:one-source-of-truth] `resp.output` lines arrive as Latin-1-byte-
+    // faithful strings — the library's command-response contract (transport
+    // reads tmux stdout with setEncoding('latin1') so each JS code unit is
+    // exactly one byte). Invert that mapping to recover the raw bytes so the
+    // wire format matches the live %output path; shipping the string as-is
+    // would let the renderer treat each byte as a Unicode codepoint and emit
+    // latin1 mojibake for any non-ASCII content in scrollback. `Buffer.from(
+    // text, 'latin1')` is the named, single-step inverse of that transport
+    // setEncoding — the operation Node already speaks. Buffer IS-A Uint8Array
+    // so the IPC payload shape is unchanged.
     const text = resp.output.join("\n");
-    this.sendToPane(paneId, "tmux:output:chunk", { paneId, data: text });
+    const data = Buffer.from(text, "latin1");
+    this.sendToPane(paneId, "tmux:output:chunk", { paneId, data });
     this.sendState(paneId, "streaming");
   }
 }

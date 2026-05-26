@@ -122,19 +122,53 @@ let launchRegistry: LaunchRegistry | null = null;
 // surfaces; this adapter is the seam between the engine and the singleton
 // control connection. No tmux imports inside CommandEngine — the type is
 // the only thing it knows.
-const utf8Decoder = new TextDecoder("utf-8", { fatal: false });
 const toPaneId = (n: number): PaneId => `%${n}` as PaneId;
 const commandEngine = new CommandEngine({
   onOutput: (handler) => {
+    // [LAW:single-enforcer] Per-pane streaming UTF-8 decoder. tmux emits
+    // %output frames at arbitrary byte boundaries, so a non-streaming
+    // decoder folds the trailing partial of every multi-byte sequence into
+    // U+FFFD / latin1 mojibake — breaking the patterns the engine matches
+    // against. A shared decoder across panes would additionally cross-
+    // contaminate one pane's partial bytes into another pane's chunk.
+    //
+    // [LAW:locality-or-seam] The decoder map lives in the subscription's
+    // closure, not at module scope: its lifetime matches `onOutput`'s, and
+    // the cleanup function below is the single owner of its disposal.
+    //
+    // [LAW:single-enforcer] Disconnect IS the cleanup boundary. tmux pane
+    // ids are numeric and reused across server restarts — a stale partial-
+    // UTF-8 tail held from before the disconnect would prepend to the first
+    // chunk on the fresh server's stream and corrupt it. The
+    // onConnectionState hook fires `decoders.clear()` on every transition
+    // out of ready; the next ready transition starts every pane at a clean
+    // decode state. Within one connection's lifetime, a closed-pane decoder
+    // leaks only its small `TextDecoder` state until the next disconnect
+    // resets the world — accepted tradeoff vs. hooking topology eviction.
+    const decoders = new Map<number, TextDecoder>();
+    const decodePaneChunk = (paneId: number, bytes: Uint8Array): string => {
+      let dec = decoders.get(paneId);
+      if (dec === undefined) {
+        dec = new TextDecoder("utf-8", { fatal: false });
+        decoders.set(paneId, dec);
+      }
+      return dec.decode(bytes, { stream: true });
+    };
+
     const offOutput = tmuxControl.on("output", (msg) =>
-      handler(toPaneId(msg.paneId), utf8Decoder.decode(msg.data)),
+      handler(toPaneId(msg.paneId), decodePaneChunk(msg.paneId, msg.data)),
     );
     const offExtended = tmuxControl.on("extended-output", (msg) =>
-      handler(toPaneId(msg.paneId), utf8Decoder.decode(msg.data)),
+      handler(toPaneId(msg.paneId), decodePaneChunk(msg.paneId, msg.data)),
     );
+    const offConn = tmuxControl.onConnectionState((state) => {
+      if (state.status !== "ready") decoders.clear();
+    });
     return () => {
       offOutput();
       offExtended();
+      offConn();
+      decoders.clear();
     };
   },
   sendKeys: async (target, keys) => {
