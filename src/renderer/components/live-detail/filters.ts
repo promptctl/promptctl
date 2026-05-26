@@ -27,10 +27,15 @@ export type ErrorValue = "yes" | "no";
 export type SizeBucketValue = "small" | "medium" | "large";
 
 // Size thresholds (design §7.3). Computed against the JSON-stringified
-// request body length — a directional measure that matches what a user
-// reads in the Request tab. Records without a body fall into "small".
-const SIZE_MEDIUM_BYTES = 4 * 1024;
-const SIZE_LARGE_BYTES = 64 * 1024;
+// request body's string length — UTF-16 code units, not bytes — a
+// directional measure that matches what a user reads in the Request
+// tab. The thresholds use the same units so a non-ASCII-heavy body
+// can't be over- or under-bucketed by units mismatch; if a precise
+// byte count ever becomes the spec, swap to TextEncoder here (and
+// only here — the rest of the predicate is unaffected). Records
+// without a body fall into "small".
+const SIZE_MEDIUM_CHARS = 4 * 1024;
+const SIZE_LARGE_CHARS = 64 * 1024;
 
 export interface RequestFilters {
   models: Set<ModelValue>;
@@ -88,20 +93,26 @@ export function isErrorOf(record: RequestRecord): ErrorValue {
 }
 
 export function sizeBucketOf(record: RequestRecord): SizeBucketValue {
-  // JSON-stringified length is the directional measure. Falls back to
-  // 0 (→ small) when the body hasn't streamed in yet — same shape as a
-  // genuinely empty request, which is the truthful answer at that
-  // moment.
+  // JSON-stringified length (UTF-16 code units) is the directional
+  // measure — what a user actually reads when they expand the
+  // Request tab. Falls back to 0 (→ small) when the body hasn't
+  // streamed in yet — same shape as a genuinely empty request,
+  // which is the truthful answer at that moment.
   const body = record.requestBody;
-  const bytes = body === null || body === undefined ? 0 : JSON.stringify(body).length;
-  if (bytes >= SIZE_LARGE_BYTES) return "large";
-  if (bytes >= SIZE_MEDIUM_BYTES) return "medium";
+  const chars = body === null || body === undefined ? 0 : JSON.stringify(body).length;
+  if (chars >= SIZE_LARGE_CHARS) return "large";
+  if (chars >= SIZE_MEDIUM_CHARS) return "medium";
   return "small";
 }
 
 // [LAW:single-enforcer] The extractor table is the only place that
-// maps a category to its per-record value. The chip UI reads from the
-// same table to populate its dropdown options from observed records.
+// maps a category to its per-record value — passesFilters reads
+// from it. The chip UI does NOT read from EXTRACTORS for its option
+// lists: closed-enum categories use static option arrays declared
+// in FilterChips, and the open-set Model category uses observedModels
+// below (a separate observation pass that yields distinct values
+// across a record set, which is a different question than "what
+// value does this one record have").
 export const EXTRACTORS = {
   models: modelOf,
   statuses: statusOf,

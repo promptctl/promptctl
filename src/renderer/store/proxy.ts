@@ -191,9 +191,16 @@ export function initProxySubscription(): () => void {
 }
 
 export function visibleRequests(state: ProxyStore): RequestRecord[] {
-  // [LAW:single-enforcer] All filter dimensions compose here. Adding a
-  // new dimension (search, model, status) means adding a predicate to
-  // this list — never branching elsewhere.
+  // [LAW:single-enforcer] One filter composition pipeline for the
+  // request list. Two layers, both routed through this function:
+  //   - Store-level singletons (selectedClientId, selectedPromptHash)
+  //     inline here — they're scalars, not chip categories.
+  //   - Chip-category dimensions (model, status, tool-use, errors,
+  //     size) inside `passesFilters` in filters.ts.
+  // A new chip dimension is one entry in filters.ts; a new
+  // store-level singleton is one inline clause here. Either way the
+  // composition fans into a single AND chain, and no other code path
+  // filters the request list.
   return sortedRequests(state.requests).filter((record) => {
     if (
       state.selectedClientId !== null &&
