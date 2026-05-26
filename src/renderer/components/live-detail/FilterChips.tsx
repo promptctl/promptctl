@@ -179,7 +179,7 @@ function FilterChip<V extends string>({
         data-testid={`filter-chip-${label.toLowerCase().replace(/\s+/g, "-")}`}
         data-active={active ? "true" : "false"}
         aria-expanded={isOpen}
-        aria-haspopup="listbox"
+        aria-haspopup="menu"
         className={`rounded border px-2 py-0.5 ${
           disabled
             ? "cursor-default border-neutral-900 text-neutral-700"
@@ -195,7 +195,8 @@ function FilterChip<V extends string>({
       </button>
       {isOpen && !disabled && (
         <div
-          role="listbox"
+          role="menu"
+          aria-label={label}
           data-testid={`filter-chip-menu-${label.toLowerCase().replace(/\s+/g, "-")}`}
           className="absolute left-0 top-full z-20 mt-1 min-w-[10rem] rounded border border-neutral-700 bg-neutral-900 py-1 shadow-lg"
         >
@@ -210,8 +211,8 @@ function FilterChip<V extends string>({
                 <button
                   type="button"
                   key={option}
-                  role="option"
-                  aria-selected={on}
+                  role="menuitemcheckbox"
+                  aria-checked={on}
                   onClick={() => onChoose(option)}
                   data-testid={`filter-option-${option}`}
                   className="flex w-full items-center gap-2 px-3 py-1 text-left text-[11px] text-neutral-200 hover:bg-neutral-800"

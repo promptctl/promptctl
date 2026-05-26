@@ -165,6 +165,29 @@ describe("FilterChips", () => {
     expect(onClear).toHaveBeenCalled();
   });
 
+  it("uses the menu + menuitemcheckbox a11y pattern for the dropdown", async () => {
+    render(
+      <FilterChips
+        records={[record()]}
+        filters={f({ statuses: new Set(["success"]) })}
+        onToggle={vi.fn()}
+        onClear={vi.fn()}
+      />,
+    );
+    const chip = screen.getByTestId("filter-chip-status");
+    expect(chip.getAttribute("aria-haspopup")).toBe("menu");
+    await userEvent.click(chip);
+    const menu = screen.getByTestId("filter-chip-menu-status");
+    expect(menu.getAttribute("role")).toBe("menu");
+    expect(menu.getAttribute("aria-label")).toBe("Status");
+    const success = within(menu).getByTestId("filter-option-success");
+    expect(success.getAttribute("role")).toBe("menuitemcheckbox");
+    expect(success.getAttribute("aria-checked")).toBe("true");
+    const error = within(menu).getByTestId("filter-option-error");
+    expect(error.getAttribute("role")).toBe("menuitemcheckbox");
+    expect(error.getAttribute("aria-checked")).toBe("false");
+  });
+
   it("clicking outside the chip strip closes any open menu", async () => {
     render(
       <div>
