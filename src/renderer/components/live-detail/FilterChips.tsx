@@ -207,6 +207,15 @@ function FilterChip<V extends string>({
   onChoose,
 }: FilterChipProps<V>) {
   const active = selected.size > 0;
+  // [LAW:types-are-the-program] aria-expanded and the popup's render
+  // gate must agree in every commit, not just after the parent's
+  // reconciliation effect runs. Derive `expanded` at render so the
+  // inconsistent state ("expanded but no popup" / "popup but not
+  // expanded") cannot exist for a single frame. The parent's
+  // useEffect still resets openKey on the underlying transition so
+  // re-enabling the chip later doesn't auto-reopen — but the DOM
+  // invariant doesn't depend on that effect firing first.
+  const expanded = isOpen && !disabled;
   return (
     <div className="relative">
       <button
@@ -215,7 +224,7 @@ function FilterChip<V extends string>({
         disabled={disabled}
         data-testid={`filter-chip-${testKey}`}
         data-active={active ? "true" : "false"}
-        aria-expanded={isOpen}
+        aria-expanded={expanded}
         aria-haspopup="menu"
         className={`rounded border px-2 py-0.5 ${
           disabled
@@ -230,7 +239,7 @@ function FilterChip<V extends string>({
         <span>{summarize(selected, emptyLabel)}</span>{" "}
         <span aria-hidden className="text-neutral-500">▾</span>
       </button>
-      {isOpen && !disabled && (
+      {expanded && (
         <div
           role="menu"
           aria-label={label}
