@@ -14,7 +14,7 @@
 // the upstream provider and user aliases), so the per-call type
 // constraint there is just `string`.
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";
 import { fnv1a64Hex } from "./conversation";
 import {
@@ -71,8 +71,16 @@ export function FilterChips({
   // on" is `observed ∪ selected`, not `observed`. Lifting selected
   // into the option list makes "stuck disabled with selections" an
   // unrepresentable state.
-  const observed = observedModels(records);
-  const modelOptions = mergeModelOptions(observed, filters.models);
+  //
+  // Memoized because `records` can be up to MAX_REQUESTS items and
+  // FilterChips re-renders on every openKey transition — without the
+  // memo we'd walk the entire capture each time a user opens or
+  // closes a dropdown.
+  const observed = useMemo(() => observedModels(records), [records]);
+  const modelOptions = useMemo(
+    () => mergeModelOptions(observed, filters.models),
+    [observed, filters.models],
+  );
   const cleared = filtersAreEmpty(filters);
 
   // Close on outside click. Clicking another chip is "inside" so the
