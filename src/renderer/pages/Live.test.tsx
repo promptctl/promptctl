@@ -4,7 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { Live } from "./Live";
 import { useProxyStore } from "../store/proxy";
 import type { ClientInfo, ProxyEvent } from "../../shared/proxy-events";
+import { optionTestSuffix } from "../components/live-detail/FilterChips";
+import { emptyFilters } from "../components/live-detail/filters";
 import { installElectronMock } from "../../test/electron-mock";
+
+function optId(key: string, value: string): string {
+  return `filter-option-${key}-${optionTestSuffix(value)}`;
+}
 
 beforeEach(() => {
   cleanup();
@@ -22,6 +28,7 @@ beforeEach(() => {
     selectedClientId: null,
     selectedRequestId: null,
     selectedPromptHash: null,
+    filters: emptyFilters(),
   });
 });
 
@@ -206,6 +213,80 @@ describe("Live", () => {
     expect(screen.queryByTestId("prompts-filter-dot")).toBeNull();
   });
 
+  it("filter chips compose: [Errors: yes] narrows the list to errored records, Clear restores it", async () => {
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    // One successful and one errored request — chips should distinguish them.
+    for (const event of [
+      ...events("req-a", "client-a"),
+      ...erroredEvents("req-bad", "client-a"),
+    ]) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+
+    // Both rows visible with no filter applied.
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
+
+    // Open Errors chip and click "yes".
+    await userEvent.click(screen.getByTestId("filter-chip-errors"));
+    await userEvent.click(screen.getByTestId(optId("errors", "yes")));
+
+    // Only the errored row remains.
+    const rowsAfter = screen.getAllByTestId("live-request-row");
+    expect(rowsAfter).toHaveLength(1);
+    expect(rowsAfter[0].textContent).toContain("req-ba");
+
+    // Chip reflects the active state in its label and data-active flag.
+    const chip = screen.getByTestId("filter-chip-errors");
+    expect(chip.getAttribute("data-active")).toBe("true");
+    expect(chip.textContent).toContain("yes");
+
+    // Clear restores everything.
+    await userEvent.click(screen.getByTestId("filter-chips-clear"));
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
+    expect(screen.getByTestId("filter-chip-errors").getAttribute("data-active"))
+      .toBe("false");
+  });
+
+  it("filter chips and the existing prompt-hash filter AND together via visibleRequests", async () => {
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    // Two distinct prompts × {success, error} so the cross-filter
+    // intersection is unambiguous.
+    for (const event of [
+      ...promptEvents("req-alpha-ok", "client-a", "Alpha", 10),
+      ...promptEvents("req-beta-ok", "client-a", "Beta", 20),
+      ...erroredPromptEvents("req-alpha-bad", "client-a", "Alpha", 30),
+    ]) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(3);
+
+    // Filter to the Alpha prompt → 2 rows (alpha-ok + alpha-bad).
+    await userEvent.click(screen.getByTestId("prompts-toggle"));
+    // Bucket order is most-recent-first and depends on test data, so
+    // pick the bucket card by its visible content rather than index.
+    const alphaCard = within(screen.getByTestId("prompts-panel"))
+      .getAllByTestId("prompt-bucket-card")
+      .find((card) => card.textContent?.includes("Alpha"));
+    if (alphaCard === undefined) throw new Error("Alpha bucket card missing");
+    await userEvent.click(
+      within(alphaCard).getByTestId("prompt-bucket-filter"),
+    );
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
+
+    // AND-compose with Errors=yes → just alpha-bad.
+    await userEvent.click(screen.getByTestId("filter-chip-errors"));
+    await userEvent.click(screen.getByTestId(optId("errors", "yes")));
+    const remaining = screen.getAllByTestId("live-request-row");
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].textContent).toContain("req-alpha-bad");
+  });
+
   it("clicking the hash badge expands the bucket to show the full prompt", async () => {
     const state = useProxyStore.getState();
     state.upsertClient(client("client-a", "Claude @ app"));
@@ -325,6 +406,60 @@ function promptEvents(
         system: systemPrompt,
         messages: [{ role: "user", content: `hello ${requestId}` }],
       },
+    },
+  ];
+}
+
+function erroredEvents(requestId: string, clientId: string): ProxyEvent[] {
+  return [
+    {
+      requestId,
+      clientId,
+      globalSeq: 100,
+      recvNs: 100,
+      kind: "request_headers",
+      method: "POST",
+      url: `https://api.example.test/${requestId}`,
+      headers: {},
+    },
+    {
+      requestId,
+      clientId,
+      globalSeq: 101,
+      recvNs: 101,
+      kind: "request_body",
+      body: {
+        model: "claude-test",
+        system: "Test system",
+        messages: [{ role: "user", content: `hello ${requestId}` }],
+      },
+    },
+    {
+      requestId,
+      clientId,
+      globalSeq: 102,
+      recvNs: 102,
+      kind: "proxy_error",
+      error: "synthetic test failure",
+    },
+  ];
+}
+
+function erroredPromptEvents(
+  requestId: string,
+  clientId: string,
+  systemPrompt: string,
+  recvNs: number,
+): ProxyEvent[] {
+  return [
+    ...promptEvents(requestId, clientId, systemPrompt, recvNs),
+    {
+      requestId,
+      clientId,
+      globalSeq: recvNs + 2,
+      recvNs: recvNs + 2,
+      kind: "proxy_error",
+      error: "synthetic test failure",
     },
   ];
 }

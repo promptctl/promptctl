@@ -2,6 +2,7 @@
 // projections from the store; live capture and replay share the same path.
 import { useEffect, useMemo, useRef, useState } from "react";
 import { RequestDetail } from "../components/live-detail";
+import { FilterChips } from "../components/live-detail/FilterChips";
 import { LatencyBadges } from "../components/live-detail/LatencyBadges";
 import { PromptsPanel } from "../components/live-detail/PromptsPanel";
 import { UsageAggregate } from "../components/live-detail/UsageAggregate";
@@ -25,6 +26,8 @@ export function Live() {
   const clearEvents = useProxyStore((s) => s.clearEvents);
   const selectClient = useProxyStore((s) => s.selectClient);
   const selectPromptHash = useProxyStore((s) => s.selectPromptHash);
+  const toggleFilter = useProxyStore((s) => s.toggleFilter);
+  const clearFilters = useProxyStore((s) => s.clearFilters);
   const toggleRequest = useProxyStore((s) => s.toggleRequest);
   const clearInactiveClients = useProxyStore((s) => s.clearInactiveClients);
   const [follow, setFollow] = useState(true);
@@ -33,7 +36,12 @@ export function Live() {
   const logRef = useRef<HTMLDivElement | null>(null);
   const requests = useMemo(
     () => visibleRequests(state),
-    [state.requests, state.selectedClientId, state.selectedPromptHash],
+    [
+      state.requests,
+      state.selectedClientId,
+      state.selectedPromptHash,
+      state.filters,
+    ],
   );
   // Prompts panel sources from the client-scoped, unfiltered-by-prompt
   // list so that activating a prompt filter doesn't collapse the panel
@@ -121,6 +129,16 @@ export function Live() {
         onSelect={selectClient}
         onTogglePrompts={() => setPromptsOpen((open) => !open)}
         onClearInactive={clearInactiveClients}
+      />
+      {/* [LAW:single-enforcer] Chip options come from the client-scoped,
+        pre-chip-filter set so toggling a filter never erases its own
+        option from the dropdown. The store's filters slice is the
+        only mutation path; visibleRequests is the only consumer. */}
+      <FilterChips
+        records={promptsSourceRequests}
+        filters={state.filters}
+        onToggle={toggleFilter}
+        onClear={clearFilters}
       />
       {promptsOpen && (
         <PromptsPanel
