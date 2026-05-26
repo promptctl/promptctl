@@ -4,8 +4,13 @@ import userEvent from "@testing-library/user-event";
 import { Live } from "./Live";
 import { useProxyStore } from "../store/proxy";
 import type { ClientInfo, ProxyEvent } from "../../shared/proxy-events";
+import { optionTestSuffix } from "../components/live-detail/FilterChips";
 import { emptyFilters } from "../components/live-detail/filters";
 import { installElectronMock } from "../../test/electron-mock";
+
+function optId(key: string, value: string): string {
+  return `filter-option-${key}-${optionTestSuffix(value)}`;
+}
 
 beforeEach(() => {
   cleanup();
@@ -226,7 +231,7 @@ describe("Live", () => {
 
     // Open Errors chip and click "yes".
     await userEvent.click(screen.getByTestId("filter-chip-errors"));
-    await userEvent.click(screen.getByTestId("filter-option-errors-yes"));
+    await userEvent.click(screen.getByTestId(optId("errors", "yes")));
 
     // Only the errored row remains.
     const rowsAfter = screen.getAllByTestId("live-request-row");
@@ -276,7 +281,7 @@ describe("Live", () => {
 
     // AND-compose with Errors=yes → just alpha-bad.
     await userEvent.click(screen.getByTestId("filter-chip-errors"));
-    await userEvent.click(screen.getByTestId("filter-option-errors-yes"));
+    await userEvent.click(screen.getByTestId(optId("errors", "yes")));
     const remaining = screen.getAllByTestId("live-request-row");
     expect(remaining).toHaveLength(1);
     expect(remaining[0].textContent).toContain("req-alpha-bad");

@@ -2,8 +2,12 @@ import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
 import type { RequestRecord } from "../../../shared/proxy-events";
-import { FilterChips } from "./FilterChips";
+import { FilterChips, optionTestSuffix } from "./FilterChips";
 import { emptyFilters, type RequestFilters } from "./filters";
+
+function optId(key: string, value: string): string {
+  return `filter-option-${key}-${optionTestSuffix(value)}`;
+}
 
 beforeEach(() => {
   cleanup();
@@ -79,12 +83,14 @@ describe("FilterChips", () => {
     expect(screen.getByTestId("filter-chip-models")).not.toBeDisabled();
     await userEvent.click(screen.getByTestId("filter-chip-models"));
     const menu = screen.getByTestId("filter-chip-menu-models");
-    // Option testid slug-encodes the option value to be selector-safe.
+    // Option testid is slug + short hash — collision-free across
+    // distinct option values. Tests compose it via optionTestSuffix
+    // to stay in sync with the component.
     expect(
-      within(menu).getByTestId("filter-option-models-claude-sonnet"),
+      within(menu).getByTestId(optId("models", "claude-sonnet")),
     ).toBeTruthy();
     expect(
-      within(menu).getByTestId("filter-option-models-claude-opus"),
+      within(menu).getByTestId(optId("models", "claude-opus")),
     ).toBeTruthy();
   });
 
@@ -110,7 +116,7 @@ describe("FilterChips", () => {
     await userEvent.click(chip);
     const menu = screen.getByTestId("filter-chip-menu-models");
     const selected = within(menu).getByTestId(
-      "filter-option-models-claude-sonnet",
+      optId("models", "claude-sonnet"),
     );
     expect(selected.getAttribute("aria-checked")).toBe("true");
     await userEvent.click(selected);
@@ -144,7 +150,7 @@ describe("FilterChips", () => {
       />,
     );
     await userEvent.click(screen.getByTestId("filter-chip-statuses"));
-    await userEvent.click(screen.getByTestId("filter-option-statuses-success"));
+    await userEvent.click(screen.getByTestId(optId("statuses", "success")));
     expect(onToggle).toHaveBeenCalledWith("statuses", "success");
   });
 
@@ -215,10 +221,10 @@ describe("FilterChips", () => {
     const menu = screen.getByTestId("filter-chip-menu-statuses");
     expect(menu.getAttribute("role")).toBe("menu");
     expect(menu.getAttribute("aria-label")).toBe("Status");
-    const success = within(menu).getByTestId("filter-option-statuses-success");
+    const success = within(menu).getByTestId(optId("statuses", "success"));
     expect(success.getAttribute("role")).toBe("menuitemcheckbox");
     expect(success.getAttribute("aria-checked")).toBe("true");
-    const error = within(menu).getByTestId("filter-option-statuses-error");
+    const error = within(menu).getByTestId(optId("statuses", "error"));
     expect(error.getAttribute("role")).toBe("menuitemcheckbox");
     expect(error.getAttribute("aria-checked")).toBe("false");
   });

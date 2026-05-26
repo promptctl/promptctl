@@ -1,4 +1,4 @@
-import { describe, expect, it } from "vitest";
+import { describe, expect, it, vi } from "vitest";
 import type {
   AnthropicMessage,
   RequestRecord,
@@ -201,25 +201,20 @@ describe("passesFilters composition", () => {
     // re-running it 1000 times per render is the cost the lazy
     // matcher exists to avoid. If we ever regress to eager
     // evaluation, the JSON.stringify spy fires.
-    let stringifyCalls = 0;
-    const original = JSON.stringify;
-    JSON.stringify = ((value: unknown, replacer?: never, space?: never) => {
-      stringifyCalls += 1;
-      return original(value, replacer, space);
-    }) as typeof JSON.stringify;
+    const stringifySpy = vi.spyOn(JSON, "stringify");
     try {
       // 1000 records, no filters: 0 JSON.stringify calls.
       for (let i = 0; i < 1000; i += 1) {
         passesFilters(record({ requestId: `r${i}` }), emptyFilters());
       }
-      expect(stringifyCalls).toBe(0);
+      expect(stringifySpy).toHaveBeenCalledTimes(0);
 
       // Activating sizeBuckets re-enables the extractor — same
       // dataflow, just driven by a different value.
       passesFilters(record(), filters({ sizeBuckets: new Set(["small"]) }));
-      expect(stringifyCalls).toBe(1);
+      expect(stringifySpy).toHaveBeenCalledTimes(1);
     } finally {
-      JSON.stringify = original;
+      stringifySpy.mockRestore();
     }
   });
 

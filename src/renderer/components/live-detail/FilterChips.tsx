@@ -16,6 +16,7 @@
 
 import { useEffect, useRef, useState } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";
+import { fnv1a64Hex } from "./conversation";
 import {
   filtersAreEmpty,
   observedModels,
@@ -250,10 +251,13 @@ function FilterChip<V extends string>({
                   role="menuitemcheckbox"
                   aria-checked={on}
                   onClick={() => onChoose(option)}
-                  // Slug the option so model names (open-set strings)
-                  // can't break CSS selectors in Testing Library /
-                  // Playwright. Closed-enum values slug to themselves.
-                  data-testid={`filter-option-${testKey}-${slugify(option)}`}
+                  // Slug + short hash so the testid is selector-safe
+                  // AND collision-free. The slug stays readable for
+                  // closed-enum values ("success", "yes", model
+                  // names); the 6-hex suffix prevents two distinct
+                  // raw values that happen to slug to the same form
+                  // (e.g. "foo-bar" vs "foo_bar") from colliding.
+                  data-testid={`filter-option-${testKey}-${optionTestSuffix(option)}`}
                   data-value={option}
                   className="flex w-full items-center gap-2 px-3 py-1 text-left text-[11px] text-neutral-200 hover:bg-neutral-800"
                 >
@@ -276,11 +280,21 @@ function FilterChip<V extends string>({
   );
 }
 
-// Make an arbitrary option string safe to embed in a CSS selector
-// (Testing Library, Playwright). Closed-enum values like "success",
-// "yes", "small" slug to themselves; open-set values like model
-// names with dots and hyphens stay readable. Other characters
-// collapse to a single hyphen; consecutive hyphens dedupe.
+// Make an option string suitable for a CSS-attribute selector AND
+// guarantee uniqueness against any other raw option value. The slug
+// is a readable prefix (closed-enum values like "success"/"yes" slug
+// to themselves; model names stay legible); the FNV-1a-64 hash
+// suffix discriminates between values that happen to share a slug
+// ("foo-bar" vs "foo_bar" both slug to "foo-bar"). 6 hex chars =
+// 24 bits = ~16M-keyed buckets per slug, which is far more
+// resolution than any realistic option-value set needs.
+// Exported so tests (and any external consumer wiring selectors)
+// can build the testid the same way the component does — without
+// duplicating the slug + hash rule and drifting out of sync.
+export function optionTestSuffix(value: string): string {
+  return `${slugify(value)}-${fnv1a64Hex(value).slice(0, 6)}`;
+}
+
 function slugify(value: string): string {
   const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
   return slug.length === 0 ? "x" : slug;
