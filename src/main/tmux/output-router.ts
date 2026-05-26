@@ -194,10 +194,12 @@ export class TmuxOutputRouter {
     // exactly one byte). Invert that mapping to recover the raw bytes so the
     // wire format matches the live %output path; shipping the string as-is
     // would let the renderer treat each byte as a Unicode codepoint and emit
-    // latin1 mojibake for any non-ASCII content in scrollback.
+    // latin1 mojibake for any non-ASCII content in scrollback. `Buffer.from(
+    // text, 'latin1')` is the named, single-step inverse of that transport
+    // setEncoding — the operation Node already speaks. Buffer IS-A Uint8Array
+    // so the IPC payload shape is unchanged.
     const text = resp.output.join("\n");
-    const data = new Uint8Array(text.length);
-    for (let i = 0; i < text.length; i++) data[i] = text.charCodeAt(i) & 0xff;
+    const data = Buffer.from(text, "latin1");
     this.sendToPane(paneId, "tmux:output:chunk", { paneId, data });
     this.sendState(paneId, "streaming");
   }
