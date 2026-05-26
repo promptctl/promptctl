@@ -226,7 +226,7 @@ describe("Live", () => {
 
     // Open Errors chip and click "yes".
     await userEvent.click(screen.getByTestId("filter-chip-errors"));
-    await userEvent.click(screen.getByTestId("filter-option-yes"));
+    await userEvent.click(screen.getByTestId("filter-option-errors-yes"));
 
     // Only the errored row remains.
     const rowsAfter = screen.getAllByTestId("live-request-row");
@@ -276,7 +276,7 @@ describe("Live", () => {
 
     // AND-compose with Errors=yes → just alpha-bad.
     await userEvent.click(screen.getByTestId("filter-chip-errors"));
-    await userEvent.click(screen.getByTestId("filter-option-yes"));
+    await userEvent.click(screen.getByTestId("filter-option-errors-yes"));
     const remaining = screen.getAllByTestId("live-request-row");
     expect(remaining).toHaveLength(1);
     expect(remaining[0].textContent).toContain("req-alpha-bad");

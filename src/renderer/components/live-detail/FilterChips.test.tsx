@@ -43,8 +43,9 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    // Every chip exists.
-    for (const k of ["model", "status", "tool-use", "errors", "size"]) {
+    // Every chip exists — testid is the stable FilterKey, not the
+    // user-facing label.
+    for (const k of ["models", "statuses", "toolUse", "errors", "sizeBuckets"]) {
       const chip = screen.getByTestId(`filter-chip-${k}`);
       expect(chip).toBeTruthy();
       expect(chip.textContent).toContain("any");
@@ -61,7 +62,7 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    const modelChip = screen.getByTestId("filter-chip-model");
+    const modelChip = screen.getByTestId("filter-chip-models");
     expect(modelChip).toBeDisabled();
 
     rerender(
@@ -75,11 +76,45 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    expect(screen.getByTestId("filter-chip-model")).not.toBeDisabled();
-    await userEvent.click(screen.getByTestId("filter-chip-model"));
-    const menu = screen.getByTestId("filter-chip-menu-model");
-    expect(within(menu).getByTestId("filter-option-claude-sonnet")).toBeTruthy();
-    expect(within(menu).getByTestId("filter-option-claude-opus")).toBeTruthy();
+    expect(screen.getByTestId("filter-chip-models")).not.toBeDisabled();
+    await userEvent.click(screen.getByTestId("filter-chip-models"));
+    const menu = screen.getByTestId("filter-chip-menu-models");
+    // Option testid slug-encodes the option value to be selector-safe.
+    expect(
+      within(menu).getByTestId("filter-option-models-claude-sonnet"),
+    ).toBeTruthy();
+    expect(
+      within(menu).getByTestId("filter-option-models-claude-opus"),
+    ).toBeTruthy();
+  });
+
+  it("keeps Model chip enabled when filters.models has selections even if no records are observed", async () => {
+    // The bug this guards against: records vanish (client switch,
+    // Clear events) while filters.models retains selections. The
+    // chip used to disable itself out from under those selections,
+    // leaving the user no way to deselect short of Clear filters.
+    const onToggle = vi.fn();
+    render(
+      <FilterChips
+        records={[]}
+        filters={f({ models: new Set(["claude-sonnet"]) })}
+        onToggle={onToggle}
+        onClear={vi.fn()}
+      />,
+    );
+    const chip = screen.getByTestId("filter-chip-models");
+    expect(chip).not.toBeDisabled();
+    expect(chip.getAttribute("data-active")).toBe("true");
+    // The selected-but-unobserved value is in the option list so it
+    // can be toggled off.
+    await userEvent.click(chip);
+    const menu = screen.getByTestId("filter-chip-menu-models");
+    const selected = within(menu).getByTestId(
+      "filter-option-models-claude-sonnet",
+    );
+    expect(selected.getAttribute("aria-checked")).toBe("true");
+    await userEvent.click(selected);
+    expect(onToggle).toHaveBeenCalledWith("models", "claude-sonnet");
   });
 
   it("opening one chip closes the others", async () => {
@@ -91,10 +126,10 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByTestId("filter-chip-status"));
-    expect(screen.getByTestId("filter-chip-menu-status")).toBeTruthy();
+    await userEvent.click(screen.getByTestId("filter-chip-statuses"));
+    expect(screen.getByTestId("filter-chip-menu-statuses")).toBeTruthy();
     await userEvent.click(screen.getByTestId("filter-chip-errors"));
-    expect(screen.queryByTestId("filter-chip-menu-status")).toBeNull();
+    expect(screen.queryByTestId("filter-chip-menu-statuses")).toBeNull();
     expect(screen.getByTestId("filter-chip-menu-errors")).toBeTruthy();
   });
 
@@ -108,8 +143,8 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByTestId("filter-chip-status"));
-    await userEvent.click(screen.getByTestId("filter-option-success"));
+    await userEvent.click(screen.getByTestId("filter-chip-statuses"));
+    await userEvent.click(screen.getByTestId("filter-option-statuses-success"));
     expect(onToggle).toHaveBeenCalledWith("statuses", "success");
   });
 
@@ -122,7 +157,7 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    const single = screen.getByTestId("filter-chip-status");
+    const single = screen.getByTestId("filter-chip-statuses");
     expect(single.textContent).toContain("success");
     expect(single.getAttribute("data-active")).toBe("true");
 
@@ -135,7 +170,7 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    expect(screen.getByTestId("filter-chip-status").textContent).toContain(
+    expect(screen.getByTestId("filter-chip-statuses").textContent).toContain(
       "2 selected",
     );
   });
@@ -174,22 +209,24 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    const chip = screen.getByTestId("filter-chip-status");
+    const chip = screen.getByTestId("filter-chip-statuses");
     expect(chip.getAttribute("aria-haspopup")).toBe("menu");
     await userEvent.click(chip);
-    const menu = screen.getByTestId("filter-chip-menu-status");
+    const menu = screen.getByTestId("filter-chip-menu-statuses");
     expect(menu.getAttribute("role")).toBe("menu");
     expect(menu.getAttribute("aria-label")).toBe("Status");
-    const success = within(menu).getByTestId("filter-option-success");
+    const success = within(menu).getByTestId("filter-option-statuses-success");
     expect(success.getAttribute("role")).toBe("menuitemcheckbox");
     expect(success.getAttribute("aria-checked")).toBe("true");
-    const error = within(menu).getByTestId("filter-option-error");
+    const error = within(menu).getByTestId("filter-option-statuses-error");
     expect(error.getAttribute("role")).toBe("menuitemcheckbox");
     expect(error.getAttribute("aria-checked")).toBe("false");
   });
 
-  it("auto-closes the Model chip when records dry up so aria-expanded stays consistent", async () => {
-    // Start with records → Model chip is enabled.
+  it("auto-closes the Model chip when records dry up AND no selections remain", async () => {
+    // With no selections, an empty record set should both disable
+    // the chip AND auto-close any open menu so aria-expanded /
+    // suppressed-popup don't disagree.
     const { rerender } = render(
       <FilterChips
         records={[record({ requestBody: { model: "claude-sonnet" } })]}
@@ -198,15 +235,12 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    const chip = screen.getByTestId("filter-chip-model");
+    const chip = screen.getByTestId("filter-chip-models");
     expect(chip).not.toBeDisabled();
     await userEvent.click(chip);
-    expect(screen.getByTestId("filter-chip-menu-model")).toBeTruthy();
+    expect(screen.getByTestId("filter-chip-menu-models")).toBeTruthy();
     expect(chip.getAttribute("aria-expanded")).toBe("true");
 
-    // Records vanish — chip becomes disabled. The effect must close
-    // the open menu so aria-expanded and the suppressed popup don't
-    // disagree, and so the now-unclickable button isn't stuck.
     rerender(
       <FilterChips
         records={[]}
@@ -215,10 +249,10 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    const chipAfter = screen.getByTestId("filter-chip-model");
+    const chipAfter = screen.getByTestId("filter-chip-models");
     expect(chipAfter).toBeDisabled();
     expect(chipAfter.getAttribute("aria-expanded")).toBe("false");
-    expect(screen.queryByTestId("filter-chip-menu-model")).toBeNull();
+    expect(screen.queryByTestId("filter-chip-menu-models")).toBeNull();
   });
 
   it("clicking outside the chip strip closes any open menu", async () => {
@@ -233,9 +267,9 @@ describe("FilterChips", () => {
         <button data-testid="outside">outside</button>
       </div>,
     );
-    await userEvent.click(screen.getByTestId("filter-chip-status"));
-    expect(screen.getByTestId("filter-chip-menu-status")).toBeTruthy();
+    await userEvent.click(screen.getByTestId("filter-chip-statuses"));
+    expect(screen.getByTestId("filter-chip-menu-statuses")).toBeTruthy();
     await userEvent.click(screen.getByTestId("outside"));
-    expect(screen.queryByTestId("filter-chip-menu-status")).toBeNull();
+    expect(screen.queryByTestId("filter-chip-menu-statuses")).toBeNull();
   });
 });

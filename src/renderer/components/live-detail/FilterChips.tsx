@@ -60,8 +60,18 @@ export function FilterChips({
   // Local UI state, no need to lift to the store.
   const [openKey, setOpenKey] = useState<FilterKey | null>(null);
   const containerRef = useRef<HTMLDivElement | null>(null);
-  const models = observedModels(records);
-  const hasModelOptions = models.length > 0;
+  // Option list for Model is observation-driven, but a currently-
+  // selected model must always remain togglable — otherwise the chip
+  // could disable itself out from under an active selection when the
+  // record set drains, leaving the user with no way to deselect short
+  // of Clear filters. Union the observed names with the selected
+  // names; order is observed-first, selected-extras after.
+  // [LAW:types-are-the-program] the type "options the user can act
+  // on" is `observed ∪ selected`, not `observed`. Lifting selected
+  // into the option list makes "stuck disabled with selections" an
+  // unrepresentable state.
+  const observed = observedModels(records);
+  const modelOptions = mergeModelOptions(observed, filters.models);
   const cleared = filtersAreEmpty(filters);
 
   // Close on outside click. Clicking another chip is "inside" so the
@@ -84,11 +94,11 @@ export function FilterChips({
   // sit with aria-expanded="true" while the popup is suppressed by
   // `{isOpen && !disabled && ...}`, and the disabled button can't be
   // clicked to close itself. Today only Model is disablable (the
-  // closed-enum categories always have options), so we reconcile
-  // here. New disablable categories add a clause to the boolean.
+  // closed-enum categories always have options); reconcile here.
+  // New disablable categories add a clause to the boolean.
   useEffect(() => {
-    if (openKey === "models" && !hasModelOptions) setOpenKey(null);
-  }, [openKey, hasModelOptions]);
+    if (openKey === "models" && modelOptions.length === 0) setOpenKey(null);
+  }, [openKey, modelOptions.length]);
 
   function chipProps<K extends FilterKey>(key: K) {
     return {
@@ -106,14 +116,19 @@ export function FilterChips({
       className="flex flex-wrap items-center gap-2 border-b border-neutral-800 bg-neutral-950 px-4 py-2 text-xs"
     >
       <FilterChip
+        testKey="models"
         label="Model"
         emptyLabel="any"
-        options={models}
+        options={modelOptions}
         selected={filters.models}
-        disabled={!hasModelOptions}
+        // Disabled only when there are no options at all — i.e.
+        // nothing observed AND nothing selected. With a selection,
+        // the chip stays enabled so the user can deselect it.
+        disabled={modelOptions.length === 0}
         {...chipProps("models")}
       />
       <FilterChip
+        testKey="statuses"
         label="Status"
         emptyLabel="any"
         options={STATUS_OPTIONS}
@@ -121,6 +136,7 @@ export function FilterChips({
         {...chipProps("statuses")}
       />
       <FilterChip
+        testKey="toolUse"
         label="Tool use"
         emptyLabel="any"
         options={TOOL_USE_OPTIONS}
@@ -128,6 +144,7 @@ export function FilterChips({
         {...chipProps("toolUse")}
       />
       <FilterChip
+        testKey="errors"
         label="Errors"
         emptyLabel="any"
         options={ERROR_OPTIONS}
@@ -135,6 +152,7 @@ export function FilterChips({
         {...chipProps("errors")}
       />
       <FilterChip
+        testKey="sizeBuckets"
         label="Size"
         emptyLabel="any"
         options={SIZE_OPTIONS}
@@ -160,6 +178,12 @@ export function FilterChips({
 }
 
 interface FilterChipProps<V extends string> {
+  // The stable identity used for test ids and the menu's a11y label.
+  // Kept separate from `label` so a copy change to the user-facing
+  // string never invalidates a selector. [LAW:single-enforcer]: the
+  // FilterKey from the store is the canonical id; no string
+  // transformation of the human label substitutes for it.
+  testKey: FilterKey;
   label: string;
   emptyLabel: string;
   options: readonly V[];
@@ -171,6 +195,7 @@ interface FilterChipProps<V extends string> {
 }
 
 function FilterChip<V extends string>({
+  testKey,
   label,
   emptyLabel,
   options,
@@ -187,7 +212,7 @@ function FilterChip<V extends string>({
         type="button"
         onClick={onToggleOpen}
         disabled={disabled}
-        data-testid={`filter-chip-${label.toLowerCase().replace(/\s+/g, "-")}`}
+        data-testid={`filter-chip-${testKey}`}
         data-active={active ? "true" : "false"}
         aria-expanded={isOpen}
         aria-haspopup="menu"
@@ -208,7 +233,7 @@ function FilterChip<V extends string>({
         <div
           role="menu"
           aria-label={label}
-          data-testid={`filter-chip-menu-${label.toLowerCase().replace(/\s+/g, "-")}`}
+          data-testid={`filter-chip-menu-${testKey}`}
           className="absolute left-0 top-full z-20 mt-1 min-w-[10rem] rounded border border-neutral-700 bg-neutral-900 py-1 shadow-lg"
         >
           {options.length === 0 ? (
@@ -225,7 +250,11 @@ function FilterChip<V extends string>({
                   role="menuitemcheckbox"
                   aria-checked={on}
                   onClick={() => onChoose(option)}
-                  data-testid={`filter-option-${option}`}
+                  // Slug the option so model names (open-set strings)
+                  // can't break CSS selectors in Testing Library /
+                  // Playwright. Closed-enum values slug to themselves.
+                  data-testid={`filter-option-${testKey}-${slugify(option)}`}
+                  data-value={option}
                   className="flex w-full items-center gap-2 px-3 py-1 text-left text-[11px] text-neutral-200 hover:bg-neutral-800"
                 >
                   <span
@@ -247,6 +276,16 @@ function FilterChip<V extends string>({
   );
 }
 
+// Make an arbitrary option string safe to embed in a CSS selector
+// (Testing Library, Playwright). Closed-enum values like "success",
+// "yes", "small" slug to themselves; open-set values like model
+// names with dots and hyphens stay readable. Other characters
+// collapse to a single hyphen; consecutive hyphens dedupe.
+function slugify(value: string): string {
+  const slug = value.toLowerCase().replace(/[^a-z0-9]+/g, "-").replace(/^-+|-+$/g, "");
+  return slug.length === 0 ? "x" : slug;
+}
+
 function summarize<V extends string>(selected: Set<V>, emptyLabel: string): string {
   if (selected.size === 0) return emptyLabel;
   if (selected.size === 1) {
@@ -254,4 +293,26 @@ function summarize<V extends string>(selected: Set<V>, emptyLabel: string): stri
     return only;
   }
   return `${selected.size} selected`;
+}
+
+// Models the user can act on = observed ∪ currently-selected. Order
+// is observed-first (most familiar to the user), with any extras
+// from selection appended in iteration order. Deduped.
+function mergeModelOptions(
+  observed: readonly string[],
+  selected: ReadonlySet<string>,
+): string[] {
+  const seen = new Set<string>();
+  const ordered: string[] = [];
+  for (const m of observed) {
+    if (seen.has(m)) continue;
+    seen.add(m);
+    ordered.push(m);
+  }
+  for (const m of selected) {
+    if (seen.has(m)) continue;
+    seen.add(m);
+    ordered.push(m);
+  }
+  return ordered;
 }
