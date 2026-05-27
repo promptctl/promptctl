@@ -1,5 +1,3 @@
-import type { SessionSaveResult } from "../../shared/types";
-
 // [LAW:dataflow-not-control-flow] Rendered when SessionSaveResult.
 // blockedReason === "live-tail". No state of its own; everything it
 // shows comes from props.
@@ -11,12 +9,17 @@ import type { SessionSaveResult } from "../../shared/types";
 // — but it is named "Force save" rather than the encouraging language
 // the validation dialog uses, because the cost here is data loss, not
 // just a malformed file.
+//
+// The full SessionSaveResult is intentionally not threaded in: nothing
+// in it differentiates one live-tail block from another, and the live-
+// tail banner above the editor already shows which launch is the
+// writer. Keeping the prop surface minimal avoids the temptation to
+// duplicate state that lives on the launch row.
 export function LiveTailBlockedDialog({
   onCancel,
   onForceSave,
   saving,
 }: {
-  result: SessionSaveResult;
   onCancel: () => void;
   onForceSave: () => void;
   saving: boolean;

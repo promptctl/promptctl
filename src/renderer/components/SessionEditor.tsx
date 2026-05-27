@@ -2538,7 +2538,6 @@ export function SessionEditor() {
       )}
       {saveResult?.blockedReason === "live-tail" && (
         <LiveTailBlockedDialog
-          result={saveResult}
           onCancel={() => setSaveResult(null)}
           onForceSave={async () => {
             const result = await save(true);
