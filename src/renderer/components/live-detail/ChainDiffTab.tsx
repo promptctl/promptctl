@@ -26,10 +26,10 @@ import {
   type SystemDiffChunk,
   type ToolsDiff,
 } from "./chainDiff";
+import { HighlightedText } from "../highlight";
 import { JsonlLineView } from "../jsonl-view/JsonlLineView";
 import { fullPromptText, toolNames } from "./promptBuckets";
 import { shortHash } from "./promptHash";
-import { HighlightedText } from "./blocks";
 
 export function ChainDiffTab({
   chain,
@@ -95,9 +95,17 @@ export function ChainDiffTab({
         selectedRequestId={selectedRequestId}
         highlightSubstring={highlightSubstring}
         onSelectRequest={onSelectRequest}
-        renderBody={(run) => <ToolsRunBody value={run.value} />}
+        renderBody={(run) => (
+          <ToolsRunBody
+            value={run.value}
+            highlightSubstring={highlightSubstring}
+          />
+        )}
         renderDiff={(prev, current) => (
-          <ToolsDiffView diff={diffTools(prev.value, current.value)} />
+          <ToolsDiffView
+            diff={diffTools(prev.value, current.value)}
+            highlightSubstring={highlightSubstring}
+          />
         )}
         emptyHash="(no tools)"
         testIdPrefix="chain-diff-tools"
@@ -373,7 +381,13 @@ function DiffChunkLine({
 
 // ─── Tools body + diff ────────────────────────────────────────────────────
 
-function ToolsRunBody({ value }: { value: unknown }) {
+function ToolsRunBody({
+  value,
+  highlightSubstring,
+}: {
+  value: unknown;
+  highlightSubstring: string;
+}) {
   if (value === null) {
     return (
       <div className="text-[11px] italic text-neutral-500">
@@ -393,17 +407,23 @@ function ToolsRunBody({ value }: { value: unknown }) {
               key={name}
               className="rounded bg-neutral-800 px-1.5 py-0.5 text-neutral-200"
             >
-              {name}
+              <HighlightedText text={name} query={highlightSubstring} />
             </span>
           ))
         )}
       </div>
-      <JsonlLineView raw={value} />
+      <JsonlLineView raw={value} highlightSubstring={highlightSubstring} />
     </div>
   );
 }
 
-function ToolsDiffView({ diff }: { diff: ToolsDiff }) {
+function ToolsDiffView({
+  diff,
+  highlightSubstring,
+}: {
+  diff: ToolsDiff;
+  highlightSubstring: string;
+}) {
   const empty =
     diff.added.length === 0 &&
     diff.removed.length === 0 &&
@@ -426,6 +446,7 @@ function ToolsDiffView({ diff }: { diff: ToolsDiff }) {
           tone="added"
           tools={diff.added.map((t) => ({ name: t.name, value: t.value }))}
           testId="chain-diff-tools-added"
+          highlightSubstring={highlightSubstring}
         />
       )}
       {diff.removed.length > 0 && (
@@ -434,6 +455,7 @@ function ToolsDiffView({ diff }: { diff: ToolsDiff }) {
           tone="removed"
           tools={diff.removed.map((t) => ({ name: t.name, value: t.value }))}
           testId="chain-diff-tools-removed"
+          highlightSubstring={highlightSubstring}
         />
       )}
       {diff.changed.length > 0 && (
@@ -447,15 +469,23 @@ function ToolsDiffView({ diff }: { diff: ToolsDiff }) {
                 key={c.name}
                 className="rounded border border-amber-800/60 bg-amber-950/20 p-2"
               >
-                <div className="mb-1 font-mono text-amber-200">{c.name}</div>
+                <div className="mb-1 font-mono text-amber-200">
+                  <HighlightedText text={c.name} query={highlightSubstring} />
+                </div>
                 <div className="grid grid-cols-1 gap-2 md:grid-cols-2">
                   <div>
                     <div className="text-[10px] text-red-300">before</div>
-                    <JsonlLineView raw={c.from} />
+                    <JsonlLineView
+                      raw={c.from}
+                      highlightSubstring={highlightSubstring}
+                    />
                   </div>
                   <div>
                     <div className="text-[10px] text-green-300">after</div>
-                    <JsonlLineView raw={c.to} />
+                    <JsonlLineView
+                      raw={c.to}
+                      highlightSubstring={highlightSubstring}
+                    />
                   </div>
                 </div>
               </div>
@@ -472,11 +502,13 @@ function ToolGroup({
   tone,
   tools,
   testId,
+  highlightSubstring,
 }: {
   label: string;
   tone: "added" | "removed";
   tools: { name: string; value: unknown }[];
   testId: string;
+  highlightSubstring: string;
 }) {
   const headerClass =
     tone === "added" ? "text-green-300" : "text-red-300";
@@ -492,8 +524,13 @@ function ToolGroup({
       <div className="space-y-1">
         {tools.map((t) => (
           <div key={t.name} className={`rounded border p-2 ${cardClass}`}>
-            <div className="mb-1 font-mono text-neutral-200">{t.name}</div>
-            <JsonlLineView raw={t.value} />
+            <div className="mb-1 font-mono text-neutral-200">
+              <HighlightedText text={t.name} query={highlightSubstring} />
+            </div>
+            <JsonlLineView
+              raw={t.value}
+              highlightSubstring={highlightSubstring}
+            />
           </div>
         ))}
       </div>

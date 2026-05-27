@@ -25,7 +25,10 @@ export function RequestTab({
             <div className="font-mono text-sm text-neutral-200">{model}</div>
           </Section>
           <Section title="System">
-            <JsonlLineView raw={system ?? null} />
+            <JsonlLineView
+              raw={system ?? null}
+              highlightSubstring={highlightSubstring}
+            />
           </Section>
           <Section title={`Messages (${messages.length})`}>
             <div className="space-y-2">
@@ -42,14 +45,21 @@ export function RequestTab({
           <Section title={`Tools (${tools.length})`}>
             <div className="space-y-2">
               {tools.map((tool, index) => (
-                <JsonCard key={jsonKey(tool, index)} value={tool} />
+                <JsonCard
+                  key={jsonKey(tool, index)}
+                  value={tool}
+                  highlightSubstring={highlightSubstring}
+                />
               ))}
             </div>
           </Section>
         </>
       ) : (
         <Section title="Request body">
-          <JsonlLineView raw={requestBody} />
+          <JsonlLineView
+            raw={requestBody}
+            highlightSubstring={highlightSubstring}
+          />
         </Section>
       )}
     </div>
@@ -67,10 +77,16 @@ function Section({ title, children }: { title: string; children: ReactNode }) {
   );
 }
 
-function JsonCard({ value }: { value: unknown }) {
+function JsonCard({
+  value,
+  highlightSubstring,
+}: {
+  value: unknown;
+  highlightSubstring?: string;
+}) {
   return (
     <div className="rounded border border-neutral-800 bg-neutral-900/50">
-      <JsonlLineView raw={value} />
+      <JsonlLineView raw={value} highlightSubstring={highlightSubstring} />
     </div>
   );
 }

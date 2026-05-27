@@ -1,4 +1,4 @@
-import { useState } from "react";
+import { useEffect, useRef, useState } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";
 import { ChainDiffTab } from "./ChainDiffTab";
 import { ConversationTab } from "./ConversationTab";
@@ -59,6 +59,28 @@ export function RequestDetail({
     record.assembledResponse?.stop_reason ??
     (record.state === "complete" ? "end_turn" : null);
 
+  // [LAW:single-enforcer] One auto-scroll effect across all detail tabs.
+  // Every tab marks search hits with the canonical
+  // <mark data-testid="search-highlight"> via HighlightedText, so a single
+  // querySelector on the shared scroll container works for any active tab.
+  // Deps: activeTab (user switched surfaces), highlightQuery (query
+  // changed), record.requestId (a different request loaded). chain.length
+  // covers the case where the Chain/Conversation tabs gain content as a
+  // new request joins the chain. jsdom-safe via the scrollIntoView guard.
+  const scrollContainerRef = useRef<HTMLDivElement | null>(null);
+  const chainLength = chain?.length ?? 0;
+  useEffect(() => {
+    const container = scrollContainerRef.current;
+    if (container === null) return;
+    if (highlightQuery === "") return;
+    const anchor = container.querySelector<HTMLElement>(
+      `[data-testid="search-highlight"]`,
+    );
+    if (anchor && typeof anchor.scrollIntoView === "function") {
+      anchor.scrollIntoView({ block: "nearest", behavior: "auto" });
+    }
+  }, [activeTab, highlightQuery, record.requestId, chainLength]);
+
   return (
     <section className="flex h-full min-w-0 flex-1 flex-col border-l border-neutral-800 bg-neutral-950">
       <div className="border-b border-neutral-800 px-4 py-3">
@@ -106,7 +128,11 @@ export function RequestDetail({
           ))}
         </div>
       </div>
-      <div className="min-h-0 flex-1 overflow-auto">
+      <div
+        ref={scrollContainerRef}
+        data-testid="request-detail-scroll"
+        className="min-h-0 flex-1 overflow-auto"
+      >
         {/* [LAW:dataflow-not-control-flow] The tab strip is fixed; selected projection content varies by activeTab data. */}
         {activeTab === "overview" && <OverviewTab record={record} />}
         {activeTab === "request" && (

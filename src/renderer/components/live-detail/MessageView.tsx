@@ -45,7 +45,10 @@ export function MessageView({
             ))}
           </div>
         ) : (
-          <JsonlLineView raw={content ?? null} />
+          <JsonlLineView
+            raw={content ?? null}
+            highlightSubstring={highlightSubstring}
+          />
         )}
       </div>
     </details>

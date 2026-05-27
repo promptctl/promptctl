@@ -3,7 +3,6 @@ import {
   normalizeQuery,
   recordMatchesSearch,
   searchText,
-  splitHighlights,
   type SearchIndex,
 } from "./search";
 import type {
@@ -263,58 +262,3 @@ describe("recordMatchesSearch", () => {
   });
 });
 
-describe("splitHighlights", () => {
-  it("empty query yields a single non-match segment", () => {
-    const segments = splitHighlights("the quick brown fox", "");
-    expect(segments).toEqual([{ text: "the quick brown fox", isMatch: false }]);
-  });
-
-  it("empty text yields a single non-match segment", () => {
-    expect(splitHighlights("", "needle")).toEqual([{ text: "", isMatch: false }]);
-  });
-
-  it("highlights a single match preserving original case", () => {
-    const segments = splitHighlights("Hello, World", "world");
-    expect(segments).toEqual([
-      { text: "Hello, ", isMatch: false },
-      { text: "World", isMatch: true },
-    ]);
-  });
-
-  it("highlights multiple non-overlapping matches", () => {
-    const segments = splitHighlights("aXbXc", "x");
-    expect(segments).toEqual([
-      { text: "a", isMatch: false },
-      { text: "X", isMatch: true },
-      { text: "b", isMatch: false },
-      { text: "X", isMatch: true },
-      { text: "c", isMatch: false },
-    ]);
-  });
-
-  it("handles a match at the start", () => {
-    const segments = splitHighlights("foo bar", "foo");
-    expect(segments).toEqual([
-      { text: "foo", isMatch: true },
-      { text: " bar", isMatch: false },
-    ]);
-  });
-
-  it("handles a match at the end", () => {
-    const segments = splitHighlights("foo bar", "bar");
-    expect(segments).toEqual([
-      { text: "foo ", isMatch: false },
-      { text: "bar", isMatch: true },
-    ]);
-  });
-
-  it("does not infinite-loop on adjacent matches", () => {
-    const segments = splitHighlights("aaaa", "aa");
-    // After consuming a match of length 2, the cursor advances past it
-    // so the second "aa" is also matched.
-    expect(segments).toEqual([
-      { text: "aa", isMatch: true },
-      { text: "aa", isMatch: true },
-    ]);
-  });
-});

@@ -2,7 +2,7 @@
 // JSON.stringify of the body verbatim and does its own substring marking
 // on that text (per design §8.3). The block-renderer registry's marking
 // path doesn't apply here because the raw view is not a block.
-import { HighlightedText } from "./blocks";
+import { HighlightedText } from "../highlight";
 import type { RequestRecord } from "../../../shared/proxy-events";
 
 export function RawTab({
