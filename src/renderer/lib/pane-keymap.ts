@@ -40,11 +40,22 @@ export function createPaneCommander(
 ): TmuxCommander {
   return {
     execute(command: string) {
+      // [LAW:dataflow-not-control-flow] The ordering invariant —
+      // "select-pane runs before the binding command" — lives in the
+      // value (one compound command-line tmux parses sequentially),
+      // not in a sequence of execute() calls. One transport write, one
+      // FIFO entry; interleaving is structurally impossible because
+      // there is nothing to interleave. Per tmux(1) COMMAND PARSING:
+      // "if a command in the sequence encounters an error, no
+      // subsequent commands are executed" — so if select-pane fails
+      // (pane vanished mid-chord) the binding command does not run
+      // against a stale target. We are sending the command directly to
+      // tmux via control mode (no shell), so plain `;` is the
+      // separator; `\;` would be a literal semicolon in an argument.
       const paneId = getSelectedPaneId();
-      if (paneId !== null) {
-        void proxy.execute(`select-pane -t ${paneId}`);
-      }
-      return proxy.execute(command);
+      const composed =
+        paneId === null ? command : `select-pane -t ${paneId} ; ${command}`;
+      return proxy.execute(composed);
     },
     detach() {
       // intentionally a no-op — see file header

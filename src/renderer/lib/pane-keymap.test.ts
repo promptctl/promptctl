@@ -218,33 +218,43 @@ describe("Escape while in prefix mode resets to root without firing a command", 
   });
 });
 
-describe("commander prepends select-pane -t %X for the focused pane", () => {
-  // [LAW:one-source-of-truth] Without this, untargeted commands act on
-  // whichever pane tmux happened to last touch — not the pane the user
-  // picked. The prepend collapses tmux's per-client current-pane cursor
-  // onto the UI's authoritative selection.
-  it("split-window is preceded by select-pane targeting the focused pane", () => {
+describe("commander composes select-pane + binding into a single tmux command", () => {
+  // [LAW:dataflow-not-control-flow] The targeting and the binding go
+  // out as one tmux command-line (separated by `;`), so the ordering
+  // invariant is in the value, not in the sequence of execute calls.
+  // Per tmux(1) COMMAND PARSING, a failed command in the sequence
+  // halts the remainder — so if select-pane errors, the binding
+  // command does not run against a stale target.
+  it("split-window is composed with select-pane in one command", () => {
     const { proxy, commands } = recordingProxy();
     const commander = createPaneCommander(proxy, () => "%7");
     const binding = bindKeymap(commander, defaultTmuxKeymap());
     fire(binding, "C-b", "%");
-    expect(commands).toEqual(["select-pane -t %7", "split-window -h"]);
+    expect(commands).toEqual(["select-pane -t %7 ; split-window -h"]);
   });
 
-  it("resize-pane -Z is preceded by select-pane targeting the focused pane", () => {
+  it("resize-pane -Z is composed with select-pane in one command", () => {
     const { proxy, commands } = recordingProxy();
     const commander = createPaneCommander(proxy, () => "%12");
     const binding = bindKeymap(commander, defaultTmuxKeymap());
     fire(binding, "C-b", "z");
-    expect(commands).toEqual(["select-pane -t %12", "resize-pane -Z"]);
+    expect(commands).toEqual(["select-pane -t %12 ; resize-pane -Z"]);
   });
 
-  it("when no pane is selected, no select-pane is prepended", () => {
+  it("when no pane is selected, the binding command is sent alone", () => {
     const { proxy, commands } = recordingProxy();
     const commander = createPaneCommander(proxy, () => null);
     const binding = bindKeymap(commander, defaultTmuxKeymap());
     fire(binding, "C-b", "c");
     expect(commands).toEqual(["new-window"]);
+  });
+
+  it("a chord that issues no execute (Escape reset) writes nothing", () => {
+    const { proxy, commands } = recordingProxy();
+    const commander = createPaneCommander(proxy, () => "%3");
+    const binding = bindKeymap(commander, defaultTmuxKeymap());
+    press(binding, "C-b");
+    expect(commands).toEqual([]);
   });
 });
 
