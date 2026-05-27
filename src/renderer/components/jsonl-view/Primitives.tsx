@@ -1,8 +1,15 @@
 // Field-level primitive renderers. Every JSONL field value flows through
 // one of these components so visual vocabulary stays consistent across the
 // entire view. [LAW:one-type-per-behavior] One renderer per field semantic.
+//
+// Substring highlighting: every primitive that renders user-visible text
+// runs that text through HighlightedText so an active search query marks
+// matches uniformly. The query is read from HighlightQueryContext, never
+// threaded as a prop — JsonlLineView is recursive and the prop would
+// touch every intermediate signature for no value.
 
 import type { ReactNode } from "react";
+import { HighlightedText, useHighlightQuery } from "../highlight";
 import { XMLText } from "./XMLText";
 import { fmtClockTime, kfmt, pathTail, truncate } from "./utils";
 
@@ -32,29 +39,32 @@ function Tip({
 // ---- Opaque handles — recede visually, full value in tooltip -------------
 
 export function IdValue({ value, len = 8 }: { value: string; len?: number }) {
+  const query = useHighlightQuery();
   if (!value) return <Dim>·</Dim>;
   const short = value.slice(0, len);
   return (
     <Tip tip={value} className={`${MONO} text-neutral-500`}>
-      {short}
+      <HighlightedText text={short} query={query} />
     </Tip>
   );
 }
 
 export function TimeValue({ value }: { value: string }) {
+  const query = useHighlightQuery();
   if (!value) return null;
   return (
     <Tip tip={value} className={`${MONO} text-neutral-500 tabular-nums`}>
-      {fmtClockTime(value)}
+      <HighlightedText text={fmtClockTime(value)} query={query} />
     </Tip>
   );
 }
 
 export function PathValue({ value }: { value: string }) {
+  const query = useHighlightQuery();
   if (!value) return null;
   return (
     <Tip tip={value} className={`${MONO} text-neutral-400`}>
-      {pathTail(value)}
+      <HighlightedText text={pathTail(value)} query={query} />
     </Tip>
   );
 }
@@ -195,11 +205,14 @@ export function Signature({ value }: { value: string }) {
 // ---- Thinking preview (truncated, full body in tooltip) -----------------
 
 export function ThinkingPreview({ value }: { value: string }) {
+  const query = useHighlightQuery();
   if (!value) return <Dim>(empty)</Dim>;
   return (
     <Tip tip={value} className="text-purple-300">
       <span className="mr-1 text-purple-400">◐</span>
-      <span className="italic">{truncate(value, 120)}</span>
+      <span className="italic">
+        <HighlightedText text={truncate(value, 120)} query={query} />
+      </span>
     </Tip>
   );
 }
@@ -211,6 +224,7 @@ export function ToolInput({
 }: {
   input: Record<string, unknown> | null | undefined;
 }) {
+  const query = useHighlightQuery();
   if (!input || typeof input !== "object") return null;
   const entries = Object.entries(input).filter(([k]) => k !== "caller");
   const SHOW = 3;
@@ -241,9 +255,13 @@ export function ToolInput({
     <Tip tip={tipText} className={`${MONO} inline-flex items-baseline gap-1.5`}>
       {short.map(([k, v]) => (
         <span key={k} className="inline-flex items-baseline">
-          <span className="text-neutral-500">{k}</span>
+          <span className="text-neutral-500">
+            <HighlightedText text={k} query={query} />
+          </span>
           <span className="text-neutral-600">:</span>
-          <span className="ml-0.5 text-neutral-300">{fmtV(v)}</span>
+          <span className="ml-0.5 text-neutral-300">
+            <HighlightedText text={fmtV(v)} query={query} />
+          </span>
         </span>
       ))}
       {overflow > 0 && <span className="text-neutral-500">+{overflow}</span>}
@@ -254,7 +272,10 @@ export function ToolInput({
 // ---- Tool name (high contrast — this is the semantic verb) ---------------
 
 export function ToolName({ value }: { value: string }) {
+  const query = useHighlightQuery();
   return (
-    <span className={`${MONO} text-violet-300 font-semibold`}>{value}</span>
+    <span className={`${MONO} text-violet-300 font-semibold`}>
+      <HighlightedText text={value} query={query} />
+    </span>
   );
 }

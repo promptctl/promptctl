@@ -5,15 +5,14 @@
 // [LAW:dataflow-not-control-flow] Control flow is identical for every block:
 // look up by type, render. Variability lives in the registry map.
 //
-// highlightSubstring on BlockCtx is the search seam: when set, text-bearing
-// renderers wrap matching substrings with <mark>. The JsonlLineView-based
-// renderers (tool_use input, OpaqueBlock) don't mark inside the structured
-// view — the row-level match cue is sufficient and threading marks into
-// the JSON viewer is a separate, larger surface.
+// highlightSubstring on BlockCtx is the search seam: text-bearing renderers
+// wrap matching substrings with <mark>, and JsonlLineView-based renderers
+// (tool_use input, tool_result objects, OpaqueBlock) forward the query so
+// the structured view marks matches via XMLText too.
 
 import type { ReactNode } from "react";
+import { HighlightedText } from "../highlight";
 import { JsonlLineView } from "../jsonl-view/JsonlLineView";
-import { splitHighlights } from "./search";
 
 export interface BlockCtx {
   index: number;
@@ -56,7 +55,7 @@ function TextBlock(block: unknown, ctx: BlockCtx): ReactNode {
   );
 }
 
-function ToolUseBlock(block: unknown): ReactNode {
+function ToolUseBlock(block: unknown, ctx: BlockCtx): ReactNode {
   const rec = asRecord(block);
   const name = typeof rec?.name === "string" ? rec.name : "(unnamed)";
   const id = typeof rec?.id === "string" ? rec.id : "";
@@ -78,7 +77,7 @@ function ToolUseBlock(block: unknown): ReactNode {
       }
       testId="block-tool-use"
     >
-      <JsonlLineView raw={input} />
+      <JsonlLineView raw={input} highlightSubstring={ctx.highlightSubstring} />
     </BlockShell>
   );
 }
@@ -119,7 +118,10 @@ function ToolResultBlock(block: unknown, ctx: BlockCtx): ReactNode {
           />
         </pre>
       ) : (
-        <JsonlLineView raw={content ?? null} />
+        <JsonlLineView
+          raw={content ?? null}
+          highlightSubstring={ctx.highlightSubstring}
+        />
       )}
     </BlockShell>
   );
@@ -155,39 +157,8 @@ function OpaqueBlock(block: unknown, ctx: BlockCtx): ReactNode {
   const type = blockType(block);
   return (
     <BlockShell label={`${type} #${ctx.index}`} testId="block-opaque">
-      <JsonlLineView raw={block} />
+      <JsonlLineView raw={block} highlightSubstring={ctx.highlightSubstring} />
     </BlockShell>
-  );
-}
-
-// [LAW:single-enforcer] Substring marking lives here so every text-bearing
-// block renderer wraps matches the same way — no per-block divergence in
-// the marker shape. Empty query yields the unmarked text as a single
-// node; the consumer doesn't need to branch.
-export function HighlightedText({
-  text,
-  query,
-}: {
-  text: string;
-  query: string;
-}): ReactNode {
-  const segments = splitHighlights(text, query);
-  return (
-    <>
-      {segments.map((segment, index) =>
-        segment.isMatch ? (
-          <mark
-            key={index}
-            data-testid="search-highlight"
-            className="rounded bg-yellow-700/60 text-yellow-100"
-          >
-            {segment.text}
-          </mark>
-        ) : (
-          <span key={index}>{segment.text}</span>
-        ),
-      )}
-    </>
   );
 }
 

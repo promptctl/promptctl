@@ -1,5 +1,5 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
-import { beforeEach, describe, expect, it } from "vitest";
+import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestRecord } from "../../../shared/proxy-events";
 import {
   installElectronMock,
@@ -64,6 +64,61 @@ describe("RequestDetail", () => {
     expect(electron.writeClipboard).toHaveBeenCalledWith(
       JSON.stringify(record.requestBody, null, 2),
     );
+  });
+
+  it("auto-scrolls the first search-highlight into view when a query is active", async () => {
+    const user = setupUser();
+    const record = requestRecord();
+    const scrollSpy = vi.fn();
+    // jsdom doesn't implement scrollIntoView; install a spy on the prototype
+    // so the effect can find a callable method via element.scrollIntoView.
+    const originalScrollIntoView = (
+      HTMLElement.prototype as unknown as {
+        scrollIntoView?: (...args: unknown[]) => void;
+      }
+    ).scrollIntoView;
+    (
+      HTMLElement.prototype as unknown as {
+        scrollIntoView: (...args: unknown[]) => void;
+      }
+    ).scrollIntoView = scrollSpy;
+    try {
+      const { rerender } = render(
+        <RequestDetail record={record} highlightQuery="" />,
+      );
+      // No query → no auto-scroll yet, even on tab switch.
+      await user.click(screen.getByRole("button", { name: "Response" }));
+      expect(scrollSpy).not.toHaveBeenCalled();
+
+      // Activating a query that matches "Hello response" must scroll the
+      // first <mark> into view on the active (Response) tab.
+      rerender(<RequestDetail record={record} highlightQuery="hello" />);
+      expect(scrollSpy).toHaveBeenCalled();
+      const lastCallTarget = (scrollSpy.mock.contexts.at(-1) ??
+        null) as HTMLElement | null;
+      expect(lastCallTarget).not.toBeNull();
+      expect(lastCallTarget?.dataset.testid ?? "").toBe("search-highlight");
+
+      // Switching tabs while a query is active triggers a fresh scroll on
+      // the new tab's first match.
+      scrollSpy.mockClear();
+      await user.click(screen.getByRole("button", { name: "Request" }));
+      expect(scrollSpy).toHaveBeenCalled();
+    } finally {
+      if (originalScrollIntoView === undefined) {
+        delete (
+          HTMLElement.prototype as unknown as {
+            scrollIntoView?: unknown;
+          }
+        ).scrollIntoView;
+      } else {
+        (
+          HTMLElement.prototype as unknown as {
+            scrollIntoView: (...args: unknown[]) => void;
+          }
+        ).scrollIntoView = originalScrollIntoView;
+      }
+    }
   });
 
   it("surfaces request errors above the tab strip", () => {

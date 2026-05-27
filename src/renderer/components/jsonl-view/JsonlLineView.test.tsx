@@ -69,10 +69,42 @@ describe("JsonlLineView — composed field grid", () => {
           "Please run <command-name>/review</command-name> on the changes.",
       },
     };
-    render(<JsonlLineView raw={raw} />);
+    const { container } = render(<JsonlLineView raw={raw} />);
     // The inner text remains in the DOM; the tag literals do not.
-    expect(
-      screen.getByText((_, el) => el?.textContent === "/review"),
-    ).toBeDefined();
+    expect(container.textContent ?? "").toContain("/review");
+    expect(container.textContent ?? "").not.toContain("<command-name>");
+    expect(container.textContent ?? "").not.toContain("</command-name>");
+  });
+
+  it("marks substring matches in primitive string values when a highlight query is set", () => {
+    const raw = { command: "grep -r needle src/" };
+    const { getAllByTestId } = render(
+      <JsonlLineView raw={raw} highlightSubstring="needle" />,
+    );
+    const marks = getAllByTestId("search-highlight");
+    expect(marks.length).toBeGreaterThan(0);
+    expect(marks[0]).toHaveTextContent("needle");
+  });
+
+  it("does not produce marks when no highlight query is set", () => {
+    const raw = { command: "grep -r needle src/" };
+    const { queryAllByTestId } = render(<JsonlLineView raw={raw} />);
+    expect(queryAllByTestId("search-highlight")).toHaveLength(0);
+  });
+
+  it("marks substring matches in tool_use input field values", () => {
+    const raw = {
+      type: "tool_use",
+      name: "Bash",
+      id: "toolu_xyz",
+      input: { command: "grep -r needle src/", file_path: "src/needle.ts" },
+    };
+    const { getAllByTestId } = render(
+      <JsonlLineView raw={raw} highlightSubstring="needle" />,
+    );
+    const marks = getAllByTestId("search-highlight");
+    // Expect a mark in the command value AND in the file_path field value.
+    expect(marks.length).toBeGreaterThanOrEqual(2);
+    expect(marks.every((m) => m.textContent === "needle")).toBe(true);
   });
 });

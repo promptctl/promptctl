@@ -5,8 +5,11 @@
 //
 // [LAW:dataflow-not-control-flow] Same render path whether the string has
 // zero, one, or many tags — the regex match array is the data that varies.
+// Same path whether a search query is active or not — the empty query is
+// the no-marks identity in splitHighlights, so consumers don't branch.
 
-import { Fragment, type ReactNode } from "react";
+import { type ReactNode } from "react";
+import { HighlightedText, useHighlightQuery } from "../highlight";
 
 const PAIR_RE = /<(\w[\w-]*)\b[^>]*>([\s\S]*?)<\/\1>/g;
 const ORPHAN_RE = /<(\/?)([\w-]+)([^>]*?)>/g;
@@ -76,24 +79,26 @@ interface XMLTextProps {
 }
 
 export function XMLText({ text }: XMLTextProps) {
+  const query = useHighlightQuery();
   if (!text) return null;
-  return <>{renderXML(text)}</>;
+  return <>{renderXML(text, query)}</>;
 }
 
-function renderXML(text: string): ReactNode[] {
+function renderXML(text: string, query: string): ReactNode[] {
   const pieces = tokenizePairs(text);
   const nodes: ReactNode[] = [];
   pieces.forEach((p, i) => {
     if (p.kind === "pair" && p.inner !== undefined) {
       const tipText = `${p.openTag}...</${p.tagName}>`;
-      // Recurse through inner — nested tags get the same treatment.
+      // Recurse through inner — nested tags AND substring highlights both
+      // descend into the inner string.
       nodes.push(
         <span
           key={`p${i}`}
           title={tipText}
           className="rounded-sm bg-amber-500/10 text-amber-200 px-0.5"
         >
-          {renderXML(p.inner)}
+          {renderXML(p.inner, query)}
         </span>,
       );
     } else if (p.kind === "text") {
@@ -111,7 +116,15 @@ function renderXML(text: string): ReactNode[] {
             </span>,
           );
         } else {
-          nodes.push(<Fragment key={`p${i}t${j}`}>{s.text}</Fragment>);
+          // Plain text run — defer marking to HighlightedText so the
+          // <mark data-testid="search-highlight"> shape stays single-sourced.
+          nodes.push(
+            <HighlightedText
+              key={`p${i}t${j}`}
+              text={s.text}
+              query={query}
+            />,
+          );
         }
       });
     }

@@ -1,20 +1,17 @@
 // [LAW:one-source-of-truth] RequestRecord stays canonical; the search
 // index is a renderer-side derivation of the text content already
-// present in record.requestBody and record.assembledResponse. No new
-// IPC channel, no parallel store slice — the index is a cache that
-// rebuilds from the records themselves.
+// present in record.requestBody and record.assembledResponse. The
+// index is a cache that rebuilds from the records themselves.
 //
-// [LAW:single-enforcer] One module owns "is this record a search
-// match" — searchText / recordMatchesSearch / splitHighlights. Every
-// callsite (visibleRequests-callers, RequestRow, block renderers,
-// RawTab) consumes through these. No bespoke substring checks
-// scattered across the live-detail components.
+// [LAW:single-enforcer] This module owns the predicate side of search
+// — searchText (haystack) / normalizeQuery / recordMatchesSearch. The
+// rendering side (splitHighlights / HighlightedText) lives in
+// components/highlight.tsx so jsonl-view can consume it without an
+// upward dep on live-detail.
 //
-// [LAW:one-way-deps] This module is pure — no React, no store import.
-// The cache + subscription live in useSearchIndex.ts so the
-// dependency edge runs useSearchIndex.ts → {search.ts, store/proxy.ts}
-// with no return arrow. That keeps proxy.ts free to import the
-// types and predicates here without dragging React into the store.
+// [LAW:one-way-deps] No React, no store import. The cache lives in
+// useSearchIndex.ts so the dependency edge runs useSearchIndex.ts →
+// {search.ts, store/proxy.ts} with no return arrow.
 
 import type { RequestRecord } from "../../../shared/proxy-events";
 
@@ -53,48 +50,6 @@ export function recordMatchesSearch(
 ): boolean {
   if (normalizedQuery === "") return true;
   return index.get(record).includes(normalizedQuery);
-}
-
-// Split text into alternating {text, isMatch} segments for rendering
-// with <mark> around matches. Query matching is case-insensitive but
-// the original case of `text` is preserved in the output segments
-// (the user sees the source text, not the normalized form).
-//
-// Empty query yields a single non-match segment for the entire
-// string — callers can render the result without a query-active
-// branch.
-export interface HighlightSegment {
-  text: string;
-  isMatch: boolean;
-}
-
-export function splitHighlights(
-  text: string,
-  normalizedQuery: string,
-): HighlightSegment[] {
-  if (normalizedQuery === "" || text === "") {
-    return [{ text, isMatch: false }];
-  }
-  const haystack = text.toLowerCase();
-  const segments: HighlightSegment[] = [];
-  const queryLength = normalizedQuery.length;
-  let cursor = 0;
-  while (cursor < text.length) {
-    const matchIndex = haystack.indexOf(normalizedQuery, cursor);
-    if (matchIndex === -1) {
-      segments.push({ text: text.slice(cursor), isMatch: false });
-      break;
-    }
-    if (matchIndex > cursor) {
-      segments.push({ text: text.slice(cursor, matchIndex), isMatch: false });
-    }
-    segments.push({
-      text: text.slice(matchIndex, matchIndex + queryLength),
-      isMatch: true,
-    });
-    cursor = matchIndex + queryLength;
-  }
-  return segments;
 }
 
 function collectFromRequestBody(body: unknown, out: string[]): void {

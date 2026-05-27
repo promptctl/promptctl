@@ -8,6 +8,7 @@
 // recursive tree. Inline-compact renderers are opt-in via the registry.
 
 import { useState, type ReactNode } from "react";
+import { HighlightedText, useHighlightQuery } from "../highlight";
 import {
   Dim,
   FlagGlyph,
@@ -24,6 +25,27 @@ import {
 } from "./Primitives";
 import { XMLText } from "./XMLText";
 import { shortModel } from "./utils";
+
+function CommandValue({ value }: { value: string }) {
+  const query = useHighlightQuery();
+  return (
+    <span
+      className="font-mono text-[11.5px] text-cyan-300"
+      title={value}
+    >
+      <HighlightedText text={value} query={query} />
+    </span>
+  );
+}
+
+function HookNameValue({ value }: { value: string }) {
+  const query = useHighlightQuery();
+  return (
+    <span className="font-mono text-[11.5px] text-neutral-300">
+      <HighlightedText text={value} query={query} />
+    </span>
+  );
+}
 
 type FieldRenderer = (value: unknown) => ReactNode;
 
@@ -63,19 +85,8 @@ const FIELD_RENDERERS: Record<string, FieldRenderer> = {
   subtype: (v) => <Pill label={String(v)} kind="system" />,
   level: (v) => <Pill label={String(v)} kind="system" />,
   hookEvent: (v) => <Pill label={String(v)} kind="hook" />,
-  hookName: (v) => (
-    <span className="font-mono text-[11.5px] text-neutral-300">
-      {String(v)}
-    </span>
-  ),
-  command: (v) => (
-    <span
-      className="font-mono text-[11.5px] text-cyan-300"
-      title={String(v ?? "")}
-    >
-      {String(v)}
-    </span>
-  ),
+  hookName: (v) => <HookNameValue value={String(v ?? "")} />,
+  command: (v) => <CommandValue value={String(v ?? "")} />,
   stop_reason: (v) =>
     v == null ? (
       <PrimitiveValue value={v} />
