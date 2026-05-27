@@ -1,11 +1,11 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { beforeEach, describe, expect, it } from "vitest";
 import type { RequestRecord } from "../../../shared/proxy-events";
 import {
   installElectronMock,
   type MockElectronAPI,
 } from "../../../test/electron-mock";
+import { setupUser } from "../../../test/user-event";
 import { RequestDetail } from "./RequestDetail";
 
 let electron: MockElectronAPI;
@@ -17,7 +17,7 @@ beforeEach(() => {
 
 describe("RequestDetail", () => {
   it("renders overview, request, response, timeline, and raw projections", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const record = requestRecord();
     render(<RequestDetail record={record} />);
 

@@ -7,7 +7,7 @@ import {
   waitFor,
   fireEvent,
 } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { setupUser } from "../../test/user-event";
 import { SessionEditor } from "./SessionEditor";
 import { useSessionStore } from "../store/sessions";
 import {
@@ -210,7 +210,7 @@ describe("Undo button", () => {
   });
 
   it("invokes store.undo when clicked", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     setStoreLoaded({ versions: makeVersions(2), versionHead: 2 });
 
     setInvokeHandlers(api, {
@@ -253,7 +253,7 @@ describe("Redo button", () => {
   });
 
   it("invokes store.redo when clicked", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     setStoreLoaded({ versions: makeVersions(3), versionHead: 1 });
 
     setInvokeHandlers(api, {
@@ -306,7 +306,7 @@ describe("History button", () => {
       }),
     });
     render(<SessionEditor />);
-    const user = userEvent.setup();
+    const user = setupUser();
     await user.click(screen.getByTestId("history-button"));
     expect(screen.getByTestId("session-editor-history-split")).toBeTruthy();
     expect(screen.getByTestId("version-history-panel")).toBeTruthy();
@@ -341,7 +341,7 @@ describe("Backup confirmation dialog removed", () => {
       }),
     });
 
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SessionEditor />);
 
     // The Save button text reflects pending removals: "Remove N & Save"
@@ -384,7 +384,7 @@ describe("Backup confirmation dialog removed", () => {
       }),
     });
 
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SessionEditor />);
     await user.click(screen.getByText(/Remove .* & Save/i));
 
@@ -426,7 +426,7 @@ describe("Task toast — Compress Tools", () => {
       "session:compress-tools": () => pending,
     });
 
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SessionEditor />);
     await user.click(screen.getByText("Compress Tools"));
 
@@ -473,7 +473,7 @@ describe("Task toast — Compress Tools", () => {
       }),
     });
 
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SessionEditor />);
     await user.click(screen.getByText("Compress Tools"));
 
@@ -786,7 +786,7 @@ describe("Topic Focus — segment-only vs focus-and-mark", () => {
       },
     });
 
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SessionEditor />);
     await user.click(screen.getByRole("button", { name: "Topic Focus" }));
 
@@ -845,7 +845,7 @@ describe("Topic Focus — segment-only vs focus-and-mark", () => {
       },
     });
 
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SessionEditor />);
 
     // First: open the segments panel via the button (segment-only)
@@ -891,7 +891,7 @@ describe("Topic Focus — segment-only vs focus-and-mark", () => {
       ],
     });
 
-    const user = userEvent.setup();
+    const user = setupUser();
     render(<SessionEditor />);
 
     // Segment session A and type a focus query

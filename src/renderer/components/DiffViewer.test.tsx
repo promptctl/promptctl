@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { setupUser } from "../../test/user-event";
 import { DiffViewer } from "./DiffViewer";
 import type {
   DiffEntry,
@@ -173,7 +173,7 @@ describe("DiffViewer", () => {
     expect(screen.queryByText("original text")).toBeNull();
     expect(screen.queryByText("modified text")).toBeNull();
 
-    const user = userEvent.setup();
+    const user = setupUser();
     await user.click(screen.getByText("Show content"));
 
     expect(screen.getByText("original text")).toBeTruthy();
@@ -223,7 +223,7 @@ describe("DiffViewer", () => {
 
   it("Click close calls onClose", async () => {
     const onClose = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <DiffViewer
         fromVersion={makeVersion(1)}
@@ -239,7 +239,7 @@ describe("DiffViewer", () => {
 
   it("Click backdrop calls onClose", async () => {
     const onClose = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <DiffViewer
         fromVersion={makeVersion(1)}
