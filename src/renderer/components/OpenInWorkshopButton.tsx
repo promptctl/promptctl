@@ -16,6 +16,7 @@ import { useNavigate } from "react-router";
 import type { LaunchId } from "../../shared/types";
 import { useLaunchStore } from "../store/launches";
 import { useProxyStore } from "../store/proxy";
+import { launchDetailRoute } from "./WorkshopLaunchList";
 
 interface FromClient {
   readonly clientId: string;
@@ -44,7 +45,7 @@ export function OpenInWorkshopButton(props: FromClient | FromLaunch) {
     <button
       data-testid="open-in-workshop-button"
       type="button"
-      onClick={() => navigate(`/workshop?launchId=${launch.launchId}`)}
+      onClick={() => navigate(launchDetailRoute(launch.launchId))}
       className="shrink-0 rounded border border-neutral-700 bg-neutral-800 px-2 py-0.5 text-[11px] text-neutral-200 hover:border-violet-500 hover:bg-neutral-700 hover:text-violet-200"
       title={`Open launch ${launch.launchId} in Workshop`}
     >

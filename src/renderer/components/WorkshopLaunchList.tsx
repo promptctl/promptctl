@@ -97,7 +97,7 @@ export function WorkshopLaunchList({
 
 function WorkshopLaunchRow({ launch }: { launch: Launch }) {
   const navigate = useNavigate();
-  const open = () => navigate(`/workshop?launchId=${launch.launchId}`);
+  const open = () => navigate(launchDetailRoute(launch.launchId));
   // sessionFilePath lives only on running / exited rows; the type
   // carries the optionality, the renderer just reads it.
   const sessionFilePath =
@@ -188,6 +188,10 @@ function relativeTime(epochMs: number): string {
   return `${Math.floor(ms / 86_400_000)}d ago`;
 }
 
+// [LAW:one-source-of-truth] Single builder for the Workshop detail
+// deep link. Internal row clicks AND every cross-tab "Open in
+// Workshop" button (Live's RequestDetail, Loops' PaneViewer) all go
+// through this — change the URL shape once, every callsite follows.
 export function launchDetailRoute(launchId: LaunchId): string {
   return `/workshop?launchId=${launchId}`;
 }
