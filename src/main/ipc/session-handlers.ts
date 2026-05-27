@@ -26,6 +26,7 @@ import {
   peekSession,
   applyPipeline,
   getActiveProvider,
+  getActivePath,
 } from "../sessions/editor";
 import {
   getAnalyzer,
@@ -137,29 +138,44 @@ export function registerSessionHandlers(): void {
   ipcMain.handle("session:list-analyzers", (_e, provider: ProviderKind) =>
     getAnalyzerMetadata(provider),
   );
-  ipcMain.handle(
-    "session:run-analyzer",
-    (_e, analyzerId: string, filePath: string) => {
-      const analyzer = getAnalyzer(analyzerId);
-      // [LAW:single-enforcer] Verify the analyzer applies to the active
-      // session's provider. session:list-analyzers is provider-scoped, so
-      // the renderer never *requests* a mismatched analyzer in practice —
-      // but the IPC surface should enforce the same invariant in case a
-      // stale invocation lands after the user switched providers, or any
-      // other consumer ever calls this directly.
-      const activeProvider = getActiveProvider();
-      if (analyzer.providerId !== activeProvider) {
-        throw new Error(
-          `Analyzer ${analyzerId} is scoped to provider ${analyzer.providerId}, but active session uses ${activeProvider}`,
-        );
-      }
-      return analyzer.run(filePath);
-    },
-  );
+  ipcMain.handle("session:run-analyzer", (_e, analyzerId: string) => {
+    const analyzer = getAnalyzer(analyzerId);
+    // [LAW:single-enforcer] Verify the analyzer applies to the active
+    // session's provider. session:list-analyzers is provider-scoped, so
+    // the renderer never *requests* a mismatched analyzer in practice —
+    // but the IPC surface enforces the same invariant in case a stale
+    // invocation lands after the user switched providers, or any other
+    // consumer ever calls this directly.
+    const activeProvider = getActiveProvider();
+    if (analyzer.providerId !== activeProvider) {
+      throw new Error(
+        `Analyzer ${analyzerId} is scoped to provider ${analyzer.providerId}, but active session uses ${activeProvider}`,
+      );
+    }
+    // [LAW:one-source-of-truth] Use the active session's path, never a
+    // renderer-supplied filePath. If the user switched sessions during
+    // the in-flight IPC invoke, that's the new active path the analyzer
+    // should run against — but the renderer's stale-guard drops the
+    // resulting analyzerResults anyway, so this never produces UI for
+    // the wrong session.
+    return analyzer.run(getActivePath());
+  });
   ipcMain.handle(
     "session:apply-pipeline",
-    (_e, pipeline: Pipeline, force?: boolean) =>
-      applyPipeline(pipeline, force ?? false),
+    (_e, pipeline: Pipeline, force?: boolean) => {
+      // Same provider gate as session:run-analyzer. Pipeline ops are
+      // Claude-JSONL-specific; running them against a non-Claude active
+      // session would silently rewrite an effectively-unchanged file and
+      // record a misleading version. The renderer's handleSave dispatch
+      // already prevents this, but the IPC boundary enforces it too.
+      const activeProvider = getActiveProvider();
+      if (activeProvider !== "claude") {
+        throw new Error(
+          `Pipeline is Claude-only; active session uses ${activeProvider}`,
+        );
+      }
+      return applyPipeline(pipeline, force ?? false);
+    },
   );
 
   // Versioning

@@ -109,7 +109,6 @@ export interface ElectronAPI {
   invoke(
     channel: "session:run-analyzer",
     analyzerId: string,
-    filePath: string,
   ): Promise<AnalyzerResult>;
   invoke(
     channel: "session:apply-pipeline",

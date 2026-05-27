@@ -145,6 +145,13 @@ export function getActiveProvider(): ProviderKind {
   return activeProviderId();
 }
 
+// Public read of the active file path — used by IPC handlers that run
+// against the loaded session (session:run-analyzer) so callers can't
+// supply an arbitrary path that points elsewhere.
+export function getActivePath(): string {
+  return activePath();
+}
+
 export function getMessageContent(index: number): string {
   return active().getMessageContent(index);
 }

@@ -607,10 +607,12 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       return { analyzerRunning: running };
     });
     try {
+      // [LAW:single-enforcer] No filePath in the IPC payload — main uses
+      // the active session's path. If the user switched sessions during
+      // the await, the renderer's stale guard below drops the result.
       const result = (await window.electronAPI.invoke(
         "session:run-analyzer",
         analyzerId,
-        session.filePath,
       )) as AnalyzerResult;
       // Drop stale results: user may have switched session during the await.
       if (get().selectedSession?.filePath !== session.filePath) return;
