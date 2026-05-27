@@ -40,8 +40,8 @@ export const SearchInput = forwardRef<HTMLInputElement, SearchInputProps>(
           data-testid="search-scope-toggle"
           title={
             globalActive
-              ? "Searching across all clients — click to scope to current filters"
-              : "Searching within current client/chip filters — click to search globally"
+              ? "Searching across the full capture — click to scope to current filters (client tab, prompt, chips)"
+              : "Searching within current filters (client tab, prompt, chips) — click to search across the full capture"
           }
           className={`rounded border px-1.5 py-0.5 text-[10px] uppercase tracking-wide ${
             globalActive
