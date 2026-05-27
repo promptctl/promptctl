@@ -170,6 +170,26 @@ describe("WorkshopLaunchList", () => {
     );
   });
 
+  it("activates a row via keyboard (Enter) — the row is a real button, not a div", async () => {
+    // The row uses a native <button> so keyboard focus + Enter/Space
+    // activation come for free. This test pins that behavior so a
+    // future refactor that drops the button (e.g. back to a div with
+    // onClick) immediately surfaces in CI as a keyboard-nav regression.
+    const user = setupUser();
+    useLaunchStore.setState({
+      launches: [runningClaude({ launchId: "L-kbd" as LaunchId })],
+    });
+    renderList();
+    const row = screen.getByTestId("workshop-launch-row");
+    expect(row.tagName).toBe("BUTTON");
+    row.focus();
+    expect(document.activeElement).toBe(row);
+    await user.keyboard("{Enter}");
+    expect(screen.getByTestId("location-search").textContent).toBe(
+      "?launchId=L-kbd",
+    );
+  });
+
   it("surfaces sessionFilePath when present on a running/exited row", () => {
     useLaunchStore.setState({
       launches: [

@@ -104,13 +104,21 @@ function WorkshopLaunchRow({ launch }: { launch: Launch }) {
     launch.status === "running" || launch.status === "exited"
       ? launch.sessionFilePath
       : null;
+  // [LAW:types-are-the-program] The row IS a button — keyboard focus,
+  // Enter/Space activation, and screen-reader semantics all come from
+  // the native element. A div-with-onClick would need role="button" +
+  // tabIndex + a keyboard handler to behave the same, and would still
+  // ship a divergent surface (mouse-only) by default. The button
+  // element absorbs the variability that custom interaction code would
+  // otherwise scatter.
   return (
-    <div
+    <button
+      type="button"
       data-testid="workshop-launch-row"
       data-launch-id={launch.launchId}
       data-launch-status={launch.status}
       data-launch-tool={launch.toolKind}
-      className="cursor-pointer rounded-md border border-neutral-800 bg-neutral-900/40 p-3 transition-colors hover:bg-neutral-900"
+      className="block w-full rounded-md border border-neutral-800 bg-neutral-900/40 p-3 text-left transition-colors hover:bg-neutral-900 focus:outline-none focus-visible:ring-2 focus-visible:ring-violet-500"
       onClick={open}
     >
       <div className="flex items-center gap-3">
@@ -147,7 +155,7 @@ function WorkshopLaunchRow({ launch }: { launch: Launch }) {
           {sessionFilePath}
         </p>
       )}
-    </div>
+    </button>
   );
 }
 

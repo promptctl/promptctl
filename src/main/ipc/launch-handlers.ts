@@ -85,10 +85,18 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
   // the natural way; the renderer sees the same `exited` event it
   // would see for any other exit reason.
   //
-  // [LAW:no-defensive-null-guards] Unknown launchId and already-
-  // exited rows return null up-front — callers can act on absence,
-  // but we don't silently no-op on either, and we don't pretend tmux
-  // got a kill-session it didn't.
+  // The return value carries the discriminator the caller acts on:
+  //  - `null`            → no row in the registry for that id.
+  //  - row.status="exited" → already terminal; we did NOT issue a
+  //    fresh kill-session, since exit is terminal and the correlator's
+  //    idempotent markExited is the sole owner of that transition.
+  //  - row.status="pending"|"running" → kill-session was sent. The
+  //    correlator's window-close / pane-gone path will flip the row
+  //    to exited and broadcast over the registry's event stream;
+  //    callers that need the post-kill state subscribe to launch:event
+  //    rather than waiting on this return.
+  // [LAW:no-defensive-null-guards] No silent no-ops on any input —
+  // every case has a distinguishable return shape.
   ipcMain.handle(
     "launch:terminate",
     async (_e, launchId: LaunchId): Promise<Launch | null> => {
