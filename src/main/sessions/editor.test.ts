@@ -11,7 +11,12 @@ import { afterEach, beforeEach, describe, expect, it } from "vitest";
 import {
   loadSession,
   saveSession,
+  undo,
+  redo,
+  restoreVersion,
+  compressToolResults,
   setLiveTailLookup,
+  LiveTailBlockedError,
   _resetForTesting,
 } from "./editor";
 import { registerProvider } from "./registry";
@@ -129,6 +134,48 @@ describe("editor.saveSession live-tail guard", () => {
     await loadSession("claude", fp);
     const result = await saveSession([]);
     expect(result.blockedReason).toBeNull();
+  });
+
+  it("undo throws LiveTailBlockedError when the active file is live-tail", async () => {
+    // undo writes the file in place — without the gate it would
+    // truncate a launch's in-flight JSONL. Single helper, multiple
+    // consumers: same gate as saveSession, different dispatch shape.
+    await loadSession("claude", fp);
+    setLiveTailLookup((p) =>
+      p === fp ? { launchId: "launch-xyz" } : null,
+    );
+    await expect(undo()).rejects.toBeInstanceOf(LiveTailBlockedError);
+  });
+
+  it("redo throws LiveTailBlockedError when the active file is live-tail", async () => {
+    await loadSession("claude", fp);
+    setLiveTailLookup((p) =>
+      p === fp ? { launchId: "launch-xyz" } : null,
+    );
+    await expect(redo()).rejects.toBeInstanceOf(LiveTailBlockedError);
+  });
+
+  it("restoreVersion throws LiveTailBlockedError when the active file is live-tail", async () => {
+    await loadSession("claude", fp);
+    setLiveTailLookup((p) =>
+      p === fp ? { launchId: "launch-xyz" } : null,
+    );
+    await expect(restoreVersion(0)).rejects.toBeInstanceOf(
+      LiveTailBlockedError,
+    );
+  });
+
+  it("compressToolResults throws LiveTailBlockedError when the active file is live-tail", async () => {
+    await loadSession("claude", fp);
+    setLiveTailLookup((p) =>
+      p === fp ? { launchId: "launch-xyz" } : null,
+    );
+    await expect(
+      compressToolResults(
+        [],
+        { summarizeThreshold: 1000, truncateThreshold: 500, keepLastN: 2 },
+      ),
+    ).rejects.toBeInstanceOf(LiveTailBlockedError);
   });
 
   it("loadSession behaves identically whether or not the file is live-tail (no branching outside the save guard)", async () => {

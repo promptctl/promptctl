@@ -1814,6 +1814,11 @@ export function SessionEditor() {
               onClose={() => setShowHistory(false)}
               onViewDiff={handleViewDiff}
               onRestore={handleRestoreVersion}
+              restoreBlockedReason={
+                liveTailLaunch
+                  ? "Blocked: this file is being written by a live launch"
+                  : null
+              }
             />
           }
         >
@@ -1928,11 +1933,12 @@ export function SessionEditor() {
                   </div>
 
                   {/* [LAW:dataflow-not-control-flow] One banner site, one
-                      condition. The editor itself doesn't change behavior
-                      when a file is live-tailed — render, version, undo,
-                      redo, diff, compress, and validate all run the same
-                      way. Only the visible affordance ("this is being
-                      written; save is blocked") differs. */}
+                      condition. The editor's read paths (load, render,
+                      diff) are invariant to live-tail; the destructive
+                      operations (save, compress, undo, redo, restore)
+                      all consult one gate helper in editor.ts (single
+                      enforcer, multiple consumers). The banner is the
+                      user-facing projection of that gate state. */}
                   {liveTailLaunch && (
                     <div
                       data-testid="live-tail-banner"
@@ -2000,7 +2006,16 @@ export function SessionEditor() {
                         >
                           <button
                             onClick={handleCompressTools}
-                            disabled={llmWorking || messages.length === 0}
+                            disabled={
+                              llmWorking ||
+                              messages.length === 0 ||
+                              liveTailLaunch !== null
+                            }
+                            title={
+                              liveTailLaunch !== null
+                                ? "Blocked: this file is being written by a live launch"
+                                : undefined
+                            }
                             className="rounded bg-emerald-600/20 px-2.5 py-1 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-600/30 disabled:opacity-30"
                           >
                             Compress Tools
@@ -2023,7 +2038,12 @@ export function SessionEditor() {
                           <button
                             data-testid="undo-button"
                             onClick={() => undo()}
-                            disabled={!canUndo}
+                            disabled={!canUndo || liveTailLaunch !== null}
+                            title={
+                              liveTailLaunch !== null
+                                ? "Blocked: this file is being written by a live launch"
+                                : undefined
+                            }
                             className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
                           >
                             &#8617; Undo
@@ -2040,7 +2060,12 @@ export function SessionEditor() {
                           <button
                             data-testid="redo-button"
                             onClick={() => redo()}
-                            disabled={!canRedo}
+                            disabled={!canRedo || liveTailLaunch !== null}
+                            title={
+                              liveTailLaunch !== null
+                                ? "Blocked: this file is being written by a live launch"
+                                : undefined
+                            }
                             className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
                           >
                             &#8618; Redo
