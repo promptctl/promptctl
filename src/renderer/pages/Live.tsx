@@ -1,6 +1,6 @@
 // [LAW:dataflow-not-control-flow] The Live tab renders RequestRecord
 // projections from the store; live capture and replay share the same path.
-import { useEffect, useMemo, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState, type ReactNode } from "react";
 import { RequestDetail } from "../components/live-detail";
 import { FilterChips } from "../components/live-detail/FilterChips";
 import { LatencyBadges } from "../components/live-detail/LatencyBadges";
@@ -19,6 +19,9 @@ import {
 import { buildChain } from "../components/live-detail/stop-reason";
 import { ResizableSplit } from "../components/ResizableSplit";
 import { useProxyStore, visibleRequests } from "../store/proxy";
+import { normalizeQuery } from "../components/live-detail/search";
+import { SearchInput } from "../components/live-detail/SearchInput";
+import { useSearchIndex } from "../components/live-detail/useSearchIndex";
 import type { ClientInfo, RequestRecord } from "../../shared/proxy-events";
 
 export function Live() {
@@ -28,21 +31,29 @@ export function Live() {
   const selectPromptHash = useProxyStore((s) => s.selectPromptHash);
   const toggleFilter = useProxyStore((s) => s.toggleFilter);
   const clearFilters = useProxyStore((s) => s.clearFilters);
+  const setSearchQuery = useProxyStore((s) => s.setSearchQuery);
+  const setSearchScope = useProxyStore((s) => s.setSearchScope);
   const toggleRequest = useProxyStore((s) => s.toggleRequest);
   const clearInactiveClients = useProxyStore((s) => s.clearInactiveClients);
   const [follow, setFollow] = useState(true);
   const [promptsOpen, setPromptsOpen] = useState(false);
   const [loadError, setLoadError] = useState<string | null>(null);
   const logRef = useRef<HTMLDivElement | null>(null);
+  const searchInputRef = useRef<HTMLInputElement | null>(null);
+  const searchIndex = useSearchIndex();
   const requests = useMemo(
-    () => visibleRequests(state),
+    () => visibleRequests(state, searchIndex),
     [
       state.requests,
       state.selectedClientId,
       state.selectedPromptHash,
       state.filters,
+      state.searchQuery,
+      state.searchScope,
+      searchIndex,
     ],
   );
+  const normalizedQuery = normalizeQuery(state.searchQuery);
   // Prompts panel sources from the client-scoped, unfiltered-by-prompt
   // list so that activating a prompt filter doesn't collapse the panel
   // to a single bucket. Client selection still narrows the universe.
@@ -91,6 +102,26 @@ export function Live() {
     if (el) el.scrollTop = el.scrollHeight;
   }, [requestCount, follow]);
 
+  // [LAW:single-enforcer] Cmd/Ctrl+F focuses the search input — one
+  // listener at the page boundary, no per-component shortcut wiring.
+  // The Electron app has no native Find UI to defer to, so the
+  // shortcut always routes to our input — preventDefault is
+  // unconditional once the modifier+F combo is detected.
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      const isFindKey = event.key === "f" || event.key === "F";
+      const usesAccelerator = event.metaKey || event.ctrlKey;
+      if (!isFindKey || !usesAccelerator) return;
+      const input = searchInputRef.current;
+      if (input === null) return;
+      event.preventDefault();
+      input.focus();
+      input.select();
+    }
+    window.addEventListener("keydown", onKey);
+    return () => window.removeEventListener("keydown", onKey);
+  }, []);
+
   const proxyUrl = state.status.running
     ? `http://127.0.0.1:${state.status.port}`
     : "(not running)";
@@ -119,6 +150,15 @@ export function Live() {
         onToggleFollow={() => setFollow((f) => !f)}
         onClear={clearEvents}
         onResume={onResume}
+        searchSlot={
+          <SearchInput
+            ref={searchInputRef}
+            query={state.searchQuery}
+            scope={state.searchScope}
+            onChangeQuery={setSearchQuery}
+            onChangeScope={setSearchScope}
+          />
+        }
       />
       <ClientTabs
         clients={[...state.clients.values()]}
@@ -193,6 +233,7 @@ export function Live() {
             record={selectedRecord}
             lineage={lineage.get(selectedRecord.requestId) ?? null}
             chain={chain}
+            highlightQuery={normalizedQuery}
             onSelectRequest={toggleRequest}
           />
         )}
@@ -210,6 +251,7 @@ function StatusBar({
   onToggleFollow,
   onClear,
   onResume,
+  searchSlot,
 }: {
   status: {
     running: boolean;
@@ -224,6 +266,7 @@ function StatusBar({
   onToggleFollow: () => void;
   onClear: () => void;
   onResume: () => void;
+  searchSlot: ReactNode;
 }) {
   return (
     <div className="flex items-center gap-4 border-b border-neutral-800 bg-neutral-900 px-4 py-2 text-xs">
@@ -239,6 +282,7 @@ function StatusBar({
         {status.upstreamTarget || "(unset)"}
       </span>
       <span className="ml-auto flex items-center gap-3">
+        {searchSlot}
         <span className="text-neutral-500">
           {requestCount} requests · {eventCount} events · {status.entryCount}{" "}
           entries

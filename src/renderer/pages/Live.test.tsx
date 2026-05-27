@@ -29,6 +29,8 @@ beforeEach(() => {
     selectedRequestId: null,
     selectedPromptHash: null,
     filters: emptyFilters(),
+    searchQuery: "",
+    searchScope: "client",
   });
 });
 
@@ -324,7 +326,200 @@ describe("Live", () => {
       within(card).getByTestId("prompt-bucket-preview").textContent,
     ).not.toContain("PROMPT_TAIL");
   });
+
+  it("typing in the search input narrows the request list to matches and Cmd+F focuses it", async () => {
+    const user = setupUser();
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    for (const event of [
+      ...searchableEvents("req-needle", "client-a", "find the needle inline"),
+      ...searchableEvents("req-other", "client-a", "totally different content"),
+    ]) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
+
+    // Cmd+F focuses the search input.
+    await user.keyboard("{Meta>}f{/Meta}");
+    expect(screen.getByTestId("search-input")).toBe(document.activeElement);
+
+    // Typing narrows to the matching row.
+    await user.type(screen.getByTestId("search-input"), "needle");
+    const remaining = screen.getAllByTestId("live-request-row");
+    expect(remaining).toHaveLength(1);
+    expect(remaining[0].textContent).toContain("req-needle");
+
+    // Clearing restores both rows.
+    await user.clear(screen.getByTestId("search-input"));
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
+  });
+
+  it("global scope overrides the client filter so matches in other clients become visible", async () => {
+    const user = setupUser();
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    state.upsertClient(client("client-b", "Codex @ app"));
+    for (const event of [
+      ...searchableEvents("req-a-noise", "client-a", "uninteresting content"),
+      ...searchableEvents("req-b-target", "client-b", "the special needle"),
+    ]) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+
+    // Scope to client-a — client-b's match is filtered out.
+    await user.click(screen.getByText("Claude @ app"));
+    await user.type(screen.getByTestId("search-input"), "needle");
+    expect(screen.queryAllByTestId("live-request-row")).toHaveLength(0);
+
+    // Toggle to global — the match in client-b appears even though
+    // the client tab is still on client-a.
+    await user.click(screen.getByTestId("search-scope-toggle"));
+    const rows = screen.getAllByTestId("live-request-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("req-b-target");
+  });
+
+  it("live update mid-stream: appending an SSE event with matching content surfaces a previously-unmatched record", async () => {
+    const user = setupUser();
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    for (const event of [
+      ...searchableEvents("req-existing", "client-a", "nothing to see"),
+    ]) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+
+    await user.type(screen.getByTestId("search-input"), "mid-stream");
+    expect(screen.queryAllByTestId("live-request-row")).toHaveLength(0);
+
+    // Simulate a new request arriving live whose content matches the
+    // active query. findAllByTestId awaits the next React flush so
+    // the assertion verifies the within-one-render-cycle promise of
+    // design §8.5 rather than racing the Zustand-triggered update.
+    for (const event of searchableEvents(
+      "req-live",
+      "client-a",
+      "fresh data carrying the mid-stream needle",
+    )) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    const rows = await screen.findAllByTestId("live-request-row");
+    expect(rows).toHaveLength(1);
+    expect(rows[0].textContent).toContain("req-live");
+  });
+
+  it("Clear resets the search query alongside other filters", async () => {
+    const user = setupUser();
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    for (const event of [
+      ...searchableEvents("req-one", "client-a", "first message"),
+      ...searchableEvents("req-two", "client-a", "second message"),
+    ]) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+    await user.type(screen.getByTestId("search-input"), "first");
+    expect(screen.getAllByTestId("live-request-row")).toHaveLength(1);
+
+    await user.click(screen.getByRole("button", { name: "Clear" }));
+    // Store is fully reset by Clear — both records are gone and the
+    // input reads back as empty.
+    expect(screen.queryAllByTestId("live-request-row")).toHaveLength(0);
+    expect(
+      (screen.getByTestId("search-input") as HTMLInputElement).value,
+    ).toBe("");
+  });
+
+  it("matching text inside the Response tab is wrapped in <mark>", async () => {
+    const user = setupUser();
+    const state = useProxyStore.getState();
+    state.upsertClient(client("client-a", "Claude @ app"));
+    for (const event of searchableEvents(
+      "req-marked",
+      "client-a",
+      "irrelevant body",
+      "the response says distinctive_marker_token loudly",
+    )) {
+      useProxyStore.getState().appendEvent(event);
+    }
+
+    render(<Live />);
+    await user.type(
+      screen.getByTestId("search-input"),
+      "distinctive_marker_token",
+    );
+
+    // Select the matching row.
+    await user.click(screen.getByText(/req-marked/));
+    await user.click(screen.getByRole("button", { name: "Response" }));
+
+    const marks = screen.getAllByTestId("search-highlight");
+    expect(marks.length).toBeGreaterThanOrEqual(1);
+    expect(marks[0].textContent).toBe("distinctive_marker_token");
+  });
 });
+
+// Builds the minimum 3-event sequence (headers → body → response_complete)
+// the store needs to render a request row with searchable content in both
+// the request body and the assembled response.
+function searchableEvents(
+  requestId: string,
+  clientId: string,
+  userText: string,
+  assistantText = "default assistant reply",
+): ProxyEvent[] {
+  return [
+    {
+      requestId,
+      clientId,
+      globalSeq: 1,
+      recvNs: 1,
+      kind: "request_headers",
+      method: "POST",
+      url: `https://api.example.test/${requestId}`,
+      headers: {},
+    },
+    {
+      requestId,
+      clientId,
+      globalSeq: 2,
+      recvNs: 2,
+      kind: "request_body",
+      body: {
+        model: "claude-test",
+        system: "test system",
+        messages: [{ role: "user", content: userText }],
+      },
+    },
+    {
+      requestId,
+      clientId,
+      globalSeq: 3,
+      recvNs: 3,
+      kind: "response_complete",
+      body: {
+        id: `msg_${requestId}`,
+        type: "message",
+        role: "assistant",
+        model: "claude-test",
+        content: [{ type: "text", text: assistantText }],
+        stop_reason: "end_turn",
+        stop_sequence: null,
+        usage: { input_tokens: 1, output_tokens: 1 },
+      },
+    },
+  ];
+}
 
 function chainEvents(): ProxyEvent[] {
   const events: ProxyEvent[] = [];

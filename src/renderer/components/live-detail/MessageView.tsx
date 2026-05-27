@@ -8,10 +8,12 @@ export function MessageView({
   message,
   index,
   label,
+  highlightSubstring,
 }: {
   message: unknown;
   index: number;
   label?: string;
+  highlightSubstring?: string;
 }) {
   const body = asRecord(message);
   const role = typeof body?.role === "string" ? body.role : "unknown";
@@ -35,7 +37,10 @@ export function MessageView({
           <div className="space-y-2 p-3">
             {content.map((block, blockIndex) => (
               <div key={blockKey(block, blockIndex)}>
-                {renderBlock(block, { index: blockIndex })}
+                {renderBlock(block, {
+                  index: blockIndex,
+                  highlightSubstring,
+                })}
               </div>
             ))}
           </div>
