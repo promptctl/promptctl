@@ -32,6 +32,22 @@ let activeAdapter: ProviderAdapter | null = null;
 let activeFilePath: string | null = null;
 let activeProvider: ProviderKind | null = null;
 
+// [LAW:single-enforcer] Sole entry point for "is this file being
+// actively written by a live launch?" The save guard below is the only
+// caller; no other editor operation consults it. Production wires the
+// lookup to LaunchRegistry (see main.ts); the default returns null so
+// the editor works fine in tests/contexts that have no registry.
+//
+// [LAW:dataflow-not-control-flow] The lookup is data — a function from
+// file path to optional launch identity. saveSession does the same
+// thing every time: ask, project the answer into the result. No
+// branching on "do we have a registry" or "is live-tail enabled."
+type LiveTailLookup = (filePath: string) => { launchId: string } | null;
+let liveTailLookup: LiveTailLookup = () => null;
+export function setLiveTailLookup(lookup: LiveTailLookup): void {
+  liveTailLookup = lookup;
+}
+
 export async function listAllProjects(): Promise<Project[]> {
   const results = await Promise.all(
     getAllProviders().map((a) => a.listProjects()),
@@ -151,10 +167,34 @@ export async function saveSession(
   force = false,
 ): Promise<SessionSaveResult> {
   const adapter = active();
+  // Destination is the file we'd actually write — outputPath overrides
+  // the active path. The live-tail check runs against the destination
+  // because that's the file that would be clobbered. Save-as to a
+  // different path is therefore not blocked by live-tail on the
+  // source.
+  const destination = outputPath ?? activePath();
+
+  // [LAW:single-enforcer] One site checks live-tail. No other editor
+  // operation (load, undo, redo, restore, diff, compress) consults the
+  // lookup — they don't change the file in ways that conflict with an
+  // appending writer the way a save does.
+  if (!force && liveTailLookup(destination) !== null) {
+    return {
+      path: null,
+      violations: [],
+      forced: false,
+      blockedReason: "live-tail",
+    };
+  }
 
   const violations = validatePreSave(adapter, indicesToRemove);
   if (violations.length > 0 && !force) {
-    return { path: null, violations, forced: false, blocked: true };
+    return {
+      path: null,
+      violations,
+      forced: false,
+      blockedReason: "validation",
+    };
   }
 
   // Capture pre-edit baseline if first edit
@@ -181,7 +221,7 @@ export async function saveSession(
     path: writtenPath,
     violations,
     forced: violations.length > 0,
-    blocked: false,
+    blockedReason: null,
   };
 }
 
@@ -291,6 +331,7 @@ export function _resetForTesting(): void {
   activeAdapter = null;
   activeFilePath = null;
   activeProvider = null;
+  liveTailLookup = () => null;
 }
 
 export { listSessions } from "./registry-helpers";

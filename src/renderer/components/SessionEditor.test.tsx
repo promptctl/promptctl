@@ -330,7 +330,7 @@ describe("Backup confirmation dialog removed", () => {
         path: "/test/session.jsonl",
         violations: [],
         forced: false,
-        blocked: false,
+        blockedReason: null,
       }),
       "session:load": () => [makeMessage(0)],
       "session:list-versions": () => ({
@@ -373,7 +373,7 @@ describe("Backup confirmation dialog removed", () => {
         path: "/test/session.jsonl",
         violations: [],
         forced: false,
-        blocked: false,
+        blockedReason: null,
       }),
       "session:load": () => [],
       "session:list-versions": () => ({

@@ -266,7 +266,7 @@ describe("save action", () => {
         path: "/test.jsonl",
         violations: [],
         forced: false,
-        blocked: false,
+        blockedReason: null,
       }),
       "session:load": () => [makeMessage(0)],
       "session:list-versions": () => makeVersionMeta(2, 2),
