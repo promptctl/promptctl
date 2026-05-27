@@ -39,11 +39,13 @@ export function RequestDetail({
   record,
   lineage = null,
   chain = null,
+  highlightQuery = "",
   onSelectRequest,
 }: {
   record: RequestRecord;
   lineage?: LineageInfo | null;
   chain?: RequestRecord[] | null;
+  highlightQuery?: string;
   onSelectRequest?: (requestId: string) => void;
 }) {
   const [activeTab, setActiveTab] = useState<TabId>("overview");
@@ -103,7 +105,10 @@ export function RequestDetail({
         {/* [LAW:dataflow-not-control-flow] The tab strip is fixed; selected projection content varies by activeTab data. */}
         {activeTab === "overview" && <OverviewTab record={record} />}
         {activeTab === "request" && (
-          <RequestTab requestBody={record.requestBody} />
+          <RequestTab
+            requestBody={record.requestBody}
+            highlightSubstring={highlightQuery}
+          />
         )}
         {activeTab === "conversation" && (
           <ConversationTab
@@ -113,9 +118,13 @@ export function RequestDetail({
           />
         )}
         {activeTab === "diff" && <DiffTab record={record} lineage={lineage} />}
-        {activeTab === "response" && <ResponseTab record={record} />}
+        {activeTab === "response" && (
+          <ResponseTab record={record} highlightSubstring={highlightQuery} />
+        )}
         {activeTab === "timeline" && <SseTimelineTab record={record} />}
-        {activeTab === "raw" && <RawTab record={record} />}
+        {activeTab === "raw" && (
+          <RawTab record={record} highlightSubstring={highlightQuery} />
+        )}
       </div>
     </section>
   );

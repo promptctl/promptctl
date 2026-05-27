@@ -3,7 +3,13 @@
 import type { RequestRecord } from "../../../shared/proxy-events";
 import { blockKey, renderBlock } from "./blocks";
 
-export function ResponseTab({ record }: { record: RequestRecord }) {
+export function ResponseTab({
+  record,
+  highlightSubstring,
+}: {
+  record: RequestRecord;
+  highlightSubstring?: string;
+}) {
   const blocks = record.assembledResponse?.content ?? [];
   return (
     <div className="space-y-3 p-4">
@@ -14,7 +20,7 @@ export function ResponseTab({ record }: { record: RequestRecord }) {
       ) : (
         blocks.map((block, index) => (
           <div key={blockKey(block, index)}>
-            {renderBlock(block, { index })}
+            {renderBlock(block, { index, highlightSubstring })}
           </div>
         ))
       )}

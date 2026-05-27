@@ -8,6 +8,11 @@ import {
   type RequestFilters,
 } from "../components/live-detail/filters";
 import { systemPromptHash } from "../components/live-detail/promptHash";
+import {
+  normalizeQuery,
+  recordMatchesSearch,
+  type SearchIndex,
+} from "../components/live-detail/search";
 import type {
   ClientInfo,
   ProxyEvent,
@@ -18,6 +23,8 @@ import type {
 
 const MAX_REQUESTS = 1000;
 
+export type SearchScope = "client" | "global";
+
 interface ProxyStore {
   status: ProxyStatus;
   requests: Map<string, RequestRecord>;
@@ -26,10 +33,16 @@ interface ProxyStore {
   selectedRequestId: string | null;
   // [LAW:single-enforcer] One filter slice; visibleRequests is the
   // single consumer that composes selectedClientId AND selectedPromptHash
-  // AND filters into the displayed list. No other code path filters
-  // the request list — every component reads through visibleRequests.
+  // AND searchQuery/scope AND filters into the displayed list. No other
+  // code path filters the request list — every component reads through
+  // visibleRequests.
   selectedPromptHash: string | null;
   filters: RequestFilters;
+  // Search is a singleton dimension (one query, one scope) — kept
+  // inline alongside the other store-level singletons. Chip-category
+  // dimensions live in filters.ts; new singletons land here.
+  searchQuery: string;
+  searchScope: SearchScope;
   setStatus: (status: ProxyStatus) => void;
   appendEvent: (event: ProxyEvent) => void;
   upsertClient: (info: ClientInfo) => void;
@@ -38,6 +51,8 @@ interface ProxyStore {
   selectPromptHash: (hash: string | null) => void;
   toggleFilter: <K extends FilterKey>(key: K, value: FilterValue<K>) => void;
   clearFilters: () => void;
+  setSearchQuery: (query: string) => void;
+  setSearchScope: (scope: SearchScope) => void;
   toggleRequest: (requestId: string) => void;
   clearInactiveClients: () => void;
   clearEvents: () => void;
@@ -70,6 +85,8 @@ export const useProxyStore = create<ProxyStore>((set) => ({
   selectedRequestId: null,
   selectedPromptHash: null,
   filters: emptyFilters(),
+  searchQuery: "",
+  searchScope: "client",
   setStatus: (status) => set({ status }),
   appendEvent: (event) =>
     set((state) => {
@@ -130,6 +147,11 @@ export const useProxyStore = create<ProxyStore>((set) => ({
     }),
   clearFilters: () =>
     set({ filters: emptyFilters(), selectedRequestId: null }),
+  // Editing the query never clears the selected request — the user
+  // is typing to find/refocus; ripping out their selection would
+  // fight that. The row dim/dot cues do the narrowing visually.
+  setSearchQuery: (query) => set({ searchQuery: query }),
+  setSearchScope: (scope) => set({ searchScope: scope, selectedRequestId: null }),
   toggleRequest: (requestId) =>
     set((state) => ({
       selectedRequestId:
@@ -160,6 +182,8 @@ export const useProxyStore = create<ProxyStore>((set) => ({
       selectedRequestId: null,
       selectedPromptHash: null,
       filters: emptyFilters(),
+      searchQuery: "",
+      searchScope: "client",
     }),
 }));
 
@@ -190,18 +214,32 @@ export function initProxySubscription(): () => void {
   };
 }
 
-export function visibleRequests(state: ProxyStore): RequestRecord[] {
+export function visibleRequests(
+  state: ProxyStore,
+  searchIndex: SearchIndex,
+): RequestRecord[] {
   // [LAW:single-enforcer] One filter composition pipeline for the
-  // request list. Two layers, both routed through this function:
-  //   - Store-level singletons (selectedClientId, selectedPromptHash)
-  //     inline here — they're scalars, not chip categories.
+  // request list. Three layers, all routed through this function:
+  //   - Store-level singletons (selectedClientId, selectedPromptHash,
+  //     searchQuery/searchScope) inline here — they're scalars, not
+  //     chip categories.
   //   - Chip-category dimensions (model, status, tool-use, errors,
   //     size) inside `passesFilters` in filters.ts.
   // A new chip dimension is one entry in filters.ts; a new
   // store-level singleton is one inline clause here. Either way the
   // composition fans into a single AND chain, and no other code path
   // filters the request list.
+  //
+  // Search is the special case: when scope is "global" AND a query
+  // is active, search becomes the ONLY gate — the user is asking
+  // "find this string anywhere in the capture," and the existing
+  // client/prompt/chip filters would silently swallow the answer.
+  const query = normalizeQuery(state.searchQuery);
+  const globalSearchOverride = query !== "" && state.searchScope === "global";
   return sortedRequests(state.requests).filter((record) => {
+    if (globalSearchOverride) {
+      return recordMatchesSearch(record, query, searchIndex);
+    }
     if (
       state.selectedClientId !== null &&
       record.clientId !== state.selectedClientId
@@ -213,7 +251,8 @@ export function visibleRequests(state: ProxyStore): RequestRecord[] {
         return false;
       }
     }
-    return passesFilters(record, state.filters);
+    if (!passesFilters(record, state.filters)) return false;
+    return recordMatchesSearch(record, query, searchIndex);
   });
 }
 

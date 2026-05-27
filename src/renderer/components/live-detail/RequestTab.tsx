@@ -2,7 +2,13 @@ import type { ReactNode } from "react";
 import { JsonlLineView } from "../jsonl-view/JsonlLineView";
 import { MessageView, messageKey } from "./MessageView";
 
-export function RequestTab({ requestBody }: { requestBody: unknown }) {
+export function RequestTab({
+  requestBody,
+  highlightSubstring,
+}: {
+  requestBody: unknown;
+  highlightSubstring?: string;
+}) {
   const body = asRecord(requestBody);
   const messages = Array.isArray(body?.messages) ? body.messages : [];
   const tools = Array.isArray(body?.tools) ? body.tools : [];
@@ -28,6 +34,7 @@ export function RequestTab({ requestBody }: { requestBody: unknown }) {
                   key={messageKey(message, index)}
                   message={message}
                   index={index}
+                  highlightSubstring={highlightSubstring}
                 />
               ))}
             </div>

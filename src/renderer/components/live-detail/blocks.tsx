@@ -4,12 +4,20 @@
 // fall through to OpaqueBlock (a JsonlLineView), they are not skipped.
 // [LAW:dataflow-not-control-flow] Control flow is identical for every block:
 // look up by type, render. Variability lives in the registry map.
+//
+// highlightSubstring on BlockCtx is the search seam: when set, text-bearing
+// renderers wrap matching substrings with <mark>. The JsonlLineView-based
+// renderers (tool_use input, OpaqueBlock) don't mark inside the structured
+// view — the row-level match cue is sufficient and threading marks into
+// the JSON viewer is a separate, larger surface.
 
 import type { ReactNode } from "react";
 import { JsonlLineView } from "../jsonl-view/JsonlLineView";
+import { splitHighlights } from "./search";
 
 export interface BlockCtx {
   index: number;
+  highlightSubstring?: string;
 }
 
 export type BlockRenderer = (block: unknown, ctx: BlockCtx) => ReactNode;
@@ -36,13 +44,13 @@ export function blockKey(block: unknown, index: number): string {
   return `block-${blockType(block)}-${index}`;
 }
 
-function TextBlock(block: unknown): ReactNode {
+function TextBlock(block: unknown, ctx: BlockCtx): ReactNode {
   const rec = asRecord(block);
   const text = typeof rec?.text === "string" ? rec.text : "";
   return (
     <BlockShell label="text" testId="block-text">
       <pre className="whitespace-pre-wrap p-3 text-sm text-neutral-200">
-        {text}
+        <HighlightedText text={text} query={ctx.highlightSubstring ?? ""} />
       </pre>
     </BlockShell>
   );
@@ -75,7 +83,7 @@ function ToolUseBlock(block: unknown): ReactNode {
   );
 }
 
-function ToolResultBlock(block: unknown): ReactNode {
+function ToolResultBlock(block: unknown, ctx: BlockCtx): ReactNode {
   const rec = asRecord(block);
   const toolUseId = typeof rec?.tool_use_id === "string" ? rec.tool_use_id : "";
   const isError = rec?.is_error === true;
@@ -105,7 +113,10 @@ function ToolResultBlock(block: unknown): ReactNode {
     >
       {typeof content === "string" ? (
         <pre className="whitespace-pre-wrap p-3 text-sm text-neutral-200">
-          {content}
+          <HighlightedText
+            text={content}
+            query={ctx.highlightSubstring ?? ""}
+          />
         </pre>
       ) : (
         <JsonlLineView raw={content ?? null} />
@@ -114,7 +125,7 @@ function ToolResultBlock(block: unknown): ReactNode {
   );
 }
 
-function ThinkingBlock(block: unknown): ReactNode {
+function ThinkingBlock(block: unknown, ctx: BlockCtx): ReactNode {
   const rec = asRecord(block);
   const thinking = typeof rec?.thinking === "string" ? rec.thinking : "";
   return (
@@ -131,7 +142,10 @@ function ThinkingBlock(block: unknown): ReactNode {
         thinking · {thinking.length} chars
       </summary>
       <pre className="whitespace-pre-wrap border-t border-violet-900 p-3 text-sm text-violet-100">
-        {thinking}
+        <HighlightedText
+          text={thinking}
+          query={ctx.highlightSubstring ?? ""}
+        />
       </pre>
     </details>
   );
@@ -143,6 +157,37 @@ function OpaqueBlock(block: unknown, ctx: BlockCtx): ReactNode {
     <BlockShell label={`${type} #${ctx.index}`} testId="block-opaque">
       <JsonlLineView raw={block} />
     </BlockShell>
+  );
+}
+
+// [LAW:single-enforcer] Substring marking lives here so every text-bearing
+// block renderer wraps matches the same way — no per-block divergence in
+// the marker shape. Empty query yields the unmarked text as a single
+// node; the consumer doesn't need to branch.
+export function HighlightedText({
+  text,
+  query,
+}: {
+  text: string;
+  query: string;
+}): ReactNode {
+  const segments = splitHighlights(text, query);
+  return (
+    <>
+      {segments.map((segment, index) =>
+        segment.isMatch ? (
+          <mark
+            key={index}
+            data-testid="search-highlight"
+            className="rounded bg-yellow-700/60 text-yellow-100"
+          >
+            {segment.text}
+          </mark>
+        ) : (
+          <span key={index}>{segment.text}</span>
+        ),
+      )}
+    </>
   );
 }
 
