@@ -312,4 +312,15 @@ describe("WorkshopLaunchDetail — cross-tab navigation", () => {
     await user.click(screen.getByTestId("workshop-open-in-loops"));
     expect(screen.getByTestId("location-pathname").textContent).toBe("/loops");
   });
+
+  it("hides Open pane in Loops on exited launches — dead-end avoidance", () => {
+    // Exited rows had their pane closed via the correlator's pane/
+    // window-close path. Pointing Loops at the now-gone paneId would
+    // land on the "Select a pane" placeholder; the button hides so the
+    // affordance only appears when it can actually navigate to a
+    // resolvable pane.
+    useLaunchStore.setState({ launches: [exitedLaunch()] });
+    renderDetail("L-1" as LaunchId);
+    expect(screen.queryByTestId("workshop-open-in-loops")).toBeNull();
+  });
 });

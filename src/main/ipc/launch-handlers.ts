@@ -107,7 +107,22 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
       // directly. Each launch lives in its own session (spawn creates
       // one per launch), so killing the session terminates the whole
       // launch — pane, window, and any tool process still inside.
-      await deps.execute(`kill-session -t ${tmuxEscape(launch.sessionId)}`);
+      //
+      // [LAW:dataflow-not-control-flow] "Session already gone" is part
+      // of the data, not an error. The tool may have exited or been
+      // killed externally before the registry's pane/window-close
+      // subscription flipped the row to exited (a few-ms race the
+      // correlator owns). In that window, kill-session replies with
+      // "can't find session"; we read that as "the work is already
+      // done" and return the same launch row we would have returned
+      // on a successful kill. Other tmux errors stay loud — see
+      // `sessionExists` in spawn.ts for the same pattern at the other
+      // end of the lifecycle.
+      try {
+        await deps.execute(`kill-session -t ${tmuxEscape(launch.sessionId)}`);
+      } catch (err) {
+        if (!isSessionGone(err)) throw err;
+      }
       return launch;
     },
   );
@@ -134,4 +149,26 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
     ipcMain.removeHandler("launch:terminate");
     subscribers.clear();
   };
+}
+
+// [LAW:locality-or-seam] One predicate that decides whether a tmux
+// error means "session already gone". The error shape varies between
+// TmuxCommandError (carries .response.output) and plain Error
+// (message-only), so we flatten both into one string and pattern-match
+// tmux's reply text. Mirrors the same probe in
+// spawn.ts::sessionExists — when tmux unifies its error shapes, both
+// callsites collapse into the same simpler check.
+//
+// Exported for unit testing only — keeps the surface area honest: any
+// caller in main wanting this answer should go through the
+// already-existing spawn.ts pattern, not a new copy.
+export function isSessionGone(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message =
+    "response" in err
+      ? (err as Error & { response: { output: string[] } }).response.output.join(
+          "\n",
+        )
+      : err.message;
+  return /can't find session/.test(message);
 }

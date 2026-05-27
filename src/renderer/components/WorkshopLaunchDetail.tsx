@@ -159,14 +159,23 @@ function Header({
         </p>
       </div>
       <div className="ml-auto flex items-center gap-2">
-        <button
-          type="button"
-          data-testid="workshop-open-in-loops"
-          onClick={openInLoops}
-          className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
-        >
-          Open pane in Loops
-        </button>
+        {/* [LAW:dataflow-not-control-flow] Both affordances are gated
+            on the same status discriminator: an exited row's pane is
+            expected to be gone (the correlator's pane/window-close
+            path is what flipped the row exited in the first place),
+            so pointing Loops at it would land on the "Select a pane"
+            placeholder — a dead-end UX. The button hides whenever the
+            row's data says the pane isn't actionable. */}
+        {canTerminate && (
+          <button
+            type="button"
+            data-testid="workshop-open-in-loops"
+            onClick={openInLoops}
+            className="rounded bg-neutral-800 px-2 py-1 text-xs text-neutral-200 hover:bg-neutral-700"
+          >
+            Open pane in Loops
+          </button>
+        )}
         {canTerminate && (
           <button
             type="button"
