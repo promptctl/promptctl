@@ -46,12 +46,14 @@ test.describe("Workshop tab", () => {
     const page = appHandle.window;
 
     // The top tab labeled "Workshop" is active when /workshop is the
-    // current route. The TopTab class lights `text-neutral-200` for the
-    // active tab; checking text presence + the new-launch affordance is
-    // the smoke equivalent of "the page is up."
-    await expect(page.getByText("Workshop", { exact: true })).toBeVisible({
-      timeout: READY_TIMEOUT_MS,
-    });
+    // current route. The text "Workshop" also appears as the page's
+    // <h2> heading, so we target the top-tab link specifically via
+    // role+name (the TopTab renders a react-router <Link>, which is
+    // an <a>). [LAW:locality-or-seam] Role-scoped selectors keep the
+    // smoke test rooted in semantics rather than fragile text matches.
+    await expect(
+      page.getByRole("link", { name: "Workshop" }),
+    ).toBeVisible({ timeout: READY_TIMEOUT_MS });
     await expect(
       page.locator("[data-testid=workshop-new-launch]"),
     ).toBeVisible({ timeout: READY_TIMEOUT_MS });
