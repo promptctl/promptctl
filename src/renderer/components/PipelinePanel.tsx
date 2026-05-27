@@ -243,6 +243,7 @@ export function PipelinePanel({
                   onClick={() => removeStep(step.id)}
                   className="shrink-0 rounded px-2 py-0.5 text-neutral-500 hover:bg-neutral-800 hover:text-neutral-200"
                   title="Remove step from pipeline"
+                  aria-label="Remove step from pipeline"
                 >
                   ✕
                 </button>

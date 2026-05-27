@@ -378,6 +378,65 @@ describe("Backup confirmation dialog removed", () => {
     cleanup();
   });
 
+  it("routes Save through the legacy session:save path for non-Claude providers", async () => {
+    // Pipeline ops are Claude-JSONL-specific. For Gemini sessions, handleSave
+    // must dispatch to session:save instead of session:apply-pipeline; the
+    // pipeline path would silently no-op (no UUIDs to anchor on).
+    useSessionStore.setState({
+      selectedSession: makeSession(),
+      selectedProjectPath: "/test",
+      selectedProvider: "gemini",
+      messages: [makeMessage(0), makeMessage(1)],
+      markedForRemoval: new Set([0]),
+      providerMetadata: {
+        gemini: {
+          badge: { label: "Gemini", color: "" },
+          typeStyles: { user: { label: "User", color: "" } },
+          flagDefinitions: {},
+          helpText: {
+            description: "",
+            resumeCommand: "",
+            safeToRemove: [],
+            beCareful: [],
+          },
+        },
+      },
+    });
+
+    setInvokeHandlers(api, {
+      "session:save": () => ({
+        path: "/test/session.jsonl",
+        violations: [],
+        forced: false,
+        blockedReason: null,
+      }),
+      "session:load": () => [makeMessage(0)],
+      "session:list-versions": () => ({
+        sessionPath: "/test",
+        provider: "gemini",
+        head: 1,
+        versions: makeVersions(1),
+      }),
+    });
+
+    const user = setupUser();
+    render(<SessionEditor />);
+    await user.click(screen.getByText(/Remove .* & Save/i));
+
+    expect(api.invoke).toHaveBeenCalledWith(
+      "session:save",
+      [0],
+      undefined,
+      false,
+    );
+    expect(api.invoke).not.toHaveBeenCalledWith(
+      "session:apply-pipeline",
+      expect.anything(),
+      expect.anything(),
+    );
+    cleanup();
+  });
+
   it("does not queue duplicate remove-messages steps when Save is retried after a blocked apply", async () => {
     // Slice 1 shim's contract: handleSave builds a one-off pipeline and
     // does NOT mutate the stored pipeline. Two consecutive Save clicks with

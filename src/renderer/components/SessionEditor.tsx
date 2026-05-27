@@ -1256,6 +1256,7 @@ export function SessionEditor() {
     closePreview,
     runAutoTrim,
     applyAutoTrim,
+    save,
     undo,
     redo,
     pipeline,
@@ -1476,28 +1477,41 @@ export function SessionEditor() {
     [lastClickedIndex, toggleMessage, toggleRange],
   );
 
-  // [LAW:single-enforcer] Slice-1 shim: route the legacy "Remove N & Save"
-  // click through the pipeline. We build a *one-off* pipeline (any stored
-  // steps + a transient manual remove step) and pass it to applyPipeline
-  // as an override — we never mutate the stored pipeline here. Otherwise
-  // a blocked apply followed by a retry would queue duplicate stored
-  // remove-messages steps for the same marked set.
-  // The standalone Apply button (in PipelinePanel) is the path for
-  // analyzer-driven multi-step pipelines that the user assembled.
-  const handleSave = useCallback(async () => {
-    const overrideSteps = [...pipeline.steps];
-    if (markedForRemoval.size > 0) {
-      overrideSteps.push({
-        id: crypto.randomUUID(),
-        source: "manual",
-        kind: "remove-messages",
-        targets: [...markedForRemoval],
-        rationale: `${markedForRemoval.size} manually marked message${markedForRemoval.size === 1 ? "" : "s"}`,
-      });
-    }
-    const result = await applyPipeline(false, { steps: overrideSteps });
-    setSaveResult(result);
-  }, [pipeline.steps, markedForRemoval, applyPipeline]);
+  // [LAW:dataflow-not-control-flow] The provider drives the mutation path.
+  // Pipeline ops are Claude-JSONL-specific (UUID-anchored line filtering,
+  // thinking-block stripping); for non-Claude providers (Gemini's JSON
+  // format) the ops would silently no-op. So Save dispatches off provider:
+  // Claude → pipeline shim (one-off pipeline, doesn't mutate stored state);
+  // anything else → legacy session:save adapter call. Analyzers are
+  // already provider-scoped (Analyzer.providerId), so this is the intended
+  // shape, not a temporary fork.
+  //
+  // We build a *one-off* pipeline (stored steps + a transient manual
+  // remove step) instead of pushing into the stored pipeline. Repeating
+  // Save after a blocked apply rebuilds a fresh one-off rather than
+  // queuing duplicate stored steps.
+  const handleSave = useCallback(
+    async (force = false) => {
+      if (selectedProvider !== "claude") {
+        const result = await save(force);
+        setSaveResult(result);
+        return;
+      }
+      const overrideSteps = [...pipeline.steps];
+      if (markedForRemoval.size > 0) {
+        overrideSteps.push({
+          id: crypto.randomUUID(),
+          source: "manual",
+          kind: "remove-messages",
+          targets: [...markedForRemoval],
+          rationale: `${markedForRemoval.size} manually marked message${markedForRemoval.size === 1 ? "" : "s"}`,
+        });
+      }
+      const result = await applyPipeline(force, { steps: overrideSteps });
+      setSaveResult(result);
+    },
+    [selectedProvider, pipeline.steps, markedForRemoval, save, applyPipeline],
+  );
 
   const handleAutoTrim = useCallback(async () => {
     await runAutoTrim();
@@ -2178,7 +2192,7 @@ export function SessionEditor() {
                       />
                       <ToolHoverCard info={TOOL_HOVER_INFO.save}>
                         <button
-                          onClick={handleSave}
+                          onClick={() => void handleSave()}
                           disabled={markedForRemoval.size === 0 || applying}
                           className="rounded bg-red-600/80 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-30"
                         >
@@ -2575,20 +2589,14 @@ export function SessionEditor() {
         <ValidationViolationsDialog
           result={saveResult}
           onCancel={() => setSaveResult(null)}
-          onForceSave={async () => {
-            const result = await applyPipeline(true);
-            setSaveResult(result);
-          }}
+          onForceSave={() => handleSave(true)}
           saving={applying}
         />
       )}
       {saveResult?.blockedReason === "live-tail" && (
         <LiveTailBlockedDialog
           onCancel={() => setSaveResult(null)}
-          onForceSave={async () => {
-            const result = await applyPipeline(true);
-            setSaveResult(result);
-          }}
+          onForceSave={() => handleSave(true)}
           saving={applying}
         />
       )}

@@ -563,13 +563,23 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
   // reuse the cached metadata. Fires all in parallel — analyzers are pure
   // (read file, return result) so they don't share state.
   runAllAnalyzers: async () => {
-    const provider = get().selectedProvider;
-    const session = get().selectedSession;
-    if (!provider || !session) return;
+    // [LAW:one-source-of-truth] Snapshot the session this catalog request
+    // targets. A session-switch during the await must NOT cause us to
+    // write analyzer state keyed to the wrong session/provider — mirrors
+    // the stale-result guard in runAnalyzer.
+    const startSession = get().selectedSession;
+    const startProvider = get().selectedProvider;
+    if (!startProvider || !startSession) return;
     const metadata = (await window.electronAPI.invoke(
       "session:list-analyzers",
-      provider,
+      startProvider,
     )) as AnalyzerMetadata[];
+    if (
+      get().selectedSession?.filePath !== startSession.filePath ||
+      get().selectedProvider !== startProvider
+    ) {
+      return;
+    }
     set({
       analyzerMetadata: metadata,
       analyzerResults: {},
