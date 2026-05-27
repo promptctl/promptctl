@@ -162,6 +162,36 @@ describe("CommandBar", () => {
     ).toBeInTheDocument();
   });
 
+  it("logs and preserves the draft when a suggestion click's fireCommand rejects", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    fireCommandMock.mockImplementationOnce(() =>
+      Promise.reject(new Error("ipc down")),
+    );
+    seedCommands([
+      {
+        id: "cmd-bad" as CommandId,
+        name: "broken.command",
+        target: { kind: "app", resource: "x" },
+        action: { kind: "notify", message: "nope" },
+        trigger: { kind: "manual" },
+        enabled: true,
+        lastRun: null,
+        runCount: 0,
+      },
+    ]);
+    const user = userEvent.setup({ delay: null });
+    render(<CommandBar />);
+    const input = screen.getByTestId("loops-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "broken");
+    // Suggestion dropdown shows broken.command. Click it.
+    const suggestion = await screen.findByText("broken.command");
+    await user.click(suggestion);
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    // Draft preserved; the user can retry.
+    expect(input.value).toBe("broken");
+    spy.mockRestore();
+  });
+
   it("logs and preserves the draft when sendKeys rejects (no unhandled rejection, no clear)", async () => {
     const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
     sendKeys.mockImplementationOnce(() => Promise.reject(new Error("ipc down")));

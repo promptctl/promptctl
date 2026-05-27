@@ -48,37 +48,52 @@ export function CommandBar() {
           .slice(0, 5)
       : [];
 
+  // [LAW:one-source-of-truth] All "fire / sendKeys → record history → reset
+  // composer" sequences flow through one helper. Both the Enter-submit path
+  // and the suggestion-click path share its try/catch + reset shape; the
+  // success criterion is "the async op resolved cleanly," and the data — the
+  // op closure passed in — picks the variant.
+  const fireAndReset = useCallback(
+    async (op: () => Promise<unknown>, recordText: string) => {
+      try {
+        await op();
+      } catch (err) {
+        // Log so failures are visible; no swallow. The input stays in place
+        // so the user can retry without retyping.
+        console.error("CommandBar action failed", err);
+        return;
+      }
+      recordHistory(recordText);
+      setInput("");
+      setHistoryIndex(DRAFT_INDEX);
+      draftRef.current = "";
+      setShowSuggestions(false);
+    },
+    [],
+  );
+
   const submit = useCallback(async () => {
     const text = input.trim();
     if (!text) return;
     const exactMatch = commands.find(
       (c) => c.name.toLowerCase() === text.toLowerCase(),
     );
-    try {
-      if (exactMatch) {
-        await fireCommand(exactMatch.id);
-      } else {
-        // Pane is required only for the literal-keys path; command fire is
-        // pane-agnostic (target.kind may be tmux-session/window/app).
-        if (!selectedPaneId) return;
-        // [LAW:one-source-of-truth] The library's TmuxClientProxy is the single
-        // renderer-side surface for tmux operations. `sendKeys` sends literally
-        // (`-l`), so embedded "\n" is delivered as a newline and the trailing
-        // "\r" is the submit. Multi-line input goes through one send.
-        await getTmuxProxy().sendKeys(selectedPaneId, text + "\r");
-      }
-    } catch (err) {
-      // Log so failures are visible in the dev console; no swallow. The
-      // input stays in place so the user can retry without retyping.
-      console.error("CommandBar submit failed", err);
+    if (exactMatch) {
+      await fireAndReset(() => fireCommand(exactMatch.id), text);
       return;
     }
-    recordHistory(text);
-    setInput("");
-    setHistoryIndex(DRAFT_INDEX);
-    draftRef.current = "";
-    setShowSuggestions(false);
-  }, [input, selectedPaneId, commands, fireCommand]);
+    // Pane is required only for the literal-keys path; command fire is
+    // pane-agnostic (target.kind may be tmux-session/window/app).
+    if (!selectedPaneId) return;
+    // [LAW:one-source-of-truth] The library's TmuxClientProxy is the single
+    // renderer-side surface for tmux operations. `sendKeys` sends literally
+    // (`-l`), so embedded "\n" is delivered as a newline and the trailing
+    // "\r" is the submit. Multi-line input goes through one send.
+    await fireAndReset(
+      () => getTmuxProxy().sendKeys(selectedPaneId, text + "\r"),
+      text,
+    );
+  }, [input, selectedPaneId, commands, fireCommand, fireAndReset]);
 
   const stepHistory = useCallback(
     (direction: "older" | "newer"): boolean => {
@@ -189,12 +204,7 @@ export function CommandBar() {
                 key={cmd.id}
                 onClick={(e) => {
                   e.stopPropagation();
-                  fireCommand(cmd.id);
-                  recordHistory(cmd.name);
-                  setInput("");
-                  setHistoryIndex(DRAFT_INDEX);
-                  draftRef.current = "";
-                  setShowSuggestions(false);
+                  void fireAndReset(() => fireCommand(cmd.id), cmd.name);
                 }}
                 className="flex w-full items-center gap-2 px-3 py-1.5 text-left text-xs text-neutral-300 hover:bg-neutral-800"
               >
