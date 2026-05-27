@@ -1243,6 +1243,7 @@ export function SessionEditor() {
     previewRaw,
     loading,
     applying,
+    saving,
     versions,
     versionHead,
     loadProjects,
@@ -2193,10 +2194,18 @@ export function SessionEditor() {
                       <ToolHoverCard info={TOOL_HOVER_INFO.save}>
                         <button
                           onClick={() => void handleSave()}
-                          disabled={markedForRemoval.size === 0 || applying}
+                          // [LAW:dataflow-not-control-flow] The same button
+                          // drives both mutation paths (pipeline for Claude
+                          // via `applying`, legacy adapter save for other
+                          // providers via `saving`). The disabled/label
+                          // state reflects whichever is in flight; the
+                          // button doesn't ask which path it's on.
+                          disabled={
+                            markedForRemoval.size === 0 || applying || saving
+                          }
                           className="rounded bg-red-600/80 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-30"
                         >
-                          {applying
+                          {applying || saving
                             ? "Applying..."
                             : `Remove ${markedForRemoval.size} & Save`}
                         </button>
@@ -2590,14 +2599,14 @@ export function SessionEditor() {
           result={saveResult}
           onCancel={() => setSaveResult(null)}
           onForceSave={() => handleSave(true)}
-          saving={applying}
+          saving={applying || saving}
         />
       )}
       {saveResult?.blockedReason === "live-tail" && (
         <LiveTailBlockedDialog
           onCancel={() => setSaveResult(null)}
           onForceSave={() => handleSave(true)}
-          saving={applying}
+          saving={applying || saving}
         />
       )}
     </div>

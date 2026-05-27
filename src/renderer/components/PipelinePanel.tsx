@@ -80,9 +80,16 @@ export function PipelinePanel({
     [pipeline.steps],
   );
 
+  // applyPipeline can throw (the store rethrows IPC invoke errors so the
+  // try/finally around `applying` can always reset). Catch here to keep
+  // the Apply button from leaving an unhandled rejection on the page.
   const handleApply = async () => {
-    const result = await applyPipeline();
-    onApplied(result);
+    try {
+      const result = await applyPipeline();
+      onApplied(result);
+    } catch (err) {
+      console.error("applyPipeline failed:", err);
+    }
   };
 
   if (analyzerMetadata.length === 0 && pipeline.steps.length === 0) {
@@ -112,7 +119,7 @@ export function PipelinePanel({
             </button>
           )}
           <button
-            onClick={handleApply}
+            onClick={() => void handleApply()}
             disabled={pipeline.steps.length === 0 || applying}
             className="rounded bg-purple-600/80 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-purple-600 disabled:opacity-30"
           >
