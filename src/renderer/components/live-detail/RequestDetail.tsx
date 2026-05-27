@@ -13,6 +13,7 @@ import { SseTimelineTab } from "./SseTimelineTab";
 import { ChainSparkline } from "./ChainSparkline";
 import { useLiveTickNs } from "./latency";
 import { OpenPaneButton } from "./OpenPaneButton";
+import { OpenInWorkshopButton } from "../OpenInWorkshopButton";
 import { ChainStopReasonStrip, StopReasonChip } from "./stop-reason";
 
 type TabId =
@@ -89,11 +90,13 @@ export function RequestDetail({
           <div className="min-w-0 flex-1 truncate font-mono text-sm text-neutral-200">
             {record.method || "?"} {record.url || "(unknown url)"}
           </div>
-          {/* [LAW:no-defensive-null-guards] OpenPaneButton renders only when
-              the request's launchId maps to a known launch row. Untagged
-              traffic and replays produce no button — pointing at "the
-              first pane" would be wrong, so absence is the correct UI. */}
+          {/* [LAW:no-defensive-null-guards] Both deep-link buttons render
+              only when the request's launchId maps to a known launch row.
+              Untagged traffic and replays produce no buttons — pointing
+              at "the first pane" or "the first launch" would be wrong, so
+              absence is the correct UI. */}
           <OpenPaneButton clientId={record.clientId} />
+          <OpenInWorkshopButton clientId={record.clientId} />
           {/* [LAW:single-enforcer] stop_reason styling lives in stop-reason.tsx; this is one of two callsites. */}
           <StopReasonChip
             stopReason={stopReason}

@@ -1,14 +1,18 @@
 // [LAW:single-enforcer] One IPC site for the launch registry. Reads
 // (`launch:list`, `launch:get`) and subscribe (`launch:subscribe` +
 // push `launch:event` / `launch:list`) come from the registry's
-// projection. The lone mutating channel — `launch:create` — delegates
-// to the spawn flow which is the only constructor of launch rows
-// (`launch:terminate` lands when the Workshop tab needs it).
+// projection. Mutating channels — `launch:create` and `launch:terminate`
+// — both flow through this module. Creation funnels into the spawn flow,
+// the sole constructor of launch rows; termination kills the launch's
+// tmux session and lets the correlator's existing pane-gone /
+// window-close path call markExited.
 //
 // [LAW:one-source-of-truth] All payloads project off the registry — no
 // caching at the IPC boundary. The handler is a thin pass-through.
 
 import { ipcMain, type WebContents } from "electron";
+import { tmuxEscape } from "tmux-control-mode-js/protocol";
+import type { CommandResponse } from "tmux-control-mode-js/protocol";
 import type {
   Launch,
   LaunchEvent,
@@ -20,10 +24,14 @@ import { spawnLaunch, type SpawnDeps } from "../launch/spawn";
 
 export interface LaunchHandlerDeps {
   readonly registry: LaunchRegistry;
-  // The spawn flow's other dependencies (tmux client, topology, proxy
-  // port). The handler hands them through verbatim — it has no opinions
-  // beyond plumbing.
-  readonly spawn: Omit<SpawnDeps, "registry">;
+  // Tmux executor — used by both `launch:create` (via spawn) and
+  // `launch:terminate` (kill-session). Hoisted out of `spawn` so a
+  // single owner plumbs it from main, and terminate doesn't have to
+  // reach into spawn-shaped deps for the same primitive.
+  readonly execute: (command: string) => Promise<CommandResponse>;
+  // The spawn flow's other dependencies (proxy port, optional test
+  // seams). Plumbed through verbatim — the handler has no opinions.
+  readonly spawn: Omit<SpawnDeps, "registry" | "execute">;
 }
 
 export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
@@ -67,7 +75,33 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
   ipcMain.handle(
     "launch:create",
     (_e, spec: LaunchSpec): Promise<Launch> =>
-      spawnLaunch({ registry, ...deps.spawn }, spec),
+      spawnLaunch({ registry, execute: deps.execute, ...deps.spawn }, spec),
+  );
+
+  // [LAW:single-enforcer] One IPC entry to stop a tagged launch. The
+  // handler does not call markExited directly — the correlator's
+  // existing pane-gone / window-close path is the sole transition
+  // owner. We kill the tmux session and let the broadcast loop fire
+  // the natural way; the renderer sees the same `exited` event it
+  // would see for any other exit reason.
+  //
+  // [LAW:no-defensive-null-guards] Unknown launchId and already-
+  // exited rows return null up-front — callers can act on absence,
+  // but we don't silently no-op on either, and we don't pretend tmux
+  // got a kill-session it didn't.
+  ipcMain.handle(
+    "launch:terminate",
+    async (_e, launchId: LaunchId): Promise<Launch | null> => {
+      const launch = registry.get(launchId);
+      if (launch === null) return null;
+      if (launch.status === "exited") return launch;
+      // tmux's `kill-session -t <session-id>` accepts the `$N` form
+      // directly. Each launch lives in its own session (spawn creates
+      // one per launch), so killing the session terminates the whole
+      // launch — pane, window, and any tool process still inside.
+      await deps.execute(`kill-session -t ${tmuxEscape(launch.sessionId)}`);
+      return launch;
+    },
   );
 
   const unsubRegistry = registry.on((evt: LaunchEvent) => {
@@ -89,6 +123,7 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
     ipcMain.removeHandler("launch:list");
     ipcMain.removeHandler("launch:get");
     ipcMain.removeHandler("launch:create");
+    ipcMain.removeHandler("launch:terminate");
     subscribers.clear();
   };
 }

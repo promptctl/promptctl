@@ -107,7 +107,7 @@ beforeEach(() => {
     "settings:load": () => ({
       openaiApiKey: "",
       openaiModel: "gpt-5.4",
-      lastRoute: "/workshop",
+      lastRoute: "/context-workshop",
       compressSummarizeThreshold: 5000,
       compressTruncateThreshold: 1000,
       compressKeepLastN: 3,
@@ -749,7 +749,7 @@ describe("Topic Focus — segment-only vs focus-and-mark", () => {
   const defaultSettings = () => ({
     openaiApiKey: "",
     openaiModel: "gpt-5.4",
-    lastRoute: "/workshop",
+    lastRoute: "/context-workshop",
     compressSummarizeThreshold: 5000,
     compressTruncateThreshold: 1000,
     compressKeepLastN: 3,

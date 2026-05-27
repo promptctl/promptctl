@@ -41,17 +41,17 @@ describe("parsePromptctlUrl", () => {
 });
 
 describe("promptctlUrlToHash", () => {
-  it("produces workshop route hash", () => {
+  it("produces context-workshop route hash", () => {
     expect(
       promptctlUrlToHash("promptctl://open?provider=claude&sessionId=abc"),
-    ).toBe("#/workshop?provider=claude&sessionId=abc");
+    ).toBe("#/context-workshop?provider=claude&sessionId=abc");
   });
 
   it("url-encodes special chars in sessionId", () => {
     const hash = promptctlUrlToHash(
       "promptctl://open?provider=claude&sessionId=a%2Fb",
     );
-    expect(hash).toBe("#/workshop?provider=claude&sessionId=a%2Fb");
+    expect(hash).toBe("#/context-workshop?provider=claude&sessionId=a%2Fb");
   });
 
   it("returns null for invalid input", () => {
