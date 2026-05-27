@@ -674,12 +674,19 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
         force,
       )) as SessionSaveResult;
 
-      // Stale guard: user switched sessions during the apply. Drop the
-      // result — the file we just wrote belongs to a session that's no
-      // longer active, and the new session has its own loaded state we
-      // mustn't clobber.
+      // Stale guard: user switched sessions during the apply. Don't
+      // forward the result to callers — a blocked result would open a
+      // validation/live-tail dialog for the OLD session, and the user
+      // clicking Force-save in that dialog would target the NEW session
+      // with stale violations data. Return a neutral no-op so the
+      // caller's setSaveResult opens no dialog.
       if (get().selectedSession?.filePath !== startSession?.filePath) {
-        return result;
+        return {
+          path: null,
+          violations: [],
+          forced: false,
+          blockedReason: null,
+        };
       }
 
       if (result.blockedReason !== null) {
@@ -696,8 +703,14 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
           startSession.filePath,
         )) as MessageSummary[];
         // Re-check stale after the reload await — runAnalyzer's pattern.
+        // Same neutral-no-op return as the earlier stale guard above.
         if (get().selectedSession?.filePath !== startSession.filePath) {
-          return result;
+          return {
+            path: null,
+            violations: [],
+            forced: false,
+            blockedReason: null,
+          };
         }
         set({
           messages,

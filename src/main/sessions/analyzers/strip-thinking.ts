@@ -106,7 +106,7 @@ export const stripThinkingAnalyzer: Analyzer = {
             source: STRIP_THINKING_ID,
             kind: "strip-thinking",
             targets: flagged,
-            rationale: `${flagged.length} message${flagged.length === 1 ? "" : "s"} have thinking blocks with missing/invalid signatures or non-Anthropic origin`,
+            rationale: `${flagged.length} message${flagged.length === 1 ? " has" : "s have"} thinking blocks with missing/invalid signatures or non-Anthropic origin`,
           },
         },
       ],
