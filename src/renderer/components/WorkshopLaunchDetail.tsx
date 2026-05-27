@@ -1,7 +1,11 @@
 // Workshop's launch-detail view. Three side-by-side panels driven
 // entirely off the same launch row:
 //   - Pane terminal (paneId → live xterm stream)
-//   - Live request stream (proxyClientId → filtered request list)
+//   - Live request stream (launchId → every proxy client whose
+//     X-Promptctl-Launch header carries this launchId → their
+//     requests; one launch can produce many client rows as the tool
+//     reconnects, so we scan `clients` rather than reading the row's
+//     own `proxyClientId`)
 //   - Session file (sessionFilePath → path + Open-in-Context-Workshop)
 //
 // [LAW:types-are-the-program] Each panel is a one-liner projection
