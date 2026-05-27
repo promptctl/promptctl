@@ -14,8 +14,18 @@
 import type { Pipeline, Step, StepKind } from "../../../shared/types";
 import { stripThinking } from "./ops/strip-thinking";
 import { removeMessages } from "./ops/remove-messages";
+import { buildSourceIndexToUuid } from "./source-index";
 
-export type Operation = (content: string, step: Step, source: string) => string;
+// Each op receives a precomputed source-index → uuid map. Building it
+// once per pipeline run (instead of per-step) keeps an N-step pipeline
+// from re-parsing the entire source content N times — JSON.parse on
+// long sessions dominates op-runtime, and this map is identical for
+// every step in the same pipeline run.
+export type Operation = (
+  content: string,
+  step: Step,
+  sourceIndex: Map<number, string>,
+) => string;
 
 const OPS: Record<StepKind, Operation> = {
   "strip-thinking": stripThinking,
@@ -23,13 +33,14 @@ const OPS: Record<StepKind, Operation> = {
 };
 
 export function runPipeline(content: string, pipeline: Pipeline): string {
-  // The initial content is the source — every step's source-relative targets
-  // resolve against this, not the running content. Keeps targets stable
-  // regardless of step order.
-  const source = content;
+  // [LAW:one-source-of-truth] Source-relative targets resolve against the
+  // INITIAL content's index→uuid map. Step ordering then doesn't shift
+  // targets — uuids are stable across removals/strips on the running
+  // content.
+  const sourceIndex = buildSourceIndexToUuid(content);
   let current = content;
   for (const step of pipeline.steps) {
-    current = OPS[step.kind](current, step, source);
+    current = OPS[step.kind](current, step, sourceIndex);
   }
   return current;
 }

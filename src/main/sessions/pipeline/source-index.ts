@@ -28,14 +28,16 @@ export function buildSourceIndexToUuid(source: string): Map<number, string> {
   return map;
 }
 
-export function targetUuidsForStep(
-  source: string,
+// Variant that takes a precomputed source-index map. Ops receive the
+// map from runPipeline (built once per pipeline run) and use this to
+// resolve their targets without re-parsing the source content.
+export function targetUuidsFromIndex(
+  sourceIndex: Map<number, string>,
   targets: number[],
 ): Set<string> {
-  const map = buildSourceIndexToUuid(source);
   const out = new Set<string>();
   for (const idx of targets) {
-    const uuid = map.get(idx);
+    const uuid = sourceIndex.get(idx);
     if (typeof uuid === "string") out.add(uuid);
   }
   return out;

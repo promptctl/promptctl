@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { stripThinking } from "./strip-thinking";
+import { buildSourceIndexToUuid } from "../source-index";
 import type { Step } from "../../../../shared/types";
 
 function buildStep(targets: number[]): Step {
@@ -47,7 +48,11 @@ function assistantWithThinking(uuid: string) {
 describe("stripThinking op", () => {
   it("strips thinking blocks from targeted lines, leaves text intact", () => {
     const source = [userLine("u1"), assistantWithThinking("a1")].join("\n");
-    const result = stripThinking(source, buildStep([1]), source);
+    const result = stripThinking(
+      source,
+      buildStep([1]),
+      buildSourceIndexToUuid(source),
+    );
     const lines = result.split("\n").map((l) => JSON.parse(l));
     const blocks = lines[1].message.content as { type: string }[];
     expect(blocks.map((b) => b.type)).toEqual(["text"]);
@@ -55,14 +60,21 @@ describe("stripThinking op", () => {
 
   it("leaves non-targeted lines byte-for-byte intact", () => {
     const source = [userLine("u1"), assistantWithThinking("a1")].join("\n");
-    const result = stripThinking(source, buildStep([1]), source);
-    // The user line is untouched — same raw string.
+    const result = stripThinking(
+      source,
+      buildStep([1]),
+      buildSourceIndexToUuid(source),
+    );
     expect(result.split("\n")[0]).toBe(userLine("u1"));
   });
 
   it("no-op when no targets resolve to known uuids", () => {
     const source = [userLine("u1"), assistantWithThinking("a1")].join("\n");
-    const result = stripThinking(source, buildStep([99]), source);
+    const result = stripThinking(
+      source,
+      buildStep([99]),
+      buildSourceIndexToUuid(source),
+    );
     expect(result).toBe(source);
   });
 
@@ -85,8 +97,11 @@ describe("stripThinking op", () => {
       },
     });
     const source = [userLine("u1"), textOnlyAssistant].join("\n");
-    const result = stripThinking(source, buildStep([1]), source);
-    // Byte-for-byte identical.
+    const result = stripThinking(
+      source,
+      buildStep([1]),
+      buildSourceIndexToUuid(source),
+    );
     expect(result).toBe(source);
   });
 
@@ -97,9 +112,14 @@ describe("stripThinking op", () => {
     // assistant line in the running content is still found and stripped.
     const source = [userLine("u1"), assistantWithThinking("a1")].join("\n");
     const running = assistantWithThinking("a1"); // u1 already removed
-    const result = stripThinking(running, buildStep([1]), source);
-    const blocks = (JSON.parse(result) as { message: { content: { type: string }[] } })
-      .message.content;
+    const result = stripThinking(
+      running,
+      buildStep([1]),
+      buildSourceIndexToUuid(source),
+    );
+    const blocks = (
+      JSON.parse(result) as { message: { content: { type: string }[] } }
+    ).message.content;
     expect(blocks.map((b) => b.type)).toEqual(["text"]);
   });
 });

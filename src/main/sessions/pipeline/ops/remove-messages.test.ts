@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { removeMessages } from "./remove-messages";
+import { buildSourceIndexToUuid } from "../source-index";
 import type { Step } from "../../../../shared/types";
 
 function buildStep(targets: number[]): Step {
@@ -26,12 +27,12 @@ function userLine(uuid: string) {
 
 describe("removeMessages op", () => {
   it("removes targeted lines and preserves others byte-for-byte", () => {
-    const source = [
-      userLine("u1"),
-      userLine("u2"),
-      userLine("u3"),
-    ].join("\n");
-    const result = removeMessages(source, buildStep([1]), source);
+    const source = [userLine("u1"), userLine("u2"), userLine("u3")].join("\n");
+    const result = removeMessages(
+      source,
+      buildStep([1]),
+      buildSourceIndexToUuid(source),
+    );
     const remaining = result
       .split("\n")
       .map((l) => JSON.parse(l) as { uuid: string });
@@ -40,7 +41,11 @@ describe("removeMessages op", () => {
 
   it("returns content unchanged when no targets resolve", () => {
     const source = userLine("u1");
-    const result = removeMessages(source, buildStep([99]), source);
+    const result = removeMessages(
+      source,
+      buildStep([99]),
+      buildSourceIndexToUuid(source),
+    );
     expect(result).toBe(source);
   });
 });

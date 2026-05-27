@@ -1493,23 +1493,30 @@ export function SessionEditor() {
   // queuing duplicate stored steps.
   const handleSave = useCallback(
     async (force = false) => {
-      if (selectedProvider !== "claude") {
-        const result = await save(force);
+      // IPC invoke rejections bubble out of save/applyPipeline. Catch here
+      // so the click handler never leaves an unhandled promise rejection;
+      // mirrors PipelinePanel.handleApply's pattern.
+      try {
+        if (selectedProvider !== "claude") {
+          const result = await save(force);
+          setSaveResult(result);
+          return;
+        }
+        const overrideSteps = [...pipeline.steps];
+        if (markedForRemoval.size > 0) {
+          overrideSteps.push({
+            id: crypto.randomUUID(),
+            source: "manual",
+            kind: "remove-messages",
+            targets: [...markedForRemoval],
+            rationale: `${markedForRemoval.size} manually marked message${markedForRemoval.size === 1 ? "" : "s"}`,
+          });
+        }
+        const result = await applyPipeline(force, { steps: overrideSteps });
         setSaveResult(result);
-        return;
+      } catch (err) {
+        console.error("handleSave failed:", err);
       }
-      const overrideSteps = [...pipeline.steps];
-      if (markedForRemoval.size > 0) {
-        overrideSteps.push({
-          id: crypto.randomUUID(),
-          source: "manual",
-          kind: "remove-messages",
-          targets: [...markedForRemoval],
-          rationale: `${markedForRemoval.size} manually marked message${markedForRemoval.size === 1 ? "" : "s"}`,
-        });
-      }
-      const result = await applyPipeline(force, { steps: overrideSteps });
-      setSaveResult(result);
     },
     [selectedProvider, pipeline.steps, markedForRemoval, save, applyPipeline],
   );

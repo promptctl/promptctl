@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { buildSourceIndexToUuid, targetUuidsForStep } from "./source-index";
+import { buildSourceIndexToUuid, targetUuidsFromIndex } from "./source-index";
 
 const VISIBLE_USER = (uuid: string) =>
   JSON.stringify({
@@ -66,10 +66,11 @@ describe("buildSourceIndexToUuid", () => {
   });
 });
 
-describe("targetUuidsForStep", () => {
+describe("targetUuidsFromIndex", () => {
   it("resolves indices to uuids; unknown indices are dropped", () => {
     const content = [VISIBLE_USER("u1"), VISIBLE_USER("u2")].join("\n");
-    const uuids = targetUuidsForStep(content, [0, 999]);
+    const map = buildSourceIndexToUuid(content);
+    const uuids = targetUuidsFromIndex(map, [0, 999]);
     expect([...uuids]).toEqual(["u1"]);
   });
 });

@@ -5,14 +5,14 @@
 // metadata lines and lines with no uuid) pass through unchanged.
 import type { Step } from "../../../../shared/types";
 import type { ClaudeLine } from "../../claude/types";
-import { targetUuidsForStep } from "../source-index";
+import { targetUuidsFromIndex } from "../source-index";
 
 export function removeMessages(
   content: string,
   step: Step,
-  source: string,
+  sourceIndex: Map<number, string>,
 ): string {
-  const targetUuids = targetUuidsForStep(source, step.targets);
+  const targetUuids = targetUuidsFromIndex(sourceIndex, step.targets);
   if (targetUuids.size === 0) return content;
 
   const outLines: string[] = [];
