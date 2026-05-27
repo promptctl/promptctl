@@ -25,6 +25,7 @@ import {
   searchSessions,
   peekSession,
   applyPipeline,
+  getActiveProvider,
 } from "../sessions/editor";
 import {
   getAnalyzer,
@@ -138,8 +139,22 @@ export function registerSessionHandlers(): void {
   );
   ipcMain.handle(
     "session:run-analyzer",
-    (_e, analyzerId: string, filePath: string) =>
-      getAnalyzer(analyzerId).run(filePath),
+    (_e, analyzerId: string, filePath: string) => {
+      const analyzer = getAnalyzer(analyzerId);
+      // [LAW:single-enforcer] Verify the analyzer applies to the active
+      // session's provider. session:list-analyzers is provider-scoped, so
+      // the renderer never *requests* a mismatched analyzer in practice —
+      // but the IPC surface should enforce the same invariant in case a
+      // stale invocation lands after the user switched providers, or any
+      // other consumer ever calls this directly.
+      const activeProvider = getActiveProvider();
+      if (analyzer.providerId !== activeProvider) {
+        throw new Error(
+          `Analyzer ${analyzerId} is scoped to provider ${analyzer.providerId}, but active session uses ${activeProvider}`,
+        );
+      }
+      return analyzer.run(filePath);
+    },
   );
   ipcMain.handle(
     "session:apply-pipeline",

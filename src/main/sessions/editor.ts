@@ -138,6 +138,13 @@ function activeProviderId(): ProviderKind {
   return activeProvider;
 }
 
+// Public read of the active provider — used by IPC handlers that need to
+// verify a request matches the loaded session (e.g. session:run-analyzer
+// rejecting analyzers scoped to a different provider).
+export function getActiveProvider(): ProviderKind {
+  return activeProviderId();
+}
+
 export function getMessageContent(index: number): string {
   return active().getMessageContent(index);
 }
@@ -413,7 +420,9 @@ export async function applyPipeline(
 function formatPipelineLabel(pipeline: Pipeline): string {
   if (pipeline.steps.length === 0) return "Applied empty pipeline";
   const parts = pipeline.steps.map((s) => {
-    const count = s.targets.length;
+    // Dedupe targets when counting — ops dedupe via UUID Set, so the label
+    // must match what actually happened, not what was queued.
+    const count = new Set(s.targets).size;
     return `${s.kind} (${count} message${count === 1 ? "" : "s"} from ${s.source})`;
   });
   return `Applied ${pipeline.steps.length} step${pipeline.steps.length === 1 ? "" : "s"}: ${parts.join(", ")}`;
