@@ -37,21 +37,23 @@ const SHELL_OR_LAUNCHER_COMMS = new Set([
   "iTerm2",
   "WindowServer",
 ]);
-// [LAW:dataflow-not-control-flow] Bounds on the resolver are encoded only in
-// lsof/ps exec timeouts and a bounded retry count — not in a wall-clock race
-// against the resolver itself. The previous shape raced a 3s deadline against
-// findSocketPidWithRetry; under load lsof would take 700–900ms per call and
-// a shared 600ms exec timeout would kill it prematurely, the retry loop would
-// compound by re-killing slow-but-working lsof, and the outer deadline would
-// fire returning a `socket-<port>` fallback for processes that were findable.
-// The variability we care about is "did lsof identify the peer", which lives
-// in lsof's actual return value. The clock has no business voting on that.
+// [LAW:dataflow-not-control-flow] No wall-clock race against the resolver.
+// On macOS the bound is composed of lsof/ps exec timeouts × bounded retry
+// count; on Linux the socket→pid path reads /proc directly via readdir +
+// readlink (no exec, bounded by the kernel's fast-path filesystem ops, no
+// explicit timeout). The previous shape raced a 3s deadline; under load
+// lsof would take 700–900ms per call and a shared 600ms exec timeout would
+// kill it prematurely, the retry loop would compound by re-killing slow-
+// but-working lsof, and the outer deadline would fire returning a
+// `socket-<port>` fallback for processes that were findable. The variability
+// we care about is "did the kernel identify the peer", which lives in the
+// resolution's actual return value. The clock has no business voting on that.
 //
-// [LAW:one-type-per-behavior] Per-command timeouts: lsof scans the kernel
-// socket table (slow under contention) so it gets a generous ceiling; ps is
-// a single-pid lookup (universally fast — tens of ms even under heavy load),
-// so it keeps a tight one. Collapsing both under one constant was the trap
-// that produced the original flake.
+// [LAW:one-type-per-behavior] Per-command timeouts on macOS: lsof scans the
+// kernel socket table (slow under contention) so it gets a generous ceiling;
+// ps is a single-pid lookup (universally fast — tens of ms even under heavy
+// load), so it keeps a tight one. Collapsing both under one constant was the
+// trap that produced the original flake.
 const PEER_LOOKUP_RETRIES = 3;
 const PEER_LOOKUP_BACKOFF_MS = 100;
 const MAX_PARENT_DEPTH = 16;
@@ -96,10 +98,10 @@ function exec(
 export async function resolveClientId(socket: net.Socket): Promise<ClientInfo> {
   // [LAW:dataflow-not-control-flow] Wait for the resolver. Fallback only when
   // it tells us — via thrown rejection — that the peer cannot be identified.
-  // The bound is the sum of bounded exec calls (lsof, ps × walk depth, optional
-  // readCwd) plus retry backoffs — not a wall-clock race. The exact total varies
-  // with platform and walk depth; what matters is that every exec is timeout-
-  // bounded and there are no unbounded waits.
+  // The cost is platform-dependent: macOS sums per-command exec timeouts plus
+  // retry backoffs; Linux relies on the kernel's /proc fast-path. Both are
+  // bounded in practice — neither is an open-ended wait on an external
+  // resource — but neither is a single named ceiling either.
   try {
     return await resolveClientInfo(socket);
   } catch {
