@@ -2,6 +2,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useMemo,
   useRef,
   type ReactNode,
 } from "react";
@@ -19,6 +20,7 @@ import type {
   SessionSaveResult,
   SessionSearchResult,
   SessionSearchMatch,
+  StepKind,
 } from "../../shared/types";
 import { ResizableSplit } from "./ResizableSplit";
 import { ValidationViolationsDialog } from "./ValidationViolationsDialog";
@@ -33,7 +35,7 @@ import { newTaskId, useTaskSubscription } from "../store/tasks";
 import {
   PipelinePanel,
   PipelineEffectBadges,
-  pipelineEffectsForIndex,
+  buildPipelineEffectMap,
 } from "./PipelinePanel";
 
 // -- Layout helpers --
@@ -1036,7 +1038,7 @@ function MessageRow({
 }: {
   msg: MessageSummary;
   marked: boolean;
-  pipelineEffects: string[];
+  pipelineEffects: StepKind[];
   typeColor: string;
   typeLabel: string;
   flagDefs: Record<string, FlagDefinition>;
@@ -1699,6 +1701,15 @@ export function SessionEditor() {
   const markedTokens = messages
     .filter((m) => markedForRemoval.has(m.index))
     .reduce((sum, m) => sum + m.tokens, 0);
+
+  // [LAW:dataflow-not-control-flow] Build the index→kinds Map once per
+  // pipeline change. Rows look up by index in O(1) instead of scanning every
+  // step's targets array on every render. Empty pipeline → empty Map → no
+  // badges rendered, no work per row.
+  const pipelineEffectMap = useMemo(
+    () => buildPipelineEffectMap(pipeline.steps),
+    [pipeline.steps],
+  );
 
   // Filter messages by active type/flag/tool filters and search text
   const searchLower = searchText.toLowerCase();
@@ -2473,10 +2484,9 @@ export function SessionEditor() {
                                 key={msg.index}
                                 msg={msg}
                                 marked={markedForRemoval.has(msg.index)}
-                                pipelineEffects={pipelineEffectsForIndex(
-                                  pipeline.steps,
-                                  msg.index,
-                                )}
+                                pipelineEffects={
+                                  pipelineEffectMap.get(msg.index) ?? []
+                                }
                                 typeColor={style?.color ?? FALLBACK_STYLE}
                                 typeLabel={style?.label ?? msg.type}
                                 flagDefs={flagDefs}

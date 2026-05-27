@@ -13,12 +13,18 @@
 // Slice 1 keeps it minimal — no reorder UI, no step config editor. Both land
 // in slice 4.
 import { useMemo, useState } from "react";
-import type { SessionSaveResult } from "../../shared/types";
+import type {
+  SessionSaveResult,
+  Step,
+  StepKind,
+} from "../../shared/types";
 import { useSessionStore } from "../store/sessions";
 
-// [LAW:dataflow-not-control-flow] Per-kind display data — adding a new
-// StepKind = one entry here. The UI never branches on kind elsewhere.
-const STEP_KIND_LABEL: Record<string, { label: string; color: string }> = {
+// [LAW:types-are-the-program] Record<StepKind, …> makes UI display data
+// exhaustive at compile time. Adding a new StepKind without an entry here
+// fails type-check, mirroring how runPipeline's OPS table forces a new
+// kind to have a backing operation. No fallback default-case branch.
+const STEP_KIND_LABEL: Record<StepKind, { label: string; color: string }> = {
   "strip-thinking": {
     label: "Strip thinking",
     color: "bg-purple-500/20 text-purple-300",
@@ -29,11 +35,8 @@ const STEP_KIND_LABEL: Record<string, { label: string; color: string }> = {
   },
 };
 
-function StepKindBadge({ kind }: { kind: string }) {
-  const info = STEP_KIND_LABEL[kind] ?? {
-    label: kind,
-    color: "bg-neutral-700 text-neutral-300",
-  };
+function StepKindBadge({ kind }: { kind: StepKind }) {
+  const info = STEP_KIND_LABEL[kind];
   return (
     <span className={`rounded px-1.5 py-0.5 text-xs font-medium ${info.color}`}>
       {info.label}
@@ -252,32 +255,36 @@ export function PipelinePanel({
   );
 }
 
-// Derived data: which step kinds target a given source-message index. Used
-// by MessageRow to render per-row pipeline-effect badges.
-// [LAW:dataflow-not-control-flow] Pure projection of the pipeline; callers
-// pass it in instead of subscribing to the store from inside the row (rows
-// re-render constantly; subscribing in each row would cost more than reading
-// once at the parent and passing the result down).
-export function pipelineEffectsForIndex(
-  steps: { kind: string; targets: number[] }[],
-  index: number,
-): string[] {
-  const out: string[] = [];
+// Derived data: an index→kinds Map covering every message a pipeline step
+// targets. The host computes this once per pipeline change (useMemo) and
+// passes the Map down; each MessageRow does an O(1) Map.get(index) lookup
+// instead of scanning every step's targets array on every render.
+//
+// [LAW:dataflow-not-control-flow] Variability lives in the precomputed Map
+// — rows don't know which steps exist, they just read what they need to
+// render. With many steps and large sessions, the old "scan steps for each
+// row" shape was O(messages × steps × targets); this is O(steps × targets)
+// once + O(1) per row.
+export function buildPipelineEffectMap(
+  steps: Step[],
+): Map<number, StepKind[]> {
+  const map = new Map<number, StepKind[]>();
   for (const step of steps) {
-    if (step.targets.includes(index)) out.push(step.kind);
+    for (const idx of step.targets) {
+      const existing = map.get(idx);
+      if (existing) existing.push(step.kind);
+      else map.set(idx, [step.kind]);
+    }
   }
-  return out;
+  return map;
 }
 
-export function PipelineEffectBadges({ kinds }: { kinds: string[] }) {
+export function PipelineEffectBadges({ kinds }: { kinds: StepKind[] }) {
   if (kinds.length === 0) return null;
   return (
     <>
       {kinds.map((kind, i) => {
-        const info = STEP_KIND_LABEL[kind] ?? {
-          label: kind,
-          color: "bg-neutral-700 text-neutral-300",
-        };
+        const info = STEP_KIND_LABEL[kind];
         return (
           <span
             key={`${kind}:${i}`}

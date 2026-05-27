@@ -320,6 +320,11 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       analyzerResults: {},
       analyzerRunning: new Set(),
       pipeline: { steps: [] },
+      // [LAW:one-source-of-truth] A session switch is a full reset of
+      // transient mutation flags. Without this, an in-flight applyPipeline
+      // (or one that threw before its try/finally fires) leaves the new
+      // session UI-disabled with no path to recover.
+      applying: false,
     });
     const messages = (await window.electronAPI.invoke(
       "session:load",
@@ -374,6 +379,8 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       analyzerResults: {},
       analyzerRunning: new Set(),
       pipeline: { steps: [] },
+      // See selectSession reset — same reason.
+      applying: false,
     });
   },
 
@@ -616,28 +623,59 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
   },
 
   applyPipeline: async (force = false) => {
-    set({ applying: true });
+    // [LAW:one-source-of-truth] Capture the session this apply targets BEFORE
+    // we await; any session-switch during the await is detected by comparing
+    // selectedSession.filePath to this snapshot, and post-apply state writes
+    // (reload, version bump, analyzer re-run) skip entirely if it changed.
+    // This mirrors runAnalyzer's stale-result guard.
+    const startSession = get().selectedSession;
+    const startProvider = get().selectedProvider;
     const pipeline = get().pipeline;
-    const result = (await window.electronAPI.invoke(
-      "session:apply-pipeline",
-      pipeline,
-      force,
-    )) as SessionSaveResult;
-    if (result.blockedReason !== null) {
-      // Same fork as save: blocked = keep pipeline + selection state intact
-      // so the user can review / resolve / retry. [LAW:dataflow-not-control-flow]
-      // The renderer dispatches off blockedReason; the store doesn't care.
+    set({ applying: true });
+    let result: SessionSaveResult;
+    try {
+      result = (await window.electronAPI.invoke(
+        "session:apply-pipeline",
+        pipeline,
+        force,
+      )) as SessionSaveResult;
+    } catch (err) {
+      // [LAW:single-enforcer] try/finally pattern: applying is the gate
+      // that disables the Apply button; clearing it on every exit path
+      // (including throws) is the single guarantee callers depend on.
+      set({ applying: false });
+      throw err;
+    }
+
+    // Stale guard: user switched sessions during the apply. Drop the
+    // result entirely — the file we just wrote belongs to a session
+    // that's no longer active, and the new session has its own loaded
+    // state we mustn't clobber.
+    const afterSession = get().selectedSession;
+    if (afterSession?.filePath !== startSession?.filePath) {
       set({ applying: false });
       return result;
     }
-    const session = get().selectedSession;
-    const provider = get().selectedProvider;
-    if (session && provider) {
+
+    if (result.blockedReason !== null) {
+      // Blocked = keep pipeline + selection state intact so the user can
+      // review / resolve / retry. [LAW:dataflow-not-control-flow] The
+      // renderer dispatches off blockedReason; the store doesn't care.
+      set({ applying: false });
+      return result;
+    }
+
+    if (startSession && startProvider) {
       const messages = (await window.electronAPI.invoke(
         "session:load",
-        provider,
-        session.filePath,
+        startProvider,
+        startSession.filePath,
       )) as MessageSummary[];
+      // Re-check stale after the reload await — runAnalyzer's pattern.
+      if (get().selectedSession?.filePath !== startSession.filePath) {
+        set({ applying: false });
+        return result;
+      }
       set({
         messages,
         markedForRemoval: new Set(),

@@ -66,6 +66,30 @@ describe("stripThinking op", () => {
     expect(result).toBe(source);
   });
 
+  it("preserves the raw line byte-for-byte when the targeted message has no thinking blocks to strip", () => {
+    // Targeting a message that already has no thinking blocks is a no-op.
+    // We must NOT re-serialize the line — JSON.stringify can shuffle key
+    // order or whitespace, producing a spurious diff for no semantic change.
+    const textOnlyAssistant = JSON.stringify({
+      type: "assistant",
+      uuid: "a1",
+      parentUuid: null,
+      isSidechain: false,
+      cwd: "/r",
+      sessionId: "s",
+      timestamp: "2026-01-01T00:00:00.000Z",
+      message: {
+        role: "assistant",
+        model: "claude-sonnet-4-5",
+        content: [{ type: "text", text: "no thinking here" }],
+      },
+    });
+    const source = [userLine("u1"), textOnlyAssistant].join("\n");
+    const result = stripThinking(source, buildStep([1]), source);
+    // Byte-for-byte identical.
+    expect(result).toBe(source);
+  });
+
   it("resolves targets against source even when running content differs", () => {
     // Simulate: an earlier pipeline step removed line index 0 from the
     // running content, but the strip-thinking step still targets source

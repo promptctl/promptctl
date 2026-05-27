@@ -326,11 +326,12 @@ export async function compressToolResults(
 // (compressToolResults) where in-memory state must stay consistent with
 // disk. applyPipeline works content-pure, so we don't need that path.
 //
-// Slice 1 has no force flag — when pipeline output fails structural
-// validation, the apply is refused and the renderer surfaces the violations.
-// Slice 3 adds the structural-repair analyzer that will make this case go
-// away in practice; the force escape hatch lands with slice 4's pre-apply
-// diff UI if it's needed at all.
+// force=true: bypasses both the live-tail gate and structural validation.
+// Wired to ValidationViolationsDialog and LiveTailBlockedDialog's "Force
+// save" — the renderer flow when the user has reviewed the warning and
+// explicitly opted in. Slice 3's structural-repair analyzer will reduce
+// the need for the validation-force path in practice; slice 4 adds a
+// pre-apply diff so the user can preview what they're forcing.
 export async function applyPipeline(
   pipeline: Pipeline,
   force = false,

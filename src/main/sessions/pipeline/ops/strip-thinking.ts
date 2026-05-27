@@ -36,9 +36,18 @@ export function stripThinking(
       outLines.push(raw);
       continue;
     }
-    const filtered = (message.content as ClaudeContentBlock[]).filter(
-      (b) => b.type !== "thinking",
-    );
+    const blocks = message.content as ClaudeContentBlock[];
+    const filtered = blocks.filter((b) => b.type !== "thinking");
+    // [LAW:one-source-of-truth] If filtering removed nothing, the line's
+    // semantic content is unchanged — preserve the original raw bytes so
+    // we don't emit a spurious diff (JSON.stringify can shuffle key order
+    // or whitespace and Claude Code's session file is the source of truth
+    // for what's on disk; only re-serialize when we actually changed
+    // something).
+    if (filtered.length === blocks.length) {
+      outLines.push(raw);
+      continue;
+    }
     message.content = filtered;
     outLines.push(JSON.stringify(line));
   }
