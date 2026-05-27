@@ -54,6 +54,14 @@ test.describe("Workshop tab", () => {
     await expect(
       page.getByRole("link", { name: "Workshop" }),
     ).toBeVisible({ timeout: READY_TIMEOUT_MS });
+    // Also pin the actual route. The TopTabBar renders on every page,
+    // so the link being visible doesn't by itself prove we landed
+    // here — the URL does. HashRouter puts the route in the fragment
+    // (`#/workshop`); regex-match the suffix so dev-server vs packaged
+    // base URLs don't fight us.
+    await expect.poll(() => page.url(), { timeout: READY_TIMEOUT_MS }).toMatch(
+      /#\/workshop(\?.*)?$/,
+    );
     await expect(
       page.locator("[data-testid=workshop-new-launch]"),
     ).toBeVisible({ timeout: READY_TIMEOUT_MS });
