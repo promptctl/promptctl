@@ -118,6 +118,17 @@ beforeEach(() => {
       head: 0,
       versions: [],
     }),
+    // Slice 1 unified pipeline (5d3.4): every selectSession + every mutation
+    // routes through these two channels. Baseline returns empty so individual
+    // tests don't have to wire them unless they care about analyzer/pipeline
+    // behavior specifically.
+    "session:list-analyzers": () => [],
+    "session:apply-pipeline": () => ({
+      path: "/test/session.jsonl",
+      violations: [],
+      forced: false,
+      blockedReason: null,
+    }),
   });
   // Reset store
   useSessionStore.setState({
@@ -323,15 +334,11 @@ describe("Backup confirmation dialog removed", () => {
     setStoreLoaded({ messages: [makeMessage(0), makeMessage(1)] });
     useSessionStore.setState({ markedForRemoval: new Set([0]) });
 
+    // Slice 1: the Save button routes through the unified pipeline. The shim
+    // queues a manual remove-messages step and invokes session:apply-pipeline.
+    // The baseline handler in beforeEach answers session:apply-pipeline; this
+    // block layers on session:load for the post-apply reload.
     setInvokeHandlers(api, {
-      "session:list-projects": () => [],
-      "session:provider-metadata": () => ({}),
-      "session:save": () => ({
-        path: "/test/session.jsonl",
-        violations: [],
-        forced: false,
-        blockedReason: null,
-      }),
       "session:load": () => [makeMessage(0)],
       "session:list-versions": () => ({
         sessionPath: "/test",
@@ -350,13 +357,22 @@ describe("Backup confirmation dialog removed", () => {
 
     // Confirm should NOT have been called (backup dialog removed)
     expect(confirmSpy).not.toHaveBeenCalled();
-    // session:save should have been invoked with (indices, outputPath, force)
-    expect(api.invoke).toHaveBeenCalledWith(
-      "session:save",
-      [0],
-      undefined,
-      false,
+
+    // session:apply-pipeline should fire with a pipeline whose single step
+    // is a manual remove-messages targeting [0]. We assert the *shape* of the
+    // pipeline (its single step's kind + source + targets) rather than
+    // hard-coding the generated step id.
+    const applyCall = api.invoke.mock.calls.find(
+      (c) => c[0] === "session:apply-pipeline",
     );
+    if (!applyCall) throw new Error("expected session:apply-pipeline call");
+    const pipeline = applyCall[1] as {
+      steps: { source: string; kind: string; targets: number[] }[];
+    };
+    expect(pipeline.steps).toHaveLength(1);
+    expect(pipeline.steps[0].source).toBe("manual");
+    expect(pipeline.steps[0].kind).toBe("remove-messages");
+    expect(pipeline.steps[0].targets).toEqual([0]);
 
     confirmSpy.mockRestore();
     cleanup();
@@ -367,14 +383,6 @@ describe("Backup confirmation dialog removed", () => {
     useSessionStore.setState({ markedForRemoval: new Set([0]) });
 
     setInvokeHandlers(api, {
-      "session:list-projects": () => [],
-      "session:provider-metadata": () => ({}),
-      "session:save": () => ({
-        path: "/test/session.jsonl",
-        violations: [],
-        forced: false,
-        blockedReason: null,
-      }),
       "session:load": () => [],
       "session:list-versions": () => ({
         sessionPath: "/test",

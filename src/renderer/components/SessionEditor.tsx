@@ -30,6 +30,11 @@ import { DiffViewer } from "./DiffViewer";
 import { TaskToast } from "./TaskToast";
 import { JsonlLineView } from "./jsonl-view";
 import { newTaskId, useTaskSubscription } from "../store/tasks";
+import {
+  PipelinePanel,
+  PipelineEffectBadges,
+  pipelineEffectsForIndex,
+} from "./PipelinePanel";
 
 // -- Layout helpers --
 
@@ -1018,6 +1023,7 @@ function SessionTree({
 function MessageRow({
   msg,
   marked,
+  pipelineEffects,
   typeColor,
   typeLabel,
   flagDefs,
@@ -1030,6 +1036,7 @@ function MessageRow({
 }: {
   msg: MessageSummary;
   marked: boolean;
+  pipelineEffects: string[];
   typeColor: string;
   typeLabel: string;
   flagDefs: Record<string, FlagDefinition>;
@@ -1102,6 +1109,7 @@ function MessageRow({
                 </span>
               );
             })}
+            <PipelineEffectBadges kinds={pipelineEffects} />
             {/* Extras (model, tokens, etc.) */}
             {Object.entries(msg.extras).map(([key, value]) => (
               <span
@@ -1232,7 +1240,7 @@ export function SessionEditor() {
     previewIndex,
     previewRaw,
     loading,
-    saving,
+    applying,
     versions,
     versionHead,
     loadProjects,
@@ -1246,9 +1254,11 @@ export function SessionEditor() {
     closePreview,
     runAutoTrim,
     applyAutoTrim,
-    save,
     undo,
     redo,
+    pipeline,
+    addStep,
+    applyPipeline,
     searchQuery,
     searchResults,
     searchStatus,
@@ -1465,11 +1475,23 @@ export function SessionEditor() {
     [lastClickedIndex, toggleMessage, toggleRange],
   );
 
+  // [LAW:single-enforcer] Slice-1 shim: route the legacy "Remove N & Save"
+  // click through the pipeline (queue a manual remove-messages step, then
+  // apply). This keeps applyPipeline as the only mutation path while
+  // preserving the today-only one-click flow. The standalone Apply button
+  // (in PipelinePanel) is the path for analyzer-driven multi-step pipelines.
   const handleSave = useCallback(async () => {
-    // Versioning makes Save fearless — every save creates a recoverable version.
-    const result = await save();
+    if (markedForRemoval.size > 0) {
+      addStep({
+        source: "manual",
+        kind: "remove-messages",
+        targets: [...markedForRemoval],
+        rationale: `${markedForRemoval.size} manually marked message${markedForRemoval.size === 1 ? "" : "s"}`,
+      });
+    }
+    const result = await applyPipeline();
     setSaveResult(result);
-  }, [save]);
+  }, [markedForRemoval, addStep, applyPipeline]);
 
   const handleAutoTrim = useCallback(async () => {
     await runAutoTrim();
@@ -2125,6 +2147,12 @@ export function SessionEditor() {
 
                     <div className="h-px bg-neutral-800" />
 
+                    {/* Pipeline panel — analyzers + ordered steps + Apply.
+                        Mounts only when there are registered analyzers for the
+                        provider or the user has assembled steps. The dialog
+                        block-reasons surface here through onApplied → setSaveResult. */}
+                    <PipelinePanel onApplied={setSaveResult} />
+
                     {/* Save row — one line, stats left, primary action right, always visible */}
                     <div className="flex items-center justify-between gap-3">
                       <SessionStats
@@ -2136,11 +2164,11 @@ export function SessionEditor() {
                       <ToolHoverCard info={TOOL_HOVER_INFO.save}>
                         <button
                           onClick={handleSave}
-                          disabled={markedForRemoval.size === 0 || saving}
+                          disabled={markedForRemoval.size === 0 || applying}
                           className="rounded bg-red-600/80 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-30"
                         >
-                          {saving
-                            ? "Saving..."
+                          {applying
+                            ? "Applying..."
                             : `Remove ${markedForRemoval.size} & Save`}
                         </button>
                       </ToolHoverCard>
@@ -2445,6 +2473,10 @@ export function SessionEditor() {
                                 key={msg.index}
                                 msg={msg}
                                 marked={markedForRemoval.has(msg.index)}
+                                pipelineEffects={pipelineEffectsForIndex(
+                                  pipeline.steps,
+                                  msg.index,
+                                )}
                                 typeColor={style?.color ?? FALLBACK_STYLE}
                                 typeLabel={style?.label ?? msg.type}
                                 flagDefs={flagDefs}
@@ -2530,20 +2562,20 @@ export function SessionEditor() {
           result={saveResult}
           onCancel={() => setSaveResult(null)}
           onForceSave={async () => {
-            const result = await save(true);
+            const result = await applyPipeline(true);
             setSaveResult(result);
           }}
-          saving={saving}
+          saving={applying}
         />
       )}
       {saveResult?.blockedReason === "live-tail" && (
         <LiveTailBlockedDialog
           onCancel={() => setSaveResult(null)}
           onForceSave={async () => {
-            const result = await save(true);
+            const result = await applyPipeline(true);
             setSaveResult(result);
           }}
-          saving={saving}
+          saving={applying}
         />
       )}
     </div>

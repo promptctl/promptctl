@@ -15,12 +15,14 @@ import {
   redo,
   restoreVersion,
   compressToolResults,
+  applyPipeline,
   setLiveTailLookup,
   LiveTailBlockedError,
   _resetForTesting,
 } from "./editor";
 import { registerProvider } from "./registry";
 import { claudeAdapter } from "./claude/adapter";
+import type { Pipeline } from "../../shared/types";
 
 // A minimal valid Claude JSONL — one user line. Enough for the
 // adapter to load, summarize, and not trip pre-save validation when
@@ -176,6 +178,184 @@ describe("editor.saveSession live-tail guard", () => {
         { summarizeThreshold: 1000, truncateThreshold: 500, keepLastN: 2 },
       ),
     ).rejects.toBeInstanceOf(LiveTailBlockedError);
+  });
+
+  it("applyPipeline blocks when the active file is live-tail (force=false)", async () => {
+    await loadSession("claude", fp);
+    setLiveTailLookup((p) =>
+      p === fp ? { launchId: "launch-xyz" } : null,
+    );
+    const pipeline: Pipeline = { steps: [] };
+    const result = await applyPipeline(pipeline);
+    expect(result.blockedReason).toBe("live-tail");
+    expect(result.path).toBeNull();
+  });
+
+  it("applyPipeline with empty pipeline writes content unchanged and records a version", async () => {
+    await loadSession("claude", fp);
+    const result = await applyPipeline({ steps: [] });
+    expect(result.blockedReason).toBeNull();
+    expect(result.path).toBe(fp);
+    expect(result.forced).toBe(false);
+  });
+
+  it("applyPipeline executes a remove-messages step end-to-end", async () => {
+    // Two-user-message session; remove logical index 0 via the pipeline;
+    // file on disk should have only u2 afterwards.
+    const twoMsgJsonl =
+      [
+        JSON.stringify({
+          type: "user",
+          uuid: "u1",
+          parentUuid: null,
+          isSidechain: false,
+          cwd: "/r",
+          sessionId: "s",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          message: { role: "user", content: "first" },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "u2",
+          // No parentUuid → branch root, validator treats absence as fine.
+          // Removing u1 thus doesn't orphan u2's reference.
+          parentUuid: null,
+          isSidechain: false,
+          cwd: "/r",
+          sessionId: "s",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: { role: "user", content: "second" },
+        }),
+      ].join("\n") + "\n";
+    await writeFile(fp, twoMsgJsonl, "utf-8");
+    await loadSession("claude", fp);
+
+    const pipeline: Pipeline = {
+      steps: [
+        {
+          id: "step-1",
+          source: "manual",
+          kind: "remove-messages",
+          targets: [0],
+        },
+      ],
+    };
+    const result = await applyPipeline(pipeline);
+    expect(result.blockedReason).toBeNull();
+    expect(result.forced).toBe(false);
+
+    // Reload via loadSession so the messages reflect on-disk state.
+    const messages = await loadSession("claude", fp);
+    expect(messages).toHaveLength(1);
+    expect(messages[0].id).toBe("u2");
+  });
+
+  it("applyPipeline blocks on validation when output is structurally broken (force=false)", async () => {
+    // Build a session with a tool_use/tool_result pair, then remove only
+    // the user line containing the tool_result. The pipeline output has
+    // an orphaned tool_use; the validator catches it.
+    const session =
+      [
+        JSON.stringify({
+          type: "assistant",
+          uuid: "a1",
+          parentUuid: null,
+          isSidechain: false,
+          cwd: "/r",
+          sessionId: "s",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "tool_use", id: "t1", name: "X", input: {} }],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "u1",
+          parentUuid: "a1",
+          isSidechain: false,
+          cwd: "/r",
+          sessionId: "s",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "t1", content: "ok" },
+            ],
+          },
+        }),
+      ].join("\n") + "\n";
+    await writeFile(fp, session, "utf-8");
+    await loadSession("claude", fp);
+
+    const pipeline: Pipeline = {
+      steps: [
+        {
+          id: "s1",
+          source: "manual",
+          kind: "remove-messages",
+          // Remove the user (logical index 1) — assistant tool_use becomes orphan.
+          targets: [1],
+        },
+      ],
+    };
+    const result = await applyPipeline(pipeline);
+    expect(result.blockedReason).toBe("validation");
+    expect(result.violations.length).toBeGreaterThan(0);
+    expect(result.path).toBeNull();
+  });
+
+  it("applyPipeline with force=true bypasses validation and writes forced=true", async () => {
+    const session =
+      [
+        JSON.stringify({
+          type: "assistant",
+          uuid: "a1",
+          parentUuid: null,
+          isSidechain: false,
+          cwd: "/r",
+          sessionId: "s",
+          timestamp: "2026-01-01T00:00:00.000Z",
+          message: {
+            role: "assistant",
+            model: "claude-sonnet-4-5",
+            content: [{ type: "tool_use", id: "t1", name: "X", input: {} }],
+          },
+        }),
+        JSON.stringify({
+          type: "user",
+          uuid: "u1",
+          parentUuid: "a1",
+          isSidechain: false,
+          cwd: "/r",
+          sessionId: "s",
+          timestamp: "2026-01-01T00:00:01.000Z",
+          message: {
+            role: "user",
+            content: [
+              { type: "tool_result", tool_use_id: "t1", content: "ok" },
+            ],
+          },
+        }),
+      ].join("\n") + "\n";
+    await writeFile(fp, session, "utf-8");
+    await loadSession("claude", fp);
+
+    const pipeline: Pipeline = {
+      steps: [
+        {
+          id: "s1",
+          source: "manual",
+          kind: "remove-messages",
+          targets: [1],
+        },
+      ],
+    };
+    const result = await applyPipeline(pipeline, true);
+    expect(result.blockedReason).toBeNull();
+    expect(result.forced).toBe(true);
+    expect(result.violations.length).toBeGreaterThan(0);
   });
 
   it("loadSession behaves identically whether or not the file is live-tail (no branching outside the save guard)", async () => {

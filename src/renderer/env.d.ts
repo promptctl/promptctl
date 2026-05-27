@@ -23,6 +23,9 @@ import type {
   LaunchEvent,
   LaunchId,
   LaunchSpec,
+  AnalyzerMetadata,
+  AnalyzerResult,
+  Pipeline,
 } from "../shared/types";
 import type {
   ClientInfo,
@@ -99,6 +102,20 @@ export interface ElectronAPI {
     indices: number[],
   ): Promise<string>;
   invoke(channel: "session:auto-trim"): Promise<number[]>;
+  invoke(
+    channel: "session:list-analyzers",
+    provider: ProviderKind,
+  ): Promise<AnalyzerMetadata[]>;
+  invoke(
+    channel: "session:run-analyzer",
+    analyzerId: string,
+    filePath: string,
+  ): Promise<AnalyzerResult>;
+  invoke(
+    channel: "session:apply-pipeline",
+    pipeline: Pipeline,
+    force?: boolean,
+  ): Promise<SessionSaveResult>;
   invoke(
     channel: "session:save",
     indicesToRemove: number[],

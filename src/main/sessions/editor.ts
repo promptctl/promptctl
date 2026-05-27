@@ -13,11 +13,13 @@ import type {
   CompressToolsOptions,
   CompressToolsResult,
   SessionSaveResult,
+  Pipeline,
 } from "../../shared/types";
 import { validateClaudeContent } from "./claude/validator";
 import type { TaskHandle } from "../tasks/runner";
 import type { ProviderAdapter } from "./types";
 import { getAllProviders, getProvider } from "./registry";
+import { runPipeline } from "./pipeline/runPipeline";
 import {
   recordVersion,
   ensureBaseline,
@@ -310,6 +312,100 @@ export async function compressToolResults(
   }
 
   return result;
+}
+
+// [LAW:single-enforcer] applyPipeline is the only path that mutates a session
+// via the unified pipeline. Reads current disk content, runs the pipeline,
+// validates (Claude only — same policy as saveSession), writes through the
+// coordinator's writeFile (not the adapter's saveSession), records a version
+// with a structured label.
+//
+// Pattern parallel: undo/redo/restoreVersion also writeFile directly through
+// the coordinator and rely on the adapter being reloaded by the next
+// loadSession. The adapter's saveSession path exists for in-place edits
+// (compressToolResults) where in-memory state must stay consistent with
+// disk. applyPipeline works content-pure, so we don't need that path.
+//
+// Slice 1 has no force flag — when pipeline output fails structural
+// validation, the apply is refused and the renderer surfaces the violations.
+// Slice 3 adds the structural-repair analyzer that will make this case go
+// away in practice; the force escape hatch lands with slice 4's pre-apply
+// diff UI if it's needed at all.
+export async function applyPipeline(
+  pipeline: Pipeline,
+  force = false,
+): Promise<SessionSaveResult> {
+  const adapter = active();
+  const filePath = activePath();
+
+  // [LAW:single-enforcer] Same gate as saveSession; force only bypasses
+  // structural validation, never live-tail. A live launch's appended bytes
+  // would be clobbered either way, and that's the surface the gate exists
+  // to protect — the LiveTailBlockedDialog's "Force save" passes force=true
+  // to override the *validation* block, not the live-tail block.
+  const gate = liveTailGate(filePath, force);
+  if (gate.blocked) {
+    return {
+      path: null,
+      violations: [],
+      forced: false,
+      blockedReason: "live-tail",
+    };
+  }
+
+  const sourceContent = await readFile(filePath, "utf-8");
+  const newContent = runPipeline(sourceContent, pipeline);
+
+  // [LAW:dataflow-not-control-flow] Empty-violations list for non-claude
+  // providers — same code path, the data decides the outcome.
+  const violations =
+    adapter.id === "claude"
+      ? validateClaudeContent(newContent).violations
+      : [];
+  if (violations.length > 0 && !force) {
+    return {
+      path: null,
+      violations,
+      forced: false,
+      blockedReason: "validation",
+    };
+  }
+
+  await ensureBaselineForActive();
+  await writeFile(filePath, newContent, "utf-8");
+
+  const baseLabel = formatPipelineLabel(pipeline);
+  const label =
+    violations.length > 0
+      ? `${baseLabel} (forced with ${violations.length} violation${violations.length === 1 ? "" : "s"})`
+      : baseLabel;
+  const tokens = tokensForContent(newContent);
+  await recordVersion(filePath, activeProviderId(), newContent, label, tokens);
+
+  return {
+    path: filePath,
+    violations,
+    forced: violations.length > 0,
+    blockedReason: null,
+  };
+}
+
+function formatPipelineLabel(pipeline: Pipeline): string {
+  if (pipeline.steps.length === 0) return "Applied empty pipeline";
+  const parts = pipeline.steps.map((s) => {
+    const count = s.targets.length;
+    return `${s.kind} (${count} message${count === 1 ? "" : "s"} from ${s.source})`;
+  });
+  return `Applied ${pipeline.steps.length} step${pipeline.steps.length === 1 ? "" : "s"}: ${parts.join(", ")}`;
+}
+
+// Reload the active session after applyPipeline writes — mirrors the
+// post-undo/redo/restoreVersion pattern. The renderer calls session:load
+// directly after a successful apply, so this isn't called from main today,
+// but it's exposed so any future caller that needs the post-apply summaries
+// has a single entrypoint.
+export async function reloadActive(): Promise<MessageSummary[]> {
+  return active().loadSession(activePath());
 }
 
 export async function listVersions(): Promise<VersionMeta> {

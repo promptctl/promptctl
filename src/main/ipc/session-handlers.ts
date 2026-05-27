@@ -1,6 +1,10 @@
 // [LAW:single-enforcer] All session editor IPC goes through here.
 import { ipcMain } from "electron";
-import type { ProviderKind, CompressToolsOptions } from "../../shared/types";
+import type {
+  ProviderKind,
+  CompressToolsOptions,
+  Pipeline,
+} from "../../shared/types";
 import {
   listAllProjects,
   getAllProviderMetadata,
@@ -20,7 +24,12 @@ import {
   diffVersions,
   searchSessions,
   peekSession,
+  applyPipeline,
 } from "../sessions/editor";
+import {
+  getAnalyzer,
+  getAnalyzerMetadata,
+} from "../sessions/analyzers/registry";
 import { runTask } from "../tasks/runner";
 
 export function registerSessionHandlers(): void {
@@ -119,6 +128,23 @@ export function registerSessionHandlers(): void {
     "session:peek",
     (_e, provider: ProviderKind, filePath: string) =>
       peekSession(provider, filePath),
+  );
+
+  // Analyzers — list metadata for the provider, run a specific analyzer by id,
+  // apply a pipeline. Analyzer metadata is keyed by provider so the renderer
+  // only sees analyzers that apply to the current session's provider.
+  ipcMain.handle("session:list-analyzers", (_e, provider: ProviderKind) =>
+    getAnalyzerMetadata(provider),
+  );
+  ipcMain.handle(
+    "session:run-analyzer",
+    (_e, analyzerId: string, filePath: string) =>
+      getAnalyzer(analyzerId).run(filePath),
+  );
+  ipcMain.handle(
+    "session:apply-pipeline",
+    (_e, pipeline: Pipeline, force?: boolean) =>
+      applyPipeline(pipeline, force ?? false),
   );
 
   // Versioning

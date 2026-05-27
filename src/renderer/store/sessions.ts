@@ -9,6 +9,10 @@ import type {
   DiffEntry,
   SessionSaveResult,
   SessionSearchResult,
+  AnalyzerMetadata,
+  AnalyzerResult,
+  Pipeline,
+  Step,
 } from "../../shared/types";
 import { cancelTask, newTaskId } from "./tasks";
 
@@ -40,6 +44,19 @@ interface SessionEditorState {
   // Versioning state
   versions: VersionInfo[];
   versionHead: number;
+
+  // Unified-pipeline state. analyzerMetadata is the catalog for the active
+  // session's provider; analyzerResults caches each analyzer's last run output
+  // keyed by analyzer id. pipeline.steps is the ordered list of accepted
+  // operations the user has assembled.
+  // [LAW:one-source-of-truth] analyzerResults always reflects the LAST run
+  // for the current session. selectSession / undo / redo / restoreVersion
+  // refire all analyzers and overwrite the cache.
+  analyzerMetadata: AnalyzerMetadata[];
+  analyzerResults: Record<string, AnalyzerResult>;
+  analyzerRunning: Set<string>;
+  pipeline: Pipeline;
+  applying: boolean;
 
   // Search state. [LAW:dataflow-not-control-flow] searchResults drives the UI mode:
   // null = tree mode, array = search mode. No separate "isSearching" flag in the UI.
@@ -78,6 +95,14 @@ interface SessionEditorState {
   redo: () => Promise<void>;
   restoreVersion: (targetIdx: number) => Promise<void>;
   diffVersions: (fromIdx: number, toIdx: number) => Promise<DiffEntry[]>;
+
+  // Pipeline actions
+  runAnalyzer: (analyzerId: string) => Promise<void>;
+  runAllAnalyzers: () => Promise<void>;
+  addStep: (step: Omit<Step, "id">) => void;
+  removeStep: (stepId: string) => void;
+  clearPipeline: () => void;
+  applyPipeline: (force?: boolean) => Promise<SessionSaveResult>;
 
   // Peek (non-destructive preview while search is open). peekResult is the
   // source of truth for "is the peek pane open?"; peekMessages is lazily
@@ -186,6 +211,11 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
   autoTrimIndices: [],
   versions: [],
   versionHead: 0,
+  analyzerMetadata: [],
+  analyzerResults: {},
+  analyzerRunning: new Set(),
+  pipeline: { steps: [] },
+  applying: false,
 
   searchQuery: "",
   searchResults: null,
@@ -286,6 +316,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       previewIndex: null,
       versions: [],
       versionHead: 0,
+      analyzerMetadata: [],
+      analyzerResults: {},
+      analyzerRunning: new Set(),
+      pipeline: { steps: [] },
     });
     const messages = (await window.electronAPI.invoke(
       "session:load",
@@ -295,6 +329,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     set({ messages, loading: false });
     // Load versions after the session is active (server-side coordinator needs the active path)
     await get().loadVersions();
+    // [LAW:dataflow-not-control-flow] All analyzers fire on every session
+    // load. No branching on provider here — the metadata list is empty for
+    // providers with no registered analyzers, and runAllAnalyzers is a no-op.
+    await get().runAllAnalyzers();
   },
 
   selectSessionById: async (provider, sessionId) => {
@@ -332,6 +370,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       previewContent: "",
       versions: [],
       versionHead: 0,
+      analyzerMetadata: [],
+      analyzerResults: {},
+      analyzerRunning: new Set(),
+      pipeline: { steps: [] },
     });
   },
 
@@ -458,8 +500,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       messages,
       markedForRemoval: new Set(),
       autoTrimIndices: [],
+      pipeline: { steps: [] },
     });
     await get().loadVersions();
+    await get().runAllAnalyzers();
   },
 
   redo: async () => {
@@ -469,8 +513,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       messages,
       markedForRemoval: new Set(),
       autoTrimIndices: [],
+      pipeline: { steps: [] },
     });
     await get().loadVersions();
+    await get().runAllAnalyzers();
   },
 
   restoreVersion: async (targetIdx: number) => {
@@ -483,8 +529,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       messages,
       markedForRemoval: new Set(),
       autoTrimIndices: [],
+      pipeline: { steps: [] },
     });
     await get().loadVersions();
+    await get().runAllAnalyzers();
   },
 
   diffVersions: async (fromIdx: number, toIdx: number) => {
@@ -493,6 +541,116 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       fromIdx,
       toIdx,
     );
+  },
+
+  // [LAW:single-enforcer] runAllAnalyzers is the only place that fetches the
+  // catalog for the active session's provider. Individual runAnalyzer calls
+  // reuse the cached metadata. Fires all in parallel — analyzers are pure
+  // (read file, return result) so they don't share state.
+  runAllAnalyzers: async () => {
+    const provider = get().selectedProvider;
+    const session = get().selectedSession;
+    if (!provider || !session) return;
+    const metadata = (await window.electronAPI.invoke(
+      "session:list-analyzers",
+      provider,
+    )) as AnalyzerMetadata[];
+    set({
+      analyzerMetadata: metadata,
+      analyzerResults: {},
+      analyzerRunning: new Set(metadata.map((m) => m.id)),
+    });
+    await Promise.all(metadata.map((m) => get().runAnalyzer(m.id)));
+  },
+
+  runAnalyzer: async (analyzerId) => {
+    const session = get().selectedSession;
+    if (!session) return;
+    // Mark running BEFORE the await so the UI can render a spinner alongside
+    // the analyzer row. analyzerRunning is a Set so re-runs idempotently
+    // re-add the id without double-mounting state.
+    const running = new Set(get().analyzerRunning);
+    running.add(analyzerId);
+    set({ analyzerRunning: running });
+    try {
+      const result = (await window.electronAPI.invoke(
+        "session:run-analyzer",
+        analyzerId,
+        session.filePath,
+      )) as AnalyzerResult;
+      // Drop stale results: user may have switched session during the await.
+      const after = get();
+      if (after.selectedSession?.filePath !== session.filePath) return;
+      const nextRunning = new Set(after.analyzerRunning);
+      nextRunning.delete(analyzerId);
+      set({
+        analyzerResults: { ...after.analyzerResults, [analyzerId]: result },
+        analyzerRunning: nextRunning,
+      });
+    } catch (err) {
+      const after = get();
+      if (after.selectedSession?.filePath !== session.filePath) return;
+      const nextRunning = new Set(after.analyzerRunning);
+      nextRunning.delete(analyzerId);
+      set({ analyzerRunning: nextRunning });
+      // Surface the error so the dev sees it; analyzer failures are bugs.
+      console.error(`Analyzer ${analyzerId} failed:`, err);
+    }
+  },
+
+  addStep: (proposed) => {
+    const step: Step = { ...proposed, id: crypto.randomUUID() };
+    const pipeline = get().pipeline;
+    set({ pipeline: { steps: [...pipeline.steps, step] } });
+  },
+
+  removeStep: (stepId) => {
+    const pipeline = get().pipeline;
+    set({
+      pipeline: { steps: pipeline.steps.filter((s) => s.id !== stepId) },
+    });
+  },
+
+  clearPipeline: () => {
+    set({ pipeline: { steps: [] } });
+  },
+
+  applyPipeline: async (force = false) => {
+    set({ applying: true });
+    const pipeline = get().pipeline;
+    const result = (await window.electronAPI.invoke(
+      "session:apply-pipeline",
+      pipeline,
+      force,
+    )) as SessionSaveResult;
+    if (result.blockedReason !== null) {
+      // Same fork as save: blocked = keep pipeline + selection state intact
+      // so the user can review / resolve / retry. [LAW:dataflow-not-control-flow]
+      // The renderer dispatches off blockedReason; the store doesn't care.
+      set({ applying: false });
+      return result;
+    }
+    const session = get().selectedSession;
+    const provider = get().selectedProvider;
+    if (session && provider) {
+      const messages = (await window.electronAPI.invoke(
+        "session:load",
+        provider,
+        session.filePath,
+      )) as MessageSummary[];
+      set({
+        messages,
+        markedForRemoval: new Set(),
+        autoTrimIndices: [],
+        pipeline: { steps: [] },
+        applying: false,
+      });
+      await get().loadVersions();
+      await get().runAllAnalyzers();
+    } else {
+      set({ applying: false });
+    }
+    return result;
   },
 
   setSearchQuery: (query) => {
