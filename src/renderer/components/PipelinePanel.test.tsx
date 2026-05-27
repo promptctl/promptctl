@@ -29,6 +29,16 @@ describe("buildPipelineEffectMap", () => {
     expect(map.get(99)).toBeUndefined();
   });
 
+  it("dedupes duplicate target indices within a single step", () => {
+    // Ops dedupe via UUID Set, so the UI must match — one step
+    // contributes at most one badge per message index.
+    const map = buildPipelineEffectMap([
+      makeStep("strip-thinking", [1, 1, 1, 2]),
+    ]);
+    expect(map.get(1)).toEqual(["strip-thinking"]);
+    expect(map.get(2)).toEqual(["strip-thinking"]);
+  });
+
   it("preserves step order when multiple steps target the same index", () => {
     // Step order = pipeline order; the badge list should reflect that.
     const map = buildPipelineEffectMap([

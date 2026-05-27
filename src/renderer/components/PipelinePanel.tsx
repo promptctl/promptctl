@@ -74,9 +74,11 @@ export function PipelinePanel({
   };
 
   // Total target count across all steps — shown next to the Apply button.
-  // [LAW:dataflow-not-control-flow] Single derived value; UI just renders it.
+  // Dedupe per step (matches buildPipelineEffectMap) so duplicate indices
+  // in a step's targets don't inflate the count beyond what the ops will
+  // actually act on.
   const totalTargets = useMemo(
-    () => pipeline.steps.reduce((n, s) => n + s.targets.length, 0),
+    () => pipeline.steps.reduce((n, s) => n + new Set(s.targets).size, 0),
     [pipeline.steps],
   );
 
@@ -278,7 +280,11 @@ export function buildPipelineEffectMap(
 ): Map<number, StepKind[]> {
   const map = new Map<number, StepKind[]>();
   for (const step of steps) {
-    for (const idx of step.targets) {
+    // Dedupe targets within a step — if a user/analyzer ever produces
+    // duplicate indices, the ops dedupe via UUID Set, so the UI must
+    // match. One step contributes at most one badge per message index.
+    const uniqueTargets = new Set(step.targets);
+    for (const idx of uniqueTargets) {
       const existing = map.get(idx);
       if (existing) existing.push(step.kind);
       else map.set(idx, [step.kind]);
