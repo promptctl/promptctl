@@ -1,5 +1,6 @@
 import { useState } from "react";
 import type { RequestRecord } from "../../../shared/proxy-events";
+import { ChainDiffTab } from "./ChainDiffTab";
 import { ConversationTab } from "./ConversationTab";
 import { DiffTab } from "./DiffTab";
 import { tabClass } from "./format";
@@ -18,18 +19,22 @@ type TabId =
   | "request"
   | "conversation"
   | "diff"
+  | "chain"
   | "response"
   | "timeline"
   | "raw";
 
 // [LAW:one-source-of-truth] Tab order is defined here; the rendered
 // content map below mirrors it. Conversation sits between Request and
-// Diff per design doc §3.1.
+// Diff per design doc §3.1; Chain sits after Diff per §9.2 — "Diff" is
+// the per-request "new bits", "Chain" is the chain-wide prompt+tools
+// evolution.
 const TABS: { id: TabId; label: string }[] = [
   { id: "overview", label: "Overview" },
   { id: "request", label: "Request" },
   { id: "conversation", label: "Conversation" },
   { id: "diff", label: "Diff" },
+  { id: "chain", label: "Chain" },
   { id: "response", label: "Response" },
   { id: "timeline", label: "SSE Timeline" },
   { id: "raw", label: "Raw" },
@@ -119,6 +124,14 @@ export function RequestDetail({
           />
         )}
         {activeTab === "diff" && <DiffTab record={record} lineage={lineage} />}
+        {activeTab === "chain" && (
+          <ChainDiffTab
+            chain={chain}
+            selectedRequestId={record.requestId}
+            highlightSubstring={highlightQuery}
+            onSelectRequest={onSelectRequest}
+          />
+        )}
         {activeTab === "response" && (
           <ResponseTab record={record} highlightSubstring={highlightQuery} />
         )}
