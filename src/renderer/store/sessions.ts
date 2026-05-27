@@ -661,63 +661,55 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     const startProvider = get().selectedProvider;
     const pipeline = override ?? get().pipeline;
     set({ applying: true });
-    let result: SessionSaveResult;
+    // [LAW:single-enforcer] applying is the gate that disables the Apply
+    // button; clearing it on EVERY exit (success, blocked, stale, throw)
+    // is the single guarantee callers depend on. try/finally consolidates
+    // that into one place instead of dispatching it across five returns.
     try {
-      result = (await window.electronAPI.invoke(
+      const result = (await window.electronAPI.invoke(
         "session:apply-pipeline",
         pipeline,
         force,
       )) as SessionSaveResult;
-    } catch (err) {
-      // [LAW:single-enforcer] try/finally pattern: applying is the gate
-      // that disables the Apply button; clearing it on every exit path
-      // (including throws) is the single guarantee callers depend on.
-      set({ applying: false });
-      throw err;
-    }
 
-    // Stale guard: user switched sessions during the apply. Drop the
-    // result entirely — the file we just wrote belongs to a session
-    // that's no longer active, and the new session has its own loaded
-    // state we mustn't clobber.
-    const afterSession = get().selectedSession;
-    if (afterSession?.filePath !== startSession?.filePath) {
-      set({ applying: false });
-      return result;
-    }
-
-    if (result.blockedReason !== null) {
-      // Blocked = keep pipeline + selection state intact so the user can
-      // review / resolve / retry. [LAW:dataflow-not-control-flow] The
-      // renderer dispatches off blockedReason; the store doesn't care.
-      set({ applying: false });
-      return result;
-    }
-
-    if (startSession && startProvider) {
-      const messages = (await window.electronAPI.invoke(
-        "session:load",
-        startProvider,
-        startSession.filePath,
-      )) as MessageSummary[];
-      // Re-check stale after the reload await — runAnalyzer's pattern.
-      if (get().selectedSession?.filePath !== startSession.filePath) {
-        set({ applying: false });
+      // Stale guard: user switched sessions during the apply. Drop the
+      // result — the file we just wrote belongs to a session that's no
+      // longer active, and the new session has its own loaded state we
+      // mustn't clobber.
+      if (get().selectedSession?.filePath !== startSession?.filePath) {
         return result;
       }
-      set({
-        messages,
-        markedForRemoval: new Set(),
-        autoTrimIndices: [],
-        pipeline: { steps: [] },
-        applying: false,
-      });
-      await get().loadVersions();
-      await get().runAllAnalyzers();
-    } else {
+
+      if (result.blockedReason !== null) {
+        // Blocked = keep pipeline + selection state intact so the user
+        // can review / resolve / retry. [LAW:dataflow-not-control-flow]
+        // The renderer dispatches off blockedReason; the store doesn't.
+        return result;
+      }
+
+      if (startSession && startProvider) {
+        const messages = (await window.electronAPI.invoke(
+          "session:load",
+          startProvider,
+          startSession.filePath,
+        )) as MessageSummary[];
+        // Re-check stale after the reload await — runAnalyzer's pattern.
+        if (get().selectedSession?.filePath !== startSession.filePath) {
+          return result;
+        }
+        set({
+          messages,
+          markedForRemoval: new Set(),
+          autoTrimIndices: [],
+          pipeline: { steps: [] },
+        });
+        await get().loadVersions();
+        await get().runAllAnalyzers();
+      }
+      return result;
+    } finally {
       set({ applying: false });
     }
-    return result;
   },
 
   setSearchQuery: (query) => {
