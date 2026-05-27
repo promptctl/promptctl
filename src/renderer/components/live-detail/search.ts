@@ -10,15 +10,13 @@
 // RawTab) consumes through these. No bespoke substring checks
 // scattered across the live-detail components.
 //
-// [LAW:dataflow-not-control-flow] Live and replay produce identical
-// searchText for identical records — searchText reads from the same
-// RequestRecord shape both paths emit. Cache invalidation is keyed
-// on (requestId, state); the same state transition fires the same
-// rebuild whether the event came from a live SSE stream or a replay.
+// [LAW:one-way-deps] This module is pure — no React, no store import.
+// The cache + subscription live in useSearchIndex.ts so the
+// dependency edge runs useSearchIndex.ts → {search.ts, store/proxy.ts}
+// with no return arrow. That keeps proxy.ts free to import the
+// types and predicates here without dragging React into the store.
 
-import { useEffect, useMemo, useRef } from "react";
-import type { RequestRecord, RequestRecordState } from "../../../shared/proxy-events";
-import { useProxyStore } from "../../store/proxy";
+import type { RequestRecord } from "../../../shared/proxy-events";
 
 export interface SearchIndex {
   get(record: RequestRecord): string;
@@ -40,11 +38,10 @@ export function searchText(record: RequestRecord): string {
   return parts.join(" ").toLowerCase();
 }
 
-// Normalize a raw query string for comparison. Trim is necessary
-// because the input event delivers raw text; lowercase mirrors
-// searchText so `.includes` is case-insensitive by construction.
-// Empty string is the canonical "no query" value — it never matches
-// because callers short-circuit on it.
+// Trim + lowercase the raw input. Lowercase mirrors searchText so
+// `.includes` is case-insensitive by construction. Empty string is
+// the canonical "no query" value — recordMatchesSearch interprets
+// it as match-all so callers don't have to branch.
 export function normalizeQuery(raw: string): string {
   return raw.trim().toLowerCase();
 }
@@ -98,62 +95,6 @@ export function splitHighlights(
     cursor = matchIndex + queryLength;
   }
   return segments;
-}
-
-// React hook that owns the search-index cache. Cache key is
-// (requestId, state) — once a record reaches a terminal state
-// (complete/errored), its searchText is computed once and reused;
-// in-flight and streaming records recompute on each lookup (their
-// content is still arriving and any cached value would be stale).
-//
-// The index reference returned is stable for the component's
-// lifetime so memoization deps on `index` don't churn.
-export function useSearchIndex(): SearchIndex {
-  const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
-
-  // Prune cache entries whose record was evicted from the store
-  // (MAX_REQUESTS trim). Subscribing instead of polling means the
-  // cache shape tracks state.requests without per-call overhead in
-  // the hot `get` path.
-  useEffect(() => {
-    const unsub = useProxyStore.subscribe((state, prev) => {
-      if (state.requests === prev.requests) return;
-      const cache = cacheRef.current;
-      for (const id of cache.keys()) {
-        if (!state.requests.has(id)) cache.delete(id);
-      }
-    });
-    return unsub;
-  }, []);
-
-  return useMemo<SearchIndex>(
-    () => ({
-      get(record) {
-        const cache = cacheRef.current;
-        const cached = cache.get(record.requestId);
-        if (
-          cached !== undefined &&
-          cached.state === record.state &&
-          isTerminal(record.state)
-        ) {
-          return cached.text;
-        }
-        const text = searchText(record);
-        cache.set(record.requestId, { state: record.state, text });
-        return text;
-      },
-    }),
-    [],
-  );
-}
-
-interface CacheEntry {
-  state: RequestRecordState;
-  text: string;
-}
-
-function isTerminal(state: RequestRecordState): boolean {
-  return state === "complete" || state === "errored";
 }
 
 function collectFromRequestBody(body: unknown, out: string[]): void {

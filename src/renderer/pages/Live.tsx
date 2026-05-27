@@ -19,8 +19,9 @@ import {
 import { buildChain } from "../components/live-detail/stop-reason";
 import { ResizableSplit } from "../components/ResizableSplit";
 import { useProxyStore, visibleRequests } from "../store/proxy";
-import { normalizeQuery, useSearchIndex } from "../components/live-detail/search";
+import { normalizeQuery } from "../components/live-detail/search";
 import { SearchInput } from "../components/live-detail/SearchInput";
+import { useSearchIndex } from "../components/live-detail/useSearchIndex";
 import type { ClientInfo, RequestRecord } from "../../shared/proxy-events";
 
 export function Live() {
@@ -103,10 +104,9 @@ export function Live() {
 
   // [LAW:single-enforcer] Cmd/Ctrl+F focuses the search input — one
   // listener at the page boundary, no per-component shortcut wiring.
-  // We don't preventDefault when the user has unrelated focus
-  // (chip dropdown, request detail) — the input is always the
-  // intended target on this page, and the platform Find shortcut
-  // is the dominant mental model.
+  // The Electron app has no native Find UI to defer to, so the
+  // shortcut always routes to our input — preventDefault is
+  // unconditional once the modifier+F combo is detected.
   useEffect(() => {
     function onKey(event: KeyboardEvent) {
       const isFindKey = event.key === "f" || event.key === "F";
