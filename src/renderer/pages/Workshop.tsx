@@ -19,7 +19,14 @@ import type { LaunchId } from "../../shared/types";
 
 export function Workshop() {
   const [searchParams] = useSearchParams();
-  const launchId = searchParams.get("launchId");
+  // URLSearchParams.get distinguishes "key absent" (null) from "key
+  // present with no value" (""). Both are equally meaningful as "no
+  // launch selected" to this component — `?launchId=` should fall
+  // back to the list, not pass an empty id into the detail view. Coerce
+  // both to null at the boundary so the rest of the body has one shape.
+  // [LAW:types-are-the-program]
+  const rawLaunchId = searchParams.get("launchId");
+  const launchId = rawLaunchId === null || rawLaunchId === "" ? null : rawLaunchId;
   const [newLaunchOpen, setNewLaunchOpen] = useState(false);
 
   return (
