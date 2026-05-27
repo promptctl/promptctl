@@ -378,6 +378,50 @@ describe("Backup confirmation dialog removed", () => {
     cleanup();
   });
 
+  it("does not queue duplicate remove-messages steps when Save is retried after a blocked apply", async () => {
+    // Slice 1 shim's contract: handleSave builds a one-off pipeline and
+    // does NOT mutate the stored pipeline. Two consecutive Save clicks with
+    // the same marked set must each send a pipeline containing exactly one
+    // manual remove-messages step (the latter not stacking duplicates from
+    // the former). Regression guard for the blocked-apply → retry path.
+    setStoreLoaded({ messages: [makeMessage(0), makeMessage(1)] });
+    useSessionStore.setState({ markedForRemoval: new Set([0]) });
+
+    setInvokeHandlers(api, {
+      // Block the first apply to simulate a validation/live-tail collision.
+      "session:apply-pipeline": () => ({
+        path: null,
+        violations: [],
+        forced: false,
+        blockedReason: "validation",
+      }),
+      "session:load": () => [makeMessage(0)],
+    });
+
+    const user = setupUser();
+    render(<SessionEditor />);
+
+    const saveBtn = screen.getByText(/Remove .* & Save/i);
+    await user.click(saveBtn);
+    await user.click(saveBtn);
+
+    const applyCalls = api.invoke.mock.calls.filter(
+      (c) => c[0] === "session:apply-pipeline",
+    );
+    expect(applyCalls).toHaveLength(2);
+    for (const call of applyCalls) {
+      const pipeline = call[1] as {
+        steps: { source: string; kind: string; targets: number[] }[];
+      };
+      const manualRemoves = pipeline.steps.filter(
+        (s) => s.source === "manual" && s.kind === "remove-messages",
+      );
+      expect(manualRemoves).toHaveLength(1);
+      expect(manualRemoves[0].targets).toEqual([0]);
+    }
+    cleanup();
+  });
+
   it("does NOT invoke session:check-backup", async () => {
     setStoreLoaded({ messages: [makeMessage(0)] });
     useSessionStore.setState({ markedForRemoval: new Set([0]) });

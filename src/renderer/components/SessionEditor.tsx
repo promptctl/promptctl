@@ -1259,7 +1259,6 @@ export function SessionEditor() {
     undo,
     redo,
     pipeline,
-    addStep,
     applyPipeline,
     searchQuery,
     searchResults,
@@ -1478,22 +1477,27 @@ export function SessionEditor() {
   );
 
   // [LAW:single-enforcer] Slice-1 shim: route the legacy "Remove N & Save"
-  // click through the pipeline (queue a manual remove-messages step, then
-  // apply). This keeps applyPipeline as the only mutation path while
-  // preserving the today-only one-click flow. The standalone Apply button
-  // (in PipelinePanel) is the path for analyzer-driven multi-step pipelines.
+  // click through the pipeline. We build a *one-off* pipeline (any stored
+  // steps + a transient manual remove step) and pass it to applyPipeline
+  // as an override — we never mutate the stored pipeline here. Otherwise
+  // a blocked apply followed by a retry would queue duplicate stored
+  // remove-messages steps for the same marked set.
+  // The standalone Apply button (in PipelinePanel) is the path for
+  // analyzer-driven multi-step pipelines that the user assembled.
   const handleSave = useCallback(async () => {
+    const overrideSteps = [...pipeline.steps];
     if (markedForRemoval.size > 0) {
-      addStep({
+      overrideSteps.push({
+        id: crypto.randomUUID(),
         source: "manual",
         kind: "remove-messages",
         targets: [...markedForRemoval],
         rationale: `${markedForRemoval.size} manually marked message${markedForRemoval.size === 1 ? "" : "s"}`,
       });
     }
-    const result = await applyPipeline();
+    const result = await applyPipeline(false, { steps: overrideSteps });
     setSaveResult(result);
-  }, [markedForRemoval, addStep, applyPipeline]);
+  }, [pipeline.steps, markedForRemoval, applyPipeline]);
 
   const handleAutoTrim = useCallback(async () => {
     await runAutoTrim();

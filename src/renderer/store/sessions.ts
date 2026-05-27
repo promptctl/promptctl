@@ -102,7 +102,15 @@ interface SessionEditorState {
   addStep: (step: Omit<Step, "id">) => void;
   removeStep: (stepId: string) => void;
   clearPipeline: () => void;
-  applyPipeline: (force?: boolean) => Promise<SessionSaveResult>;
+  // `override` lets a caller apply a pipeline that ISN'T the stored one —
+  // used by the legacy "Remove N & Save" shim which builds a one-off
+  // pipeline including a transient manual remove step. Without the
+  // override, repeat-clicking the shim button after a blocked apply
+  // would queue duplicate stored steps. See handleSave in SessionEditor.
+  applyPipeline: (
+    force?: boolean,
+    override?: Pipeline,
+  ) => Promise<SessionSaveResult>;
 
   // Peek (non-destructive preview while search is open). peekResult is the
   // source of truth for "is the peek pane open?"; peekMessages is lazily
@@ -573,12 +581,17 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
   runAnalyzer: async (analyzerId) => {
     const session = get().selectedSession;
     if (!session) return;
-    // Mark running BEFORE the await so the UI can render a spinner alongside
-    // the analyzer row. analyzerRunning is a Set so re-runs idempotently
-    // re-add the id without double-mounting state.
-    const running = new Set(get().analyzerRunning);
-    running.add(analyzerId);
-    set({ analyzerRunning: running });
+    // [LAW:one-source-of-truth] Functional updates for the Set/object
+    // membership so parallel runAnalyzer calls compose deterministically.
+    // Read-snapshot-then-write would not race in current Zustand
+    // (set is synchronous, no awaits between read and write), but the
+    // functional form is robust to future refactors that might introduce
+    // awaits in the middle of the update.
+    set((state) => {
+      const running = new Set(state.analyzerRunning);
+      running.add(analyzerId);
+      return { analyzerRunning: running };
+    });
     try {
       const result = (await window.electronAPI.invoke(
         "session:run-analyzer",
@@ -586,20 +599,22 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
         session.filePath,
       )) as AnalyzerResult;
       // Drop stale results: user may have switched session during the await.
-      const after = get();
-      if (after.selectedSession?.filePath !== session.filePath) return;
-      const nextRunning = new Set(after.analyzerRunning);
-      nextRunning.delete(analyzerId);
-      set({
-        analyzerResults: { ...after.analyzerResults, [analyzerId]: result },
-        analyzerRunning: nextRunning,
+      if (get().selectedSession?.filePath !== session.filePath) return;
+      set((state) => {
+        const running = new Set(state.analyzerRunning);
+        running.delete(analyzerId);
+        return {
+          analyzerResults: { ...state.analyzerResults, [analyzerId]: result },
+          analyzerRunning: running,
+        };
       });
     } catch (err) {
-      const after = get();
-      if (after.selectedSession?.filePath !== session.filePath) return;
-      const nextRunning = new Set(after.analyzerRunning);
-      nextRunning.delete(analyzerId);
-      set({ analyzerRunning: nextRunning });
+      if (get().selectedSession?.filePath !== session.filePath) return;
+      set((state) => {
+        const running = new Set(state.analyzerRunning);
+        running.delete(analyzerId);
+        return { analyzerRunning: running };
+      });
       // Surface the error so the dev sees it; analyzer failures are bugs.
       console.error(`Analyzer ${analyzerId} failed:`, err);
     }
@@ -622,7 +637,7 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     set({ pipeline: { steps: [] } });
   },
 
-  applyPipeline: async (force = false) => {
+  applyPipeline: async (force = false, override?: Pipeline) => {
     // [LAW:one-source-of-truth] Capture the session this apply targets BEFORE
     // we await; any session-switch during the await is detected by comparing
     // selectedSession.filePath to this snapshot, and post-apply state writes
@@ -630,7 +645,7 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     // This mirrors runAnalyzer's stale-result guard.
     const startSession = get().selectedSession;
     const startProvider = get().selectedProvider;
-    const pipeline = get().pipeline;
+    const pipeline = override ?? get().pipeline;
     set({ applying: true });
     let result: SessionSaveResult;
     try {

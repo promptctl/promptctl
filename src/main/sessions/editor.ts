@@ -336,14 +336,24 @@ export async function applyPipeline(
   pipeline: Pipeline,
   force = false,
 ): Promise<SessionSaveResult> {
+  // [LAW:one-source-of-truth] Snapshot the active state once at the top.
+  // Between awaits below, another IPC handler (notably `session:load`) can
+  // change activeAdapter / activeFilePath / activeProvider; the prior code
+  // captured filePath but later called `ensureBaselineForActive()` and
+  // `activeProviderId()` which read FRESH globals — so a session switch
+  // mid-apply could record the baseline/version against the wrong file.
+  // Using the snapshot consistently keeps every I/O scoped to the file
+  // this invocation was issued against.
   const adapter = active();
   const filePath = activePath();
+  const provider = activeProviderId();
 
-  // [LAW:single-enforcer] Same gate as saveSession; force only bypasses
-  // structural validation, never live-tail. A live launch's appended bytes
-  // would be clobbered either way, and that's the surface the gate exists
-  // to protect — the LiveTailBlockedDialog's "Force save" passes force=true
-  // to override the *validation* block, not the live-tail block.
+  // [LAW:single-enforcer] Same gate as saveSession; `force` bypasses both
+  // the validation block AND the live-tail block (the inner `liveTailGate`
+  // returns unblocked when force=true). The dialog flow — Force save in
+  // ValidationViolationsDialog and LiveTailBlockedDialog — is the only
+  // path that sets force=true, and the user has explicitly opted in via
+  // those dialogs by the time we get here.
   const gate = liveTailGate(filePath, force);
   if (gate.blocked) {
     return {
@@ -372,7 +382,14 @@ export async function applyPipeline(
     };
   }
 
-  await ensureBaselineForActive();
+  // Inline the baseline + version-recording steps using the captured
+  // filePath/provider rather than activePath()/activeProviderId() helpers.
+  // That keeps each await in the chain scoped to the same session this
+  // call was issued against.
+  const baselineSourceTokens = adapter
+    .summarizeContent(sourceContent)
+    .reduce((sum, m) => sum + m.tokens, 0);
+  await ensureBaseline(filePath, provider, baselineSourceTokens);
   await writeFile(filePath, newContent, "utf-8");
 
   const baseLabel = formatPipelineLabel(pipeline);
@@ -380,8 +397,10 @@ export async function applyPipeline(
     violations.length > 0
       ? `${baseLabel} (forced with ${violations.length} violation${violations.length === 1 ? "" : "s"})`
       : baseLabel;
-  const tokens = tokensForContent(newContent);
-  await recordVersion(filePath, activeProviderId(), newContent, label, tokens);
+  const newTokens = adapter
+    .summarizeContent(newContent)
+    .reduce((sum, m) => sum + m.tokens, 0);
+  await recordVersion(filePath, provider, newContent, label, newTokens);
 
   return {
     path: filePath,
