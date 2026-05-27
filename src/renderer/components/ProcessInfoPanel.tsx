@@ -40,6 +40,8 @@ export function ProcessInfoPanel({ pane }: { pane: TmuxPane }) {
         <button
           onClick={() => setExpanded(!expanded)}
           data-testid="loops-process-info-toggle"
+          aria-expanded={expanded}
+          aria-controls="loops-process-info-content"
           className="flex items-center gap-1 text-xs text-neutral-500 hover:text-neutral-300"
         >
           <span className="text-[9px]">{expanded ? "▼" : "▶"}</span>
@@ -58,7 +60,10 @@ export function ProcessInfoPanel({ pane }: { pane: TmuxPane }) {
         )}
       </div>
       {expanded && processes && processes.children.length > 0 && (
-        <div className="mt-1 overflow-x-auto rounded border border-neutral-800 bg-neutral-900/50">
+        <div
+          id="loops-process-info-content"
+          className="mt-1 overflow-x-auto rounded border border-neutral-800 bg-neutral-900/50"
+        >
           <table className="w-full text-[11px] text-neutral-400">
             <thead>
               <tr className="border-b border-neutral-800 text-left text-neutral-500">

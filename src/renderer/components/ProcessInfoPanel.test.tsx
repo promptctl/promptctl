@@ -134,6 +134,15 @@ describe("ProcessInfoPanel", () => {
     spy.mockRestore();
   });
 
+  it("toggle exposes aria-expanded so disclosure state is announced", async () => {
+    const user = userEvent.setup({ delay: null });
+    render(<ProcessInfoPanel pane={pane()} />);
+    const toggle = screen.getByTestId("loops-process-info-toggle");
+    expect(toggle).toHaveAttribute("aria-expanded", "false");
+    await user.click(toggle);
+    expect(toggle).toHaveAttribute("aria-expanded", "true");
+  });
+
   it("refresh button has an accessible name (aria-label)", async () => {
     const user = userEvent.setup({ delay: null });
     render(<ProcessInfoPanel pane={pane()} />);
