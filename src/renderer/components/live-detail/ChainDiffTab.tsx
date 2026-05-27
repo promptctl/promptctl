@@ -42,20 +42,17 @@ export function ChainDiffTab({
   highlightSubstring?: string;
   onSelectRequest?: (requestId: string) => void;
 }) {
-  const safeChain = chain ?? [];
-  // [LAW:types-are-the-program] The memo key encodes every dimension the
-  // projection depends on: chain shape (request ids in order) and each
-  // request's system/tools content (we use their hashes via the body
-  // serialization). In practice requestBody is replaced atomically by
-  // the proxy when the request is parsed, so the array of ids is a
-  // sufficient key — but we include the body's `system`/`tools` length
-  // signatures as cheap change-detection in case bodies are patched
-  // in place.
-  const memoKey = safeChain
-    .map((r) => `${r.requestId}:${systemSig(r)}:${toolsSig(r)}`)
-    .join("|");
-  const systemRuns = useMemo(() => buildSystemRuns(safeChain), [memoKey]);
-  const toolsRuns = useMemo(() => buildToolsRuns(safeChain), [memoKey]);
+  // [LAW:one-source-of-truth] Memoize on the upstream `chain` reference
+  // directly. Live.tsx builds `chain` via useMemo keyed on selection +
+  // lineage + recordsById, so the array reference is stable until one
+  // of those changes — which is exactly when we want to recompute. A
+  // length-based signature can collide silently when two different
+  // prompts have the same length; the actual hashes are computed inside
+  // buildSystemRuns/buildToolsRuns anyway, so any synthesized memo key
+  // is redundant with that work.
+  const safeChain = useMemo(() => chain ?? [], [chain]);
+  const systemRuns = useMemo(() => buildSystemRuns(safeChain), [safeChain]);
+  const toolsRuns = useMemo(() => buildToolsRuns(safeChain), [safeChain]);
 
   if (safeChain.length === 0) {
     return (
@@ -123,14 +120,14 @@ function Section({
   testIdPrefix,
 }: {
   title: string;
-  runs: ChainVersionRun<unknown>[];
+  runs: ChainVersionRun[];
   selectedRequestId: string;
   highlightSubstring: string;
   onSelectRequest?: (requestId: string) => void;
-  renderBody: (run: ChainVersionRun<unknown>) => React.ReactNode;
+  renderBody: (run: ChainVersionRun) => React.ReactNode;
   renderDiff: (
-    prev: ChainVersionRun<unknown>,
-    current: ChainVersionRun<unknown>,
+    prev: ChainVersionRun,
+    current: ChainVersionRun,
   ) => React.ReactNode;
   emptyHash: string;
   testIdPrefix: string;
@@ -161,6 +158,7 @@ function Section({
               index={index}
               isExpanded={isExpanded}
               isSelected={isSelected}
+              selectedRequestId={selectedRequestId}
               onToggleExpanded={() =>
                 setExpanded((prev) => toggleSet(prev, key))
               }
@@ -183,6 +181,7 @@ function RunCard({
   index,
   isExpanded,
   isSelected,
+  selectedRequestId,
   onToggleExpanded,
   onSelectRequest,
   renderBody,
@@ -191,18 +190,19 @@ function RunCard({
   emptyHash,
   testIdPrefix,
 }: {
-  run: ChainVersionRun<unknown>;
+  run: ChainVersionRun;
   index: number;
   isExpanded: boolean;
   isSelected: boolean;
+  selectedRequestId: string;
   onToggleExpanded: () => void;
   onSelectRequest?: (requestId: string) => void;
-  renderBody: (run: ChainVersionRun<unknown>) => React.ReactNode;
+  renderBody: (run: ChainVersionRun) => React.ReactNode;
   renderDiff: (
-    prev: ChainVersionRun<unknown>,
-    current: ChainVersionRun<unknown>,
+    prev: ChainVersionRun,
+    current: ChainVersionRun,
   ) => React.ReactNode;
-  prior: ChainVersionRun<unknown> | null;
+  prior: ChainVersionRun | null;
   emptyHash: string;
   testIdPrefix: string;
 }) {
@@ -239,11 +239,16 @@ function RunCard({
           used by {usageCount} request{usageCount === 1 ? "" : "s"}
         </span>
         <span className="flex flex-wrap items-center gap-1">
+          {/* [LAW:one-source-of-truth] Chip styling tracks `selectedRequestId`
+            — the same source of truth the run-card's border-accent uses. The
+            run still records which request introduced the version via
+            `firstIntroducedAt`, but the introducer is implicit in chip order
+            (leftmost in chain order) and doesn't need a competing highlight. */}
           {run.requestIds.map((requestId) => (
             <RequestChip
               key={requestId}
               requestId={requestId}
-              isSelected={requestId === run.firstIntroducedAt}
+              isSelected={requestId === selectedRequestId}
               onSelectRequest={onSelectRequest}
             />
           ))}
@@ -470,7 +475,7 @@ function ToolGroup({
 }: {
   label: string;
   tone: "added" | "removed";
-  tools: Array<{ name: string; value: unknown }>;
+  tools: { name: string; value: unknown }[];
   testId: string;
 }) {
   const headerClass =
@@ -541,25 +546,8 @@ function toggleSet(prev: Set<string>, key: string): Set<string> {
   return next;
 }
 
-function runKey(run: ChainVersionRun<unknown>, index: number): string {
+function runKey(run: ChainVersionRun, index: number): string {
   // Two adjacent runs cannot share both index and hash, but a chain like
   // AABA produces two runs with the same hash; the index disambiguates.
   return `${index}:${run.hash ?? "null"}`;
-}
-
-function systemSig(record: RequestRecord): string {
-  const body = record.requestBody;
-  if (typeof body !== "object" || body === null) return "x";
-  const s = (body as { system?: unknown }).system;
-  if (typeof s === "string") return `s${s.length}`;
-  if (Array.isArray(s)) return `a${s.length}`;
-  return "n";
-}
-
-function toolsSig(record: RequestRecord): string {
-  const body = record.requestBody;
-  if (typeof body !== "object" || body === null) return "x";
-  const t = (body as { tools?: unknown }).tools;
-  if (Array.isArray(t)) return `t${t.length}`;
-  return "n";
 }

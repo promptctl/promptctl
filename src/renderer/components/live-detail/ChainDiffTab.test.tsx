@@ -131,6 +131,20 @@ describe("ChainDiffTab", () => {
     expect(cards[1]).toHaveTextContent("a3");
   });
 
+  it("highlights only the chip matching selectedRequestId within a run", () => {
+    const chain = [
+      rec("aaaaaa", { system: "Sys A" }),
+      rec("bbbbbb", { system: "Sys A" }),
+      rec("cccccc", { system: "Sys A" }),
+    ];
+    render(<ChainDiffTab chain={chain} selectedRequestId="bbbbbb" />);
+    const chips = screen.getAllByTestId("chain-diff-request-chip");
+    const systemChips = chips.slice(0, 3);
+    expect(systemChips[0].className).not.toContain("bg-cyan-900");
+    expect(systemChips[1].className).toContain("bg-cyan-900");
+    expect(systemChips[2].className).not.toContain("bg-cyan-900");
+  });
+
   it("emits onSelectRequest when a request chip is clicked", () => {
     const chain = [
       rec("a1", { system: "Sys A" }),

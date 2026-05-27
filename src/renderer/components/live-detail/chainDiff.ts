@@ -40,14 +40,17 @@ import {
 
 // ─── Version runs ─────────────────────────────────────────────────────────
 
-export interface ChainVersionRun<T> {
+export interface ChainVersionRun {
   // FNV-1a-64 hex hash of the value, or null when the value itself is
   // absent on every request in this run. The type carries the "absent"
   // signal — no parallel `isPresent` flag.
   readonly hash: string | null;
   // The value as it appeared on the first request in the run. For system
   // prompts this is the raw `system` field (string or array of blocks);
-  // for tools this is the raw `tools` array; null when absent.
+  // for tools this is the raw `tools` array; null when absent on this run.
+  // `extractSystem` and `extractTools` from ac1.6.5 normalize absence to
+  // null by construction (never undefined) — the strict `=== null` checks
+  // in the renderer are correct because of that contract.
   readonly value: unknown;
   // Every request id whose hash matched this run (in chain order).
   // length >= 1 by construction.
@@ -67,52 +70,37 @@ function scanRuns(
   chain: readonly RequestRecord[],
   hashOf: (record: RequestRecord) => string | null,
   valueOf: (record: RequestRecord) => unknown,
-): ChainVersionRun<unknown>[] {
-  const runs: ChainVersionRun<unknown>[] = [];
-  let currentHash: string | null | undefined = undefined;
-  let currentRun: {
+): ChainVersionRun[] {
+  interface RunBuilder {
     hash: string | null;
     value: unknown;
     requestIds: string[];
     firstIntroducedAt: string;
-  } | null = null;
+  }
+  const runs: ChainVersionRun[] = [];
+  let current: RunBuilder | null = null;
 
   for (const record of chain) {
     const hash = hashOf(record);
-    if (currentHash === undefined || hash !== currentHash) {
-      if (currentRun !== null) runs.push(toRun(currentRun));
-      currentRun = {
+    if (current === null || hash !== current.hash) {
+      if (current !== null) runs.push(current);
+      current = {
         hash,
         value: valueOf(record),
         requestIds: [record.requestId],
         firstIntroducedAt: record.requestId,
       };
-      currentHash = hash;
-    } else {
-      currentRun!.requestIds.push(record.requestId);
+      continue;
     }
+    current.requestIds.push(record.requestId);
   }
-  if (currentRun !== null) runs.push(toRun(currentRun));
+  if (current !== null) runs.push(current);
   return runs;
-}
-
-function toRun(builder: {
-  hash: string | null;
-  value: unknown;
-  requestIds: string[];
-  firstIntroducedAt: string;
-}): ChainVersionRun<unknown> {
-  return {
-    hash: builder.hash,
-    value: builder.value,
-    requestIds: builder.requestIds,
-    firstIntroducedAt: builder.firstIntroducedAt,
-  };
 }
 
 export function buildSystemRuns(
   chain: readonly RequestRecord[],
-): ChainVersionRun<unknown>[] {
+): ChainVersionRun[] {
   return scanRuns(
     chain,
     (r) => systemPromptHash(r.requestBody),
@@ -122,7 +110,7 @@ export function buildSystemRuns(
 
 export function buildToolsRuns(
   chain: readonly RequestRecord[],
-): ChainVersionRun<unknown>[] {
+): ChainVersionRun[] {
   return scanRuns(
     chain,
     (r) => toolsHash(r.requestBody),

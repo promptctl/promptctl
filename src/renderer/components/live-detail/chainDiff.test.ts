@@ -11,7 +11,7 @@ import {
 // requestId is the index, startedNs is monotonic. The clientId / model
 // don't matter for chainDiff itself (lineage is computed elsewhere).
 function chain(
-  steps: Array<{ system?: unknown; tools?: unknown[] | null }>,
+  steps: { system?: unknown; tools?: unknown[] | null }[],
 ): RequestRecord[] {
   return steps.map((step, i) => ({
     requestId: `r${i + 1}`,
