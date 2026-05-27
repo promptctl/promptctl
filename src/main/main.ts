@@ -331,8 +331,11 @@ app.whenReady().then(async () => {
   });
   registerLaunchHandlers({
     registry: launchRegistry,
+    // [LAW:locality-or-seam] Tmux executor is hoisted out of `spawn` so
+    // both create and terminate share a single dep — the handlers don't
+    // know the connection internals beyond this method surface.
+    execute: (cmd) => tmuxControl.execute(cmd),
     spawn: {
-      execute: (cmd) => tmuxControl.execute(cmd),
       // [LAW:one-source-of-truth] Proxy port comes from the proxy manager
       // at call time — settings are the canonical input but the actual
       // listening port can differ (e.g. when the configured port was

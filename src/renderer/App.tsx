@@ -14,6 +14,7 @@ import { CommandsPage } from "./pages/Commands";
 import { SessionsPage } from "./pages/Sessions";
 import { PromptsPage } from "./pages/Prompts";
 import { Live } from "./pages/Live";
+import { Workshop } from "./pages/Workshop";
 import { TmuxControlDebug } from "./pages/TmuxControlDebug";
 import { TmuxTree } from "./components/TmuxTree";
 import { CommandBar } from "./components/CommandBar";
@@ -46,7 +47,8 @@ function TopTabBar() {
   return (
     <div className="flex items-end border-b border-neutral-800 bg-neutral-950 pl-20">
       <TopTab to="/loops">Loops</TopTab>
-      <TopTab to="/workshop">Context Workshop</TopTab>
+      <TopTab to="/workshop">Workshop</TopTab>
+      <TopTab to="/context-workshop">Context Workshop</TopTab>
       <TopTab to="/live">Live</TopTab>
       <TopTab to="/settings">Settings</TopTab>
     </div>
@@ -205,6 +207,14 @@ export function App() {
             <Route path="/loops/*" element={<LoopsLayout />} />
             <Route
               path="/workshop"
+              element={
+                <main className="flex flex-1 flex-col overflow-hidden">
+                  <Workshop />
+                </main>
+              }
+            />
+            <Route
+              path="/context-workshop"
               element={
                 <main className="flex-1 overflow-auto p-6">
                   <SessionsPage />

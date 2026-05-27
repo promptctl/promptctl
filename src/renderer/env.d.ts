@@ -158,7 +158,10 @@ export interface ElectronAPI {
   ): Promise<SessionSearchResult[]>;
   invoke(channel: "task:cancel", taskId: string): Promise<boolean>;
   invoke(channel: "launch:list"): Promise<Launch[]>;
-  invoke(channel: "launch:get", launchId: LaunchId): Promise<Launch | null>;
+  invoke(
+    channel: "launch:get" | "launch:terminate",
+    launchId: LaunchId,
+  ): Promise<Launch | null>;
   invoke(channel: "launch:create", spec: LaunchSpec): Promise<Launch>;
   invoke(channel: "proxy:status"): Promise<ProxyStatus>;
   invoke(channel: "proxy:list-clients"): Promise<ClientInfo[]>;

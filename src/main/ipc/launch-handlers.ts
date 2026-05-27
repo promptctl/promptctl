@@ -1,14 +1,18 @@
 // [LAW:single-enforcer] One IPC site for the launch registry. Reads
 // (`launch:list`, `launch:get`) and subscribe (`launch:subscribe` +
 // push `launch:event` / `launch:list`) come from the registry's
-// projection. The lone mutating channel — `launch:create` — delegates
-// to the spawn flow which is the only constructor of launch rows
-// (`launch:terminate` lands when the Workshop tab needs it).
+// projection. Mutating channels — `launch:create` and `launch:terminate`
+// — both flow through this module. Creation funnels into the spawn flow,
+// the sole constructor of launch rows; termination kills the launch's
+// tmux session and lets the correlator's existing pane-gone /
+// window-close path call markExited.
 //
 // [LAW:one-source-of-truth] All payloads project off the registry — no
 // caching at the IPC boundary. The handler is a thin pass-through.
 
 import { ipcMain, type WebContents } from "electron";
+import { tmuxEscape } from "tmux-control-mode-js/protocol";
+import type { CommandResponse } from "tmux-control-mode-js/protocol";
 import type {
   Launch,
   LaunchEvent,
@@ -20,10 +24,14 @@ import { spawnLaunch, type SpawnDeps } from "../launch/spawn";
 
 export interface LaunchHandlerDeps {
   readonly registry: LaunchRegistry;
-  // The spawn flow's other dependencies (tmux client, topology, proxy
-  // port). The handler hands them through verbatim — it has no opinions
-  // beyond plumbing.
-  readonly spawn: Omit<SpawnDeps, "registry">;
+  // Tmux executor — used by both `launch:create` (via spawn) and
+  // `launch:terminate` (kill-session). Hoisted out of `spawn` so a
+  // single owner plumbs it from main, and terminate doesn't have to
+  // reach into spawn-shaped deps for the same primitive.
+  readonly execute: (command: string) => Promise<CommandResponse>;
+  // The spawn flow's other dependencies (proxy port, optional test
+  // seams). Plumbed through verbatim — the handler has no opinions.
+  readonly spawn: Omit<SpawnDeps, "registry" | "execute">;
 }
 
 export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
@@ -67,7 +75,56 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
   ipcMain.handle(
     "launch:create",
     (_e, spec: LaunchSpec): Promise<Launch> =>
-      spawnLaunch({ registry, ...deps.spawn }, spec),
+      spawnLaunch({ registry, execute: deps.execute, ...deps.spawn }, spec),
+  );
+
+  // [LAW:single-enforcer] One IPC entry to stop a tagged launch. The
+  // handler does not call markExited directly — the correlator's
+  // existing pane-gone / window-close path is the sole transition
+  // owner. We kill the tmux session and let the broadcast loop fire
+  // the natural way; the renderer sees the same `exited` event it
+  // would see for any other exit reason.
+  //
+  // The return value carries the discriminator the caller acts on:
+  //  - `null`            → no row in the registry for that id.
+  //  - row.status="exited" → already terminal; we did NOT issue a
+  //    fresh kill-session, since exit is terminal and the correlator's
+  //    idempotent markExited is the sole owner of that transition.
+  //  - row.status="pending"|"running" → kill-session was sent. The
+  //    correlator's window-close / pane-gone path will flip the row
+  //    to exited and broadcast over the registry's event stream;
+  //    callers that need the post-kill state subscribe to launch:event
+  //    rather than waiting on this return.
+  // [LAW:no-defensive-null-guards] No silent no-ops on any input —
+  // every case has a distinguishable return shape.
+  ipcMain.handle(
+    "launch:terminate",
+    async (_e, launchId: LaunchId): Promise<Launch | null> => {
+      const launch = registry.get(launchId);
+      if (launch === null) return null;
+      if (launch.status === "exited") return launch;
+      // tmux's `kill-session -t <session-id>` accepts the `$N` form
+      // directly. Each launch lives in its own session (spawn creates
+      // one per launch), so killing the session terminates the whole
+      // launch — pane, window, and any tool process still inside.
+      //
+      // [LAW:dataflow-not-control-flow] "Session already gone" is part
+      // of the data, not an error. The tool may have exited or been
+      // killed externally before the registry's pane/window-close
+      // subscription flipped the row to exited (a few-ms race the
+      // correlator owns). In that window, kill-session replies with
+      // "can't find session"; we read that as "the work is already
+      // done" and return the same launch row we would have returned
+      // on a successful kill. Other tmux errors stay loud — see
+      // `sessionExists` in spawn.ts for the same pattern at the other
+      // end of the lifecycle.
+      try {
+        await deps.execute(`kill-session -t ${tmuxEscape(launch.sessionId)}`);
+      } catch (err) {
+        if (!isSessionGone(err)) throw err;
+      }
+      return launch;
+    },
   );
 
   const unsubRegistry = registry.on((evt: LaunchEvent) => {
@@ -89,6 +146,29 @@ export function registerLaunchHandlers(deps: LaunchHandlerDeps): () => void {
     ipcMain.removeHandler("launch:list");
     ipcMain.removeHandler("launch:get");
     ipcMain.removeHandler("launch:create");
+    ipcMain.removeHandler("launch:terminate");
     subscribers.clear();
   };
+}
+
+// [LAW:locality-or-seam] One predicate that decides whether a tmux
+// error means "session already gone". The error shape varies between
+// TmuxCommandError (carries .response.output) and plain Error
+// (message-only), so we flatten both into one string and pattern-match
+// tmux's reply text. Mirrors the same probe in
+// spawn.ts::sessionExists — when tmux unifies its error shapes, both
+// callsites collapse into the same simpler check.
+//
+// Exported for unit testing only — keeps the surface area honest: any
+// caller in main wanting this answer should go through the
+// already-existing spawn.ts pattern, not a new copy.
+export function isSessionGone(err: unknown): boolean {
+  if (!(err instanceof Error)) return false;
+  const message =
+    "response" in err
+      ? (err as Error & { response: { output: string[] } }).response.output.join(
+          "\n",
+        )
+      : err.message;
+  return /can't find session/.test(message);
 }

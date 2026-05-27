@@ -5,7 +5,12 @@
 // translation.
 
 const OPEN_HOST = "open";
-const TARGET_ROUTE = "/workshop";
+// [LAW:one-source-of-truth] Session deep-links target the Context Workshop
+// editor route. The new Workshop tab uses /workshop and is reached via
+// launch-id deep links composed inside the renderer, not from external
+// promptctl:// URLs (a launch is an in-app artifact and has no stable
+// identity outside the running app).
+const TARGET_ROUTE = "/context-workshop";
 
 export interface DeepLinkParams {
   provider: string;

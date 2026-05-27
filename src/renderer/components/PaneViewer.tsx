@@ -5,6 +5,7 @@ import { useLaunchStore } from "../store/launches";
 import { useTopology, usePaneStream } from "../tmux/proxy";
 import { usePaneKeymapMode } from "../lib/use-pane-keymap";
 import { ProcessInfoPanel } from "./ProcessInfoPanel";
+import { OpenInWorkshopButton } from "./OpenInWorkshopButton";
 import type { ToolKind } from "../../shared/types";
 
 const TOOL_COLORS: Record<ToolKind, string> = {
@@ -61,13 +62,16 @@ export function PaneViewer() {
             </span>
           )}
           {launch && (
-            <span
-              data-testid="loops-launch-badge"
-              title={`launchId: ${launch.launchId}`}
-              className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 font-mono text-[10px] text-violet-300"
-            >
-              ↳ launch {launch.launchId.slice(0, 8)}
-            </span>
+            <>
+              <span
+                data-testid="loops-launch-badge"
+                title={`launchId: ${launch.launchId}`}
+                className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 font-mono text-[10px] text-violet-300"
+              >
+                ↳ launch {launch.launchId.slice(0, 8)}
+              </span>
+              <OpenInWorkshopButton launchId={launch.launchId} />
+            </>
           )}
           {keymapMode === "prefix" && (
             <span
