@@ -50,13 +50,16 @@ export function CommandBar() {
 
   const submit = useCallback(async () => {
     const text = input.trim();
-    if (!text || !selectedPaneId) return;
+    if (!text) return;
     const exactMatch = commands.find(
       (c) => c.name.toLowerCase() === text.toLowerCase(),
     );
     if (exactMatch) {
       fireCommand(exactMatch.id);
     } else {
+      // Pane is required only for the literal-keys path; command fire is
+      // pane-agnostic (target.kind may be tmux-session/window/app).
+      if (!selectedPaneId) return;
       // [LAW:one-source-of-truth] The library's TmuxClientProxy is the single
       // renderer-side surface for tmux operations. `sendKeys` sends literally
       // (`-l`), so embedded "\n" is delivered as a newline and the trailing

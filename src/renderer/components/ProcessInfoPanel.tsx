@@ -15,10 +15,17 @@ export function ProcessInfoPanel({ pane }: { pane: TmuxPane }) {
 
   useEffect(() => {
     let active = true;
+    // [LAW:no-defensive-null-guards] Not a guard — log so a failing IPC
+    // surface is visible in the dev console rather than swallowed. The
+    // panel keeps showing the last good snapshot until the next refetch
+    // succeeds, which is a sensible fallback at this trust boundary.
     void window.electronAPI
       .invoke("tmux:pane-processes", pane.id)
       .then((result) => {
         if (active) setProcesses(result as PaneProcesses);
+      })
+      .catch((err: unknown) => {
+        if (active) console.error("tmux:pane-processes failed", err);
       });
     return () => {
       active = false;
@@ -42,6 +49,7 @@ export function ProcessInfoPanel({ pane }: { pane: TmuxPane }) {
           <button
             onClick={() => setRefreshTick((n) => n + 1)}
             data-testid="loops-process-info-refresh"
+            aria-label="Refresh process tree"
             title="Refresh process tree"
             className="text-[10px] text-neutral-600 hover:text-neutral-300"
           >

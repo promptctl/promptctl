@@ -43,4 +43,13 @@ describe("composer-history", () => {
     recordHistory("  hello  ");
     expect(getHistory()[0]).toBe("hello");
   });
+
+  it("returns a snapshot — mutating the result does not affect later reads", () => {
+    recordHistory("a");
+    recordHistory("b");
+    const snapshot = getHistory() as string[];
+    snapshot.pop();
+    snapshot.push("INJECTED");
+    expect(Array.from(getHistory())).toEqual(["a", "b"]);
+  });
 });

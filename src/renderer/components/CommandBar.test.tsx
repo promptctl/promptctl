@@ -155,6 +155,39 @@ describe("CommandBar", () => {
     expect(input.value).toBe("draft");
   });
 
+  it("fires an exact command match even when no pane is selected", async () => {
+    selectPane(null);
+    const user = userEvent.setup({ delay: null });
+    seedCommands([
+      {
+        id: "cmd-app" as CommandId,
+        name: "app.notify",
+        target: { kind: "app", resource: "growl" },
+        action: { kind: "notify", message: "hi" },
+        trigger: { kind: "manual" },
+        enabled: true,
+        lastRun: null,
+        runCount: 0,
+      },
+    ]);
+    render(<CommandBar />);
+    const input = screen.getByTestId("loops-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "app.notify");
+    await user.keyboard("{Enter}");
+    expect(fireCommandMock).toHaveBeenCalledWith("cmd-app");
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
+  it("does NOT call sendKeys when there's no pane and no command match", async () => {
+    selectPane(null);
+    const user = userEvent.setup({ delay: null });
+    render(<CommandBar />);
+    const input = screen.getByTestId("loops-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "ls -la");
+    await user.keyboard("{Enter}");
+    expect(sendKeys).not.toHaveBeenCalled();
+  });
+
   it("fires an exact command match instead of sending to the pane", async () => {
     const user = userEvent.setup({ delay: null });
     seedCommands([

@@ -18,8 +18,13 @@ export function recordHistory(entry: string): void {
   if (history.length > HISTORY_CAP) history.shift();
 }
 
+// [LAW:types-are-the-program] The function's contract is "give me a
+// snapshot of the current history" — a snapshot is by definition immune
+// to later mutation, including mutation of the returned value itself. A
+// readonly type only documents intent; copying the backing array makes
+// the snapshot guarantee structural rather than aspirational.
 export function getHistory(): readonly string[] {
-  return history;
+  return history.slice();
 }
 
 export function clearHistory(): void {

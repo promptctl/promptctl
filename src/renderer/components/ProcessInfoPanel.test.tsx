@@ -1,6 +1,6 @@
 import { cleanup, render, screen, waitFor } from "@testing-library/react";
 import userEvent from "@testing-library/user-event";
-import { afterEach, beforeEach, describe, expect, it } from "vitest";
+import { afterEach, beforeEach, describe, expect, it, vi } from "vitest";
 import {
   installElectronMock,
   setInvokeHandlers,
@@ -108,6 +108,30 @@ describe("ProcessInfoPanel", () => {
     const refresh = await screen.findByTestId("loops-process-info-refresh");
     await user.click(refresh);
     await waitFor(() => expect(invokeCount).toBe(2));
+  });
+
+  it("logs and recovers when the IPC invoke rejects", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    setInvokeHandlers(api, {
+      "tmux:pane-processes": () => Promise.reject(new Error("boom")),
+    });
+    render(<ProcessInfoPanel pane={pane()} />);
+    // The rejection is logged (visible in dev console) rather than swallowed,
+    // and the panel stays mounted with a stable "0 children" affordance.
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    expect(screen.getByTestId("loops-process-info-toggle")).toHaveTextContent(
+      "0 child processes",
+    );
+    spy.mockRestore();
+  });
+
+  it("refresh button has an accessible name (aria-label)", async () => {
+    const user = userEvent.setup({ delay: null });
+    render(<ProcessInfoPanel pane={pane()} />);
+    await user.click(screen.getByTestId("loops-process-info-toggle"));
+    expect(
+      screen.getByRole("button", { name: "Refresh process tree" }),
+    ).toBeInTheDocument();
   });
 
   it("renders process rows when expanded with children", async () => {
