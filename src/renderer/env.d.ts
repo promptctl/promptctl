@@ -18,8 +18,6 @@ import type {
   TaskEvent,
   VersionMeta,
   DiffEntry,
-  TmuxOutputChunk,
-  TmuxOutputStateEvent,
   PaneId,
   Launch,
   LaunchEvent,
@@ -67,10 +65,6 @@ export interface ElectronAPI {
   invoke(channel: "command:list"): Promise<Command[]>;
   invoke(channel: "command:add", command: Command): Promise<void>;
   invoke(channel: "command:remove" | "command:fire", id: string): Promise<void>;
-  invoke(
-    channel: "tmux:output:subscribe" | "tmux:output:unsubscribe",
-    paneId: PaneId,
-  ): Promise<void>;
   invoke(
     channel: "command:update",
     id: string,
@@ -208,14 +202,6 @@ export interface ElectronAPI {
   on(
     channel: "tmux:control-state",
     listener: (event: TmuxControlState) => void,
-  ): () => void;
-  on(
-    channel: "tmux:output:chunk",
-    listener: (chunk: TmuxOutputChunk) => void,
-  ): () => void;
-  on(
-    channel: "tmux:output:state",
-    listener: (event: TmuxOutputStateEvent) => void,
   ): () => void;
   on(
     channel: "session:search-batch",

@@ -53,7 +53,6 @@ The Electron main process runs long-lived subsystems and owns mutable state. The
 Subsystems wired in `src/main/main.ts::app.whenReady`:
 - `TmuxControlConnection` (`src/main/tmux/control.ts`) — singleton event-driven control-mode client. Sole producer of tmux state and the only channel through which the rest of the app drives tmux (send-keys, execute, capture-pane). Wraps `tmux-control-mode-js` and maintains the attach-session-bound control client across reconnects.
 - `TmuxTopologyTracker` (`src/main/tmux/topology.ts`) — event-driven topology snapshots, fed by the control connection's subscriptions. The single source of truth for "which panes exist." Broadcast to renderers via `tmux:topology`.
-- `TmuxOutputRouter` (`src/main/tmux/output-router.ts`) — per-pane output stream router; subscribers attach via `tmux:output:subscribe` and receive `tmux:output:chunk`/`tmux:output:state` events plus an initial scrollback capture.
 - `CommandEngine` (`src/main/command/engine.ts`) — unified scheduler + matcher. Consumes tmux through a three-method seam (`onOutput`/`sendKeys`/`execute`); production wires that to the control connection. Triggers fire → actions execute → events broadcast. `[LAW:one-type-per-behavior]` collapses former `SchedulerEngine` + `MatcherEngine`.
 - `proxyManager` (`src/main/proxy/index.ts`) — module-scope singleton. One proxy per app process; auto-starts on launch, lazy-creates the HAR file on first response.
 - `deepLinkServer` (`src/main/deep-link-server.ts`) — HTTP loopback for `promptctl://` dispatch when the URL scheme can't reach Electron in dev. Port written to `~/.promptctl/deep-link-port`.
@@ -95,7 +94,7 @@ Subsystems wired in `src/main/main.ts::app.whenReady`:
 
 ## What lives where
 
-- `src/main/` — Electron main: tmux control-mode subsystems (control connection, topology tracker, output router), command engine, sessions, proxy, IPC handlers, LLM client, task runner, settings store, deep-link.
+- `src/main/` — Electron main: tmux control-mode subsystems (control connection, topology tracker), command engine, sessions, proxy, IPC handlers, LLM client, task runner, settings store, deep-link.
 - `src/renderer/` — React UI, Zustand stores, page components, and the `env.d.ts` IPC type contract.
 - `src/shared/` — `types.ts` and `proxy-events.ts` — canonical shapes shared across the process boundary.
 - `src/test/` — shared test helpers (`electron-mock.ts`, `setup.ts`).
