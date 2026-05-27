@@ -334,6 +334,7 @@ function ClientTabs({
         );
       })}
       <button
+        type="button"
         onClick={onTogglePrompts}
         data-testid="prompts-toggle"
         aria-pressed={promptsOpen}
