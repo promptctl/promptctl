@@ -59,35 +59,41 @@ export function ProcessInfoPanel({ pane }: { pane: TmuxPane }) {
           </button>
         )}
       </div>
-      {expanded && processes && processes.children.length > 0 && (
+      {expanded && (
         <div
           id="loops-process-info-content"
           className="mt-1 overflow-x-auto rounded border border-neutral-800 bg-neutral-900/50"
         >
-          <table className="w-full text-[11px] text-neutral-400">
-            <thead>
-              <tr className="border-b border-neutral-800 text-left text-neutral-500">
-                <th className="px-2 py-1">PID</th>
-                <th className="px-2 py-1">Command</th>
-                <th className="px-2 py-1">Elapsed</th>
-                <th className="px-2 py-1">CPU</th>
-                <th className="px-2 py-1">Args</th>
-              </tr>
-            </thead>
-            <tbody>
-              {processes.children.map((p) => (
-                <tr key={p.pid} className="border-b border-neutral-800/50">
-                  <td className="px-2 py-1 font-mono">{p.pid}</td>
-                  <td className="px-2 py-1">{p.comm}</td>
-                  <td className="px-2 py-1 font-mono">{p.elapsed}</td>
-                  <td className="px-2 py-1 font-mono">{p.cpuTime}</td>
-                  <td className="max-w-xs truncate px-2 py-1 font-mono">
-                    {p.args}
-                  </td>
+          {processes && processes.children.length > 0 ? (
+            <table className="w-full text-[11px] text-neutral-400">
+              <thead>
+                <tr className="border-b border-neutral-800 text-left text-neutral-500">
+                  <th className="px-2 py-1">PID</th>
+                  <th className="px-2 py-1">Command</th>
+                  <th className="px-2 py-1">Elapsed</th>
+                  <th className="px-2 py-1">CPU</th>
+                  <th className="px-2 py-1">Args</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {processes.children.map((p) => (
+                  <tr key={p.pid} className="border-b border-neutral-800/50">
+                    <td className="px-2 py-1 font-mono">{p.pid}</td>
+                    <td className="px-2 py-1">{p.comm}</td>
+                    <td className="px-2 py-1 font-mono">{p.elapsed}</td>
+                    <td className="px-2 py-1 font-mono">{p.cpuTime}</td>
+                    <td className="max-w-xs truncate px-2 py-1 font-mono">
+                      {p.args}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          ) : (
+            <p className="px-2 py-1 text-[11px] text-neutral-500">
+              No child processes.
+            </p>
+          )}
         </div>
       )}
     </div>

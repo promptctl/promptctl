@@ -152,6 +152,16 @@ describe("ProcessInfoPanel", () => {
     ).toBeInTheDocument();
   });
 
+  it("renders a stable content container with 'No child processes' when expanded and empty", async () => {
+    const user = userEvent.setup({ delay: null });
+    render(<ProcessInfoPanel pane={pane()} />);
+    await waitFor(() => expect(invokeCount).toBe(1));
+    await user.click(screen.getByTestId("loops-process-info-toggle"));
+    const container = document.getElementById("loops-process-info-content");
+    expect(container).not.toBeNull();
+    expect(container).toHaveTextContent("No child processes");
+  });
+
   it("renders process rows when expanded with children", async () => {
     setInvokeHandlers(api, {
       "tmux:pane-processes": (): PaneProcesses => ({

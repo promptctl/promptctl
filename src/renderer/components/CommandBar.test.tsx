@@ -155,6 +155,27 @@ describe("CommandBar", () => {
     expect(input.value).toBe("draft");
   });
 
+  it("composer textarea has an accessible name (aria-label)", () => {
+    render(<CommandBar />);
+    expect(
+      screen.getByRole("textbox", { name: "Command composer" }),
+    ).toBeInTheDocument();
+  });
+
+  it("logs and preserves the draft when sendKeys rejects (no unhandled rejection, no clear)", async () => {
+    const spy = vi.spyOn(console, "error").mockImplementation(() => undefined);
+    sendKeys.mockImplementationOnce(() => Promise.reject(new Error("ipc down")));
+    const user = userEvent.setup({ delay: null });
+    render(<CommandBar />);
+    const input = screen.getByTestId("loops-composer-input") as HTMLTextAreaElement;
+    await user.type(input, "echo nope");
+    await user.keyboard("{Enter}");
+    await waitFor(() => expect(spy).toHaveBeenCalled());
+    // Input is preserved so the user can retry.
+    expect(input.value).toBe("echo nope");
+    spy.mockRestore();
+  });
+
   it("fires an exact command match even when no pane is selected", async () => {
     selectPane(null);
     const user = userEvent.setup({ delay: null });

@@ -54,17 +54,24 @@ export function CommandBar() {
     const exactMatch = commands.find(
       (c) => c.name.toLowerCase() === text.toLowerCase(),
     );
-    if (exactMatch) {
-      fireCommand(exactMatch.id);
-    } else {
-      // Pane is required only for the literal-keys path; command fire is
-      // pane-agnostic (target.kind may be tmux-session/window/app).
-      if (!selectedPaneId) return;
-      // [LAW:one-source-of-truth] The library's TmuxClientProxy is the single
-      // renderer-side surface for tmux operations. `sendKeys` sends literally
-      // (`-l`), so embedded "\n" is delivered as a newline and the trailing
-      // "\r" is the submit. Multi-line input goes through one send.
-      await getTmuxProxy().sendKeys(selectedPaneId, text + "\r");
+    try {
+      if (exactMatch) {
+        await fireCommand(exactMatch.id);
+      } else {
+        // Pane is required only for the literal-keys path; command fire is
+        // pane-agnostic (target.kind may be tmux-session/window/app).
+        if (!selectedPaneId) return;
+        // [LAW:one-source-of-truth] The library's TmuxClientProxy is the single
+        // renderer-side surface for tmux operations. `sendKeys` sends literally
+        // (`-l`), so embedded "\n" is delivered as a newline and the trailing
+        // "\r" is the submit. Multi-line input goes through one send.
+        await getTmuxProxy().sendKeys(selectedPaneId, text + "\r");
+      }
+    } catch (err) {
+      // Log so failures are visible in the dev console; no swallow. The
+      // input stays in place so the user can retry without retyping.
+      console.error("CommandBar submit failed", err);
+      return;
     }
     recordHistory(text);
     setInput("");
@@ -145,6 +152,7 @@ export function CommandBar() {
         <textarea
           ref={textareaRef}
           data-testid="loops-composer-input"
+          aria-label="Command composer"
           value={input}
           rows={rows}
           onChange={(e) => {
