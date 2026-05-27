@@ -308,6 +308,10 @@ describe("selectSessionById", () => {
       "session:find": () => ({ project, session }),
       "session:load": () => [makeMessage(0)],
       "session:list-versions": () => makeVersionMeta(1, 1),
+      // selectSession kicks off runAllAnalyzers (slice 1 unified pipeline);
+      // returning [] keeps the test focused on the deep-link path without
+      // exercising analyzer behavior here.
+      "session:list-analyzers": () => [],
     });
 
     const ok = await useSessionStore

@@ -9,6 +9,10 @@ import type {
   DiffEntry,
   SessionSaveResult,
   SessionSearchResult,
+  AnalyzerMetadata,
+  AnalyzerResult,
+  Pipeline,
+  Step,
 } from "../../shared/types";
 import { cancelTask, newTaskId } from "./tasks";
 
@@ -40,6 +44,19 @@ interface SessionEditorState {
   // Versioning state
   versions: VersionInfo[];
   versionHead: number;
+
+  // Unified-pipeline state. analyzerMetadata is the catalog for the active
+  // session's provider; analyzerResults caches each analyzer's last run output
+  // keyed by analyzer id. pipeline.steps is the ordered list of accepted
+  // operations the user has assembled.
+  // [LAW:one-source-of-truth] analyzerResults always reflects the LAST run
+  // for the current session. selectSession / undo / redo / restoreVersion
+  // refire all analyzers and overwrite the cache.
+  analyzerMetadata: AnalyzerMetadata[];
+  analyzerResults: Record<string, AnalyzerResult>;
+  analyzerRunning: Set<string>;
+  pipeline: Pipeline;
+  applying: boolean;
 
   // Search state. [LAW:dataflow-not-control-flow] searchResults drives the UI mode:
   // null = tree mode, array = search mode. No separate "isSearching" flag in the UI.
@@ -78,6 +95,22 @@ interface SessionEditorState {
   redo: () => Promise<void>;
   restoreVersion: (targetIdx: number) => Promise<void>;
   diffVersions: (fromIdx: number, toIdx: number) => Promise<DiffEntry[]>;
+
+  // Pipeline actions
+  runAnalyzer: (analyzerId: string) => Promise<void>;
+  runAllAnalyzers: () => Promise<void>;
+  addStep: (step: Omit<Step, "id">) => void;
+  removeStep: (stepId: string) => void;
+  clearPipeline: () => void;
+  // `override` lets a caller apply a pipeline that ISN'T the stored one —
+  // used by the legacy "Remove N & Save" shim which builds a one-off
+  // pipeline including a transient manual remove step. Without the
+  // override, repeat-clicking the shim button after a blocked apply
+  // would queue duplicate stored steps. See handleSave in SessionEditor.
+  applyPipeline: (
+    force?: boolean,
+    override?: Pipeline,
+  ) => Promise<SessionSaveResult>;
 
   // Peek (non-destructive preview while search is open). peekResult is the
   // source of truth for "is the peek pane open?"; peekMessages is lazily
@@ -186,6 +219,11 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
   autoTrimIndices: [],
   versions: [],
   versionHead: 0,
+  analyzerMetadata: [],
+  analyzerResults: {},
+  analyzerRunning: new Set(),
+  pipeline: { steps: [] },
+  applying: false,
 
   searchQuery: "",
   searchResults: null,
@@ -286,6 +324,15 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       previewIndex: null,
       versions: [],
       versionHead: 0,
+      analyzerMetadata: [],
+      analyzerResults: {},
+      analyzerRunning: new Set(),
+      pipeline: { steps: [] },
+      // [LAW:one-source-of-truth] A session switch is a full reset of
+      // transient mutation flags. Without this, an in-flight applyPipeline
+      // (or one that threw before its try/finally fires) leaves the new
+      // session UI-disabled with no path to recover.
+      applying: false,
     });
     const messages = (await window.electronAPI.invoke(
       "session:load",
@@ -295,6 +342,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     set({ messages, loading: false });
     // Load versions after the session is active (server-side coordinator needs the active path)
     await get().loadVersions();
+    // [LAW:dataflow-not-control-flow] All analyzers fire on every session
+    // load. No branching on provider here — the metadata list is empty for
+    // providers with no registered analyzers, and runAllAnalyzers is a no-op.
+    await get().runAllAnalyzers();
   },
 
   selectSessionById: async (provider, sessionId) => {
@@ -332,6 +383,12 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       previewContent: "",
       versions: [],
       versionHead: 0,
+      analyzerMetadata: [],
+      analyzerResults: {},
+      analyzerRunning: new Set(),
+      pipeline: { steps: [] },
+      // See selectSession reset — same reason.
+      applying: false,
     });
   },
 
@@ -458,8 +515,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       messages,
       markedForRemoval: new Set(),
       autoTrimIndices: [],
+      pipeline: { steps: [] },
     });
     await get().loadVersions();
+    await get().runAllAnalyzers();
   },
 
   redo: async () => {
@@ -469,8 +528,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       messages,
       markedForRemoval: new Set(),
       autoTrimIndices: [],
+      pipeline: { steps: [] },
     });
     await get().loadVersions();
+    await get().runAllAnalyzers();
   },
 
   restoreVersion: async (targetIdx: number) => {
@@ -483,8 +544,10 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       messages,
       markedForRemoval: new Set(),
       autoTrimIndices: [],
+      pipeline: { steps: [] },
     });
     await get().loadVersions();
+    await get().runAllAnalyzers();
   },
 
   diffVersions: async (fromIdx: number, toIdx: number) => {
@@ -493,6 +556,175 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       fromIdx,
       toIdx,
     );
+  },
+
+  // [LAW:single-enforcer] runAllAnalyzers is the only place that fetches the
+  // catalog for the active session's provider. Individual runAnalyzer calls
+  // reuse the cached metadata. Fires all in parallel — analyzers are pure
+  // (read file, return result) so they don't share state.
+  runAllAnalyzers: async () => {
+    // [LAW:one-source-of-truth] Snapshot the session this catalog request
+    // targets. A session-switch during the await must NOT cause us to
+    // write analyzer state keyed to the wrong session/provider — mirrors
+    // the stale-result guard in runAnalyzer.
+    const startSession = get().selectedSession;
+    const startProvider = get().selectedProvider;
+    if (!startProvider || !startSession) return;
+    const metadata = (await window.electronAPI.invoke(
+      "session:list-analyzers",
+      startProvider,
+    )) as AnalyzerMetadata[];
+    if (
+      get().selectedSession?.filePath !== startSession.filePath ||
+      get().selectedProvider !== startProvider
+    ) {
+      return;
+    }
+    // Don't pre-populate analyzerRunning here — runAnalyzer marks each id
+    // running on entry. Pre-populating would redundantly write the same Set
+    // membership the first runAnalyzer call's set() produces, triggering an
+    // extra render for no information gain.
+    set({
+      analyzerMetadata: metadata,
+      analyzerResults: {},
+      analyzerRunning: new Set(),
+    });
+    await Promise.all(metadata.map((m) => get().runAnalyzer(m.id)));
+  },
+
+  runAnalyzer: async (analyzerId) => {
+    const session = get().selectedSession;
+    if (!session) return;
+    // [LAW:one-source-of-truth] Functional updates for the Set/object
+    // membership so parallel runAnalyzer calls compose deterministically.
+    // Read-snapshot-then-write would not race in current Zustand
+    // (set is synchronous, no awaits between read and write), but the
+    // functional form is robust to future refactors that might introduce
+    // awaits in the middle of the update.
+    set((state) => {
+      const running = new Set(state.analyzerRunning);
+      running.add(analyzerId);
+      return { analyzerRunning: running };
+    });
+    try {
+      // [LAW:single-enforcer] No filePath in the IPC payload — main uses
+      // the active session's path. If the user switched sessions during
+      // the await, the renderer's stale guard below drops the result.
+      const result = (await window.electronAPI.invoke(
+        "session:run-analyzer",
+        analyzerId,
+      )) as AnalyzerResult;
+      // Drop stale results: user may have switched session during the await.
+      if (get().selectedSession?.filePath !== session.filePath) return;
+      set((state) => {
+        const running = new Set(state.analyzerRunning);
+        running.delete(analyzerId);
+        return {
+          analyzerResults: { ...state.analyzerResults, [analyzerId]: result },
+          analyzerRunning: running,
+        };
+      });
+    } catch (err) {
+      if (get().selectedSession?.filePath !== session.filePath) return;
+      set((state) => {
+        const running = new Set(state.analyzerRunning);
+        running.delete(analyzerId);
+        return { analyzerRunning: running };
+      });
+      // Surface the error so the dev sees it; analyzer failures are bugs.
+      console.error(`Analyzer ${analyzerId} failed:`, err);
+    }
+  },
+
+  addStep: (proposed) => {
+    const step: Step = { ...proposed, id: crypto.randomUUID() };
+    const pipeline = get().pipeline;
+    set({ pipeline: { steps: [...pipeline.steps, step] } });
+  },
+
+  removeStep: (stepId) => {
+    const pipeline = get().pipeline;
+    set({
+      pipeline: { steps: pipeline.steps.filter((s) => s.id !== stepId) },
+    });
+  },
+
+  clearPipeline: () => {
+    set({ pipeline: { steps: [] } });
+  },
+
+  applyPipeline: async (force = false, override?: Pipeline) => {
+    // [LAW:one-source-of-truth] Capture the session this apply targets BEFORE
+    // we await; any session-switch during the await is detected by comparing
+    // selectedSession.filePath to this snapshot, and post-apply state writes
+    // (reload, version bump, analyzer re-run) skip entirely if it changed.
+    // This mirrors runAnalyzer's stale-result guard.
+    const startSession = get().selectedSession;
+    const startProvider = get().selectedProvider;
+    const pipeline = override ?? get().pipeline;
+    set({ applying: true });
+    // [LAW:single-enforcer] applying is the gate that disables the Apply
+    // button; clearing it on EVERY exit (success, blocked, stale, throw)
+    // is the single guarantee callers depend on. try/finally consolidates
+    // that into one place instead of dispatching it across five returns.
+    try {
+      const result = (await window.electronAPI.invoke(
+        "session:apply-pipeline",
+        pipeline,
+        force,
+      )) as SessionSaveResult;
+
+      // Stale guard: user switched sessions during the apply. Don't
+      // forward the result to callers — a blocked result would open a
+      // validation/live-tail dialog for the OLD session, and the user
+      // clicking Force-save in that dialog would target the NEW session
+      // with stale violations data. Return a neutral no-op so the
+      // caller's setSaveResult opens no dialog.
+      if (get().selectedSession?.filePath !== startSession?.filePath) {
+        return {
+          path: null,
+          violations: [],
+          forced: false,
+          blockedReason: null,
+        };
+      }
+
+      if (result.blockedReason !== null) {
+        // Blocked = keep pipeline + selection state intact so the user
+        // can review / resolve / retry. [LAW:dataflow-not-control-flow]
+        // The renderer dispatches off blockedReason; the store doesn't.
+        return result;
+      }
+
+      if (startSession && startProvider) {
+        const messages = (await window.electronAPI.invoke(
+          "session:load",
+          startProvider,
+          startSession.filePath,
+        )) as MessageSummary[];
+        // Re-check stale after the reload await — runAnalyzer's pattern.
+        // Same neutral-no-op return as the earlier stale guard above.
+        if (get().selectedSession?.filePath !== startSession.filePath) {
+          return {
+            path: null,
+            violations: [],
+            forced: false,
+            blockedReason: null,
+          };
+        }
+        set({
+          messages,
+          markedForRemoval: new Set(),
+          autoTrimIndices: [],
+          pipeline: { steps: [] },
+        });
+        await get().loadVersions();
+        await get().runAllAnalyzers();
+      }
+      return result;
+    } finally {
+      set({ applying: false });
+    }
   },
 
   setSearchQuery: (query) => {

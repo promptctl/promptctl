@@ -118,6 +118,17 @@ beforeEach(() => {
       head: 0,
       versions: [],
     }),
+    // Slice 1 unified pipeline (5d3.4): every selectSession + every mutation
+    // routes through these two channels. Baseline returns empty so individual
+    // tests don't have to wire them unless they care about analyzer/pipeline
+    // behavior specifically.
+    "session:list-analyzers": () => [],
+    "session:apply-pipeline": () => ({
+      path: "/test/session.jsonl",
+      violations: [],
+      forced: false,
+      blockedReason: null,
+    }),
   });
   // Reset store
   useSessionStore.setState({
@@ -323,15 +334,11 @@ describe("Backup confirmation dialog removed", () => {
     setStoreLoaded({ messages: [makeMessage(0), makeMessage(1)] });
     useSessionStore.setState({ markedForRemoval: new Set([0]) });
 
+    // Slice 1: the Save button routes through the unified pipeline. The shim
+    // queues a manual remove-messages step and invokes session:apply-pipeline.
+    // The baseline handler in beforeEach answers session:apply-pipeline; this
+    // block layers on session:load for the post-apply reload.
     setInvokeHandlers(api, {
-      "session:list-projects": () => [],
-      "session:provider-metadata": () => ({}),
-      "session:save": () => ({
-        path: "/test/session.jsonl",
-        violations: [],
-        forced: false,
-        blockedReason: null,
-      }),
       "session:load": () => [makeMessage(0)],
       "session:list-versions": () => ({
         sessionPath: "/test",
@@ -350,15 +357,127 @@ describe("Backup confirmation dialog removed", () => {
 
     // Confirm should NOT have been called (backup dialog removed)
     expect(confirmSpy).not.toHaveBeenCalled();
-    // session:save should have been invoked with (indices, outputPath, force)
+
+    // session:apply-pipeline should fire with a pipeline whose single step
+    // is a manual remove-messages targeting [0]. We assert the *shape* of the
+    // pipeline (its single step's kind + source + targets) rather than
+    // hard-coding the generated step id.
+    const applyCall = api.invoke.mock.calls.find(
+      (c) => c[0] === "session:apply-pipeline",
+    );
+    if (!applyCall) throw new Error("expected session:apply-pipeline call");
+    const pipeline = applyCall[1] as {
+      steps: { source: string; kind: string; targets: number[] }[];
+    };
+    expect(pipeline.steps).toHaveLength(1);
+    expect(pipeline.steps[0].source).toBe("manual");
+    expect(pipeline.steps[0].kind).toBe("remove-messages");
+    expect(pipeline.steps[0].targets).toEqual([0]);
+
+    confirmSpy.mockRestore();
+    cleanup();
+  });
+
+  it("routes Save through the legacy session:save path for non-Claude providers", async () => {
+    // Pipeline ops are Claude-JSONL-specific. For Gemini sessions, handleSave
+    // must dispatch to session:save instead of session:apply-pipeline; the
+    // pipeline path would silently no-op (no UUIDs to anchor on).
+    useSessionStore.setState({
+      selectedSession: makeSession(),
+      selectedProjectPath: "/test",
+      selectedProvider: "gemini",
+      messages: [makeMessage(0), makeMessage(1)],
+      markedForRemoval: new Set([0]),
+      providerMetadata: {
+        gemini: {
+          badge: { label: "Gemini", color: "" },
+          typeStyles: { user: { label: "User", color: "" } },
+          flagDefinitions: {},
+          helpText: {
+            description: "",
+            resumeCommand: "",
+            safeToRemove: [],
+            beCareful: [],
+          },
+        },
+      },
+    });
+
+    setInvokeHandlers(api, {
+      "session:save": () => ({
+        path: "/test/session.jsonl",
+        violations: [],
+        forced: false,
+        blockedReason: null,
+      }),
+      "session:load": () => [makeMessage(0)],
+      "session:list-versions": () => ({
+        sessionPath: "/test",
+        provider: "gemini",
+        head: 1,
+        versions: makeVersions(1),
+      }),
+    });
+
+    const user = setupUser();
+    render(<SessionEditor />);
+    await user.click(screen.getByText(/Remove .* & Save/i));
+
     expect(api.invoke).toHaveBeenCalledWith(
       "session:save",
       [0],
       undefined,
       false,
     );
+    expect(api.invoke).not.toHaveBeenCalledWith(
+      "session:apply-pipeline",
+      expect.anything(),
+      expect.anything(),
+    );
+    cleanup();
+  });
 
-    confirmSpy.mockRestore();
+  it("does not queue duplicate remove-messages steps when Save is retried after a blocked apply", async () => {
+    // Slice 1 shim's contract: handleSave builds a one-off pipeline and
+    // does NOT mutate the stored pipeline. Two consecutive Save clicks with
+    // the same marked set must each send a pipeline containing exactly one
+    // manual remove-messages step (the latter not stacking duplicates from
+    // the former). Regression guard for the blocked-apply → retry path.
+    setStoreLoaded({ messages: [makeMessage(0), makeMessage(1)] });
+    useSessionStore.setState({ markedForRemoval: new Set([0]) });
+
+    setInvokeHandlers(api, {
+      // Block the first apply to simulate a validation/live-tail collision.
+      "session:apply-pipeline": () => ({
+        path: null,
+        violations: [],
+        forced: false,
+        blockedReason: "validation",
+      }),
+      "session:load": () => [makeMessage(0)],
+    });
+
+    const user = setupUser();
+    render(<SessionEditor />);
+
+    const saveBtn = screen.getByText(/Remove .* & Save/i);
+    await user.click(saveBtn);
+    await user.click(saveBtn);
+
+    const applyCalls = api.invoke.mock.calls.filter(
+      (c) => c[0] === "session:apply-pipeline",
+    );
+    expect(applyCalls).toHaveLength(2);
+    for (const call of applyCalls) {
+      const pipeline = call[1] as {
+        steps: { source: string; kind: string; targets: number[] }[];
+      };
+      const manualRemoves = pipeline.steps.filter(
+        (s) => s.source === "manual" && s.kind === "remove-messages",
+      );
+      expect(manualRemoves).toHaveLength(1);
+      expect(manualRemoves[0].targets).toEqual([0]);
+    }
     cleanup();
   });
 
@@ -367,14 +486,6 @@ describe("Backup confirmation dialog removed", () => {
     useSessionStore.setState({ markedForRemoval: new Set([0]) });
 
     setInvokeHandlers(api, {
-      "session:list-projects": () => [],
-      "session:provider-metadata": () => ({}),
-      "session:save": () => ({
-        path: "/test/session.jsonl",
-        violations: [],
-        forced: false,
-        blockedReason: null,
-      }),
       "session:load": () => [],
       "session:list-versions": () => ({
         sessionPath: "/test",

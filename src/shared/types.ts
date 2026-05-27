@@ -358,6 +358,55 @@ export type TaskEvent =
   | TaskErrorEvent
   | TaskCancelledEvent;
 
+// Context Workshop transformation pipeline.
+// [LAW:types-are-the-program] One ordered Pipeline of typed Steps; runPipeline
+// dispatches on `kind`. Adding a new operation = new StepKind + new op in OPS.
+// No per-source branching, no special cases for "where did this step come from."
+// [LAW:one-type-per-behavior] Analyzers (heuristics that PROPOSE steps) and
+// step ops (pure mutators that APPLY steps) are different types. The heuristic
+// is the Analyzer; the operation is the op behind a StepKind. They never live
+// in the same type.
+export type StepKind = "strip-thinking" | "remove-messages";
+
+export interface Step {
+  // Stable identity in the in-memory pipeline. Client-assigned uuid; never
+  // persisted today (the pipeline is ephemeral per editor session).
+  id: string;
+  // Analyzer id that proposed this step, or "manual" if the user added it.
+  source: string;
+  kind: StepKind;
+  // Source-message logical indices (the index field of MessageSummary from
+  // the initial loadSession call). Ops resolve these to uuids against the
+  // initial source content, so ordering between steps doesn't shift targets.
+  targets: number[];
+  config?: Record<string, unknown>;
+  rationale?: string;
+}
+
+export interface Pipeline {
+  steps: Step[];
+}
+
+// A Step proposed by an analyzer, not yet accepted into the pipeline. The id
+// is assigned when the user clicks "Add to pipeline."
+export interface Recommendation {
+  step: Omit<Step, "id">;
+}
+
+// Renderer-side metadata for rendering the Analyzers panel without invoking.
+export interface AnalyzerMetadata {
+  id: string;
+  name: string;
+  description: string;
+}
+
+export interface AnalyzerResult {
+  analyzerId: string;
+  recommendations: Recommendation[];
+  // One-line summary shown next to the analyzer name when results have landed.
+  summary?: string;
+}
+
 // Diff entries — adapter-aware semantic diff between two versions of session content.
 // [LAW:dataflow-not-control-flow] The UI renders these; never switches on provider.
 export type DiffEntry =

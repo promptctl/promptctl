@@ -13,11 +13,13 @@ import type {
   CompressToolsOptions,
   CompressToolsResult,
   SessionSaveResult,
+  Pipeline,
 } from "../../shared/types";
 import { validateClaudeContent } from "./claude/validator";
 import type { TaskHandle } from "../tasks/runner";
 import type { ProviderAdapter } from "./types";
 import { getAllProviders, getProvider } from "./registry";
+import { runPipeline } from "./pipeline/runPipeline";
 import {
   recordVersion,
   ensureBaseline,
@@ -134,6 +136,20 @@ function activePath(): string {
 function activeProviderId(): ProviderKind {
   if (!activeProvider) throw new Error("No session loaded");
   return activeProvider;
+}
+
+// Public read of the active provider — used by IPC handlers that need to
+// verify a request matches the loaded session (e.g. session:run-analyzer
+// rejecting analyzers scoped to a different provider).
+export function getActiveProvider(): ProviderKind {
+  return activeProviderId();
+}
+
+// Public read of the active file path — used by IPC handlers that run
+// against the loaded session (session:run-analyzer) so callers can't
+// supply an arbitrary path that points elsewhere.
+export function getActivePath(): string {
+  return activePath();
 }
 
 export function getMessageContent(index: number): string {
@@ -310,6 +326,122 @@ export async function compressToolResults(
   }
 
   return result;
+}
+
+// [LAW:single-enforcer] applyPipeline is the only path that mutates a session
+// via the unified pipeline. Reads current disk content, runs the pipeline,
+// validates (Claude only — same policy as saveSession), writes through the
+// coordinator's writeFile (not the adapter's saveSession), records a version
+// with a structured label.
+//
+// Pattern parallel: undo/redo/restoreVersion also writeFile directly through
+// the coordinator and rely on the adapter being reloaded by the next
+// loadSession. The adapter's saveSession path exists for in-place edits
+// (compressToolResults) where in-memory state must stay consistent with
+// disk. applyPipeline works content-pure, so we don't need that path.
+//
+// force=true: bypasses both the live-tail gate and structural validation.
+// Wired to ValidationViolationsDialog and LiveTailBlockedDialog's "Force
+// save" — the renderer flow when the user has reviewed the warning and
+// explicitly opted in. Slice 3's structural-repair analyzer will reduce
+// the need for the validation-force path in practice; slice 4 adds a
+// pre-apply diff so the user can preview what they're forcing.
+export async function applyPipeline(
+  pipeline: Pipeline,
+  force = false,
+): Promise<SessionSaveResult> {
+  // [LAW:one-source-of-truth] Snapshot the active state once at the top.
+  // Between awaits below, another IPC handler (notably `session:load`) can
+  // change activeAdapter / activeFilePath / activeProvider; the prior code
+  // captured filePath but later called `ensureBaselineForActive()` and
+  // `activeProviderId()` which read FRESH globals — so a session switch
+  // mid-apply could record the baseline/version against the wrong file.
+  // Using the snapshot consistently keeps every I/O scoped to the file
+  // this invocation was issued against.
+  const adapter = active();
+  const filePath = activePath();
+  const provider = activeProviderId();
+
+  // [LAW:single-enforcer] Same gate as saveSession; `force` bypasses both
+  // the validation block AND the live-tail block (the inner `liveTailGate`
+  // returns unblocked when force=true). The dialog flow — Force save in
+  // ValidationViolationsDialog and LiveTailBlockedDialog — is the only
+  // path that sets force=true, and the user has explicitly opted in via
+  // those dialogs by the time we get here.
+  const gate = liveTailGate(filePath, force);
+  if (gate.blocked) {
+    return {
+      path: null,
+      violations: [],
+      forced: false,
+      blockedReason: "live-tail",
+    };
+  }
+
+  const sourceContent = await readFile(filePath, "utf-8");
+  const newContent = runPipeline(sourceContent, pipeline);
+
+  // [LAW:dataflow-not-control-flow] Empty-violations list for non-claude
+  // providers — same code path, the data decides the outcome.
+  const violations =
+    adapter.id === "claude"
+      ? validateClaudeContent(newContent).violations
+      : [];
+  if (violations.length > 0 && !force) {
+    return {
+      path: null,
+      violations,
+      forced: false,
+      blockedReason: "validation",
+    };
+  }
+
+  // Inline the baseline + version-recording steps using the captured
+  // filePath/provider rather than activePath()/activeProviderId() helpers.
+  // That keeps each await in the chain scoped to the same session this
+  // call was issued against.
+  const baselineSourceTokens = adapter
+    .summarizeContent(sourceContent)
+    .reduce((sum, m) => sum + m.tokens, 0);
+  await ensureBaseline(filePath, provider, baselineSourceTokens);
+  await writeFile(filePath, newContent, "utf-8");
+
+  const baseLabel = formatPipelineLabel(pipeline);
+  const label =
+    violations.length > 0
+      ? `${baseLabel} (forced with ${violations.length} violation${violations.length === 1 ? "" : "s"})`
+      : baseLabel;
+  const newTokens = adapter
+    .summarizeContent(newContent)
+    .reduce((sum, m) => sum + m.tokens, 0);
+  await recordVersion(filePath, provider, newContent, label, newTokens);
+
+  return {
+    path: filePath,
+    violations,
+    forced: violations.length > 0,
+    blockedReason: null,
+  };
+}
+
+function formatPipelineLabel(pipeline: Pipeline): string {
+  if (pipeline.steps.length === 0) return "Applied empty pipeline";
+  const parts = pipeline.steps.map((s) => {
+    // Dedupe targets when counting — ops dedupe via UUID Set, so the label
+    // must match what actually happened, not what was queued.
+    const count = new Set(s.targets).size;
+    return `${s.kind} (${count} message${count === 1 ? "" : "s"} from ${s.source})`;
+  });
+  return `Applied ${pipeline.steps.length} step${pipeline.steps.length === 1 ? "" : "s"}: ${parts.join(", ")}`;
+}
+
+// Reload the active session after applyPipeline writes — mirrors the
+// post-undo/redo/restoreVersion pattern. The renderer calls session:load
+// directly after a successful apply, so this isn't called from main today,
+// but it's exposed so any future caller that needs the post-apply summaries
+// has a single entrypoint.
+export async function reloadActive(): Promise<MessageSummary[]> {
+  return active().loadSession(activePath());
 }
 
 export async function listVersions(): Promise<VersionMeta> {

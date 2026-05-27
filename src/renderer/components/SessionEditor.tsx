@@ -2,6 +2,7 @@ import {
   useEffect,
   useState,
   useCallback,
+  useMemo,
   useRef,
   type ReactNode,
 } from "react";
@@ -19,6 +20,7 @@ import type {
   SessionSaveResult,
   SessionSearchResult,
   SessionSearchMatch,
+  StepKind,
 } from "../../shared/types";
 import { ResizableSplit } from "./ResizableSplit";
 import { ValidationViolationsDialog } from "./ValidationViolationsDialog";
@@ -30,6 +32,11 @@ import { DiffViewer } from "./DiffViewer";
 import { TaskToast } from "./TaskToast";
 import { JsonlLineView } from "./jsonl-view";
 import { newTaskId, useTaskSubscription } from "../store/tasks";
+import {
+  PipelinePanel,
+  PipelineEffectBadges,
+  buildPipelineEffectMap,
+} from "./PipelinePanel";
 
 // -- Layout helpers --
 
@@ -1018,6 +1025,7 @@ function SessionTree({
 function MessageRow({
   msg,
   marked,
+  pipelineEffects,
   typeColor,
   typeLabel,
   flagDefs,
@@ -1030,6 +1038,7 @@ function MessageRow({
 }: {
   msg: MessageSummary;
   marked: boolean;
+  pipelineEffects: StepKind[];
   typeColor: string;
   typeLabel: string;
   flagDefs: Record<string, FlagDefinition>;
@@ -1102,6 +1111,7 @@ function MessageRow({
                 </span>
               );
             })}
+            <PipelineEffectBadges kinds={pipelineEffects} />
             {/* Extras (model, tokens, etc.) */}
             {Object.entries(msg.extras).map(([key, value]) => (
               <span
@@ -1232,6 +1242,7 @@ export function SessionEditor() {
     previewIndex,
     previewRaw,
     loading,
+    applying,
     saving,
     versions,
     versionHead,
@@ -1249,6 +1260,8 @@ export function SessionEditor() {
     save,
     undo,
     redo,
+    pipeline,
+    applyPipeline,
     searchQuery,
     searchResults,
     searchStatus,
@@ -1465,11 +1478,48 @@ export function SessionEditor() {
     [lastClickedIndex, toggleMessage, toggleRange],
   );
 
-  const handleSave = useCallback(async () => {
-    // Versioning makes Save fearless — every save creates a recoverable version.
-    const result = await save();
-    setSaveResult(result);
-  }, [save]);
+  // [LAW:dataflow-not-control-flow] The provider drives the mutation path.
+  // Pipeline ops are Claude-JSONL-specific (UUID-anchored line filtering,
+  // thinking-block stripping); for non-Claude providers (Gemini's JSON
+  // format) the ops would silently no-op. So Save dispatches off provider:
+  // Claude → pipeline shim (one-off pipeline, doesn't mutate stored state);
+  // anything else → legacy session:save adapter call. Analyzers are
+  // already provider-scoped (Analyzer.providerId), so this is the intended
+  // shape, not a temporary fork.
+  //
+  // We build a *one-off* pipeline (stored steps + a transient manual
+  // remove step) instead of pushing into the stored pipeline. Repeating
+  // Save after a blocked apply rebuilds a fresh one-off rather than
+  // queuing duplicate stored steps.
+  const handleSave = useCallback(
+    async (force = false) => {
+      // IPC invoke rejections bubble out of save/applyPipeline. Catch here
+      // so the click handler never leaves an unhandled promise rejection;
+      // mirrors PipelinePanel.handleApply's pattern.
+      try {
+        if (selectedProvider !== "claude") {
+          const result = await save(force);
+          setSaveResult(result);
+          return;
+        }
+        const overrideSteps = [...pipeline.steps];
+        if (markedForRemoval.size > 0) {
+          overrideSteps.push({
+            id: crypto.randomUUID(),
+            source: "manual",
+            kind: "remove-messages",
+            targets: [...markedForRemoval],
+            rationale: `${markedForRemoval.size} manually marked message${markedForRemoval.size === 1 ? "" : "s"}`,
+          });
+        }
+        const result = await applyPipeline(force, { steps: overrideSteps });
+        setSaveResult(result);
+      } catch (err) {
+        console.error("handleSave failed:", err);
+      }
+    },
+    [selectedProvider, pipeline.steps, markedForRemoval, save, applyPipeline],
+  );
 
   const handleAutoTrim = useCallback(async () => {
     await runAutoTrim();
@@ -1677,6 +1727,15 @@ export function SessionEditor() {
   const markedTokens = messages
     .filter((m) => markedForRemoval.has(m.index))
     .reduce((sum, m) => sum + m.tokens, 0);
+
+  // [LAW:dataflow-not-control-flow] Build the index→kinds Map once per
+  // pipeline change. Rows look up by index in O(1) instead of scanning every
+  // step's targets array on every render. Empty pipeline → empty Map → no
+  // badges rendered, no work per row.
+  const pipelineEffectMap = useMemo(
+    () => buildPipelineEffectMap(pipeline.steps),
+    [pipeline.steps],
+  );
 
   // Filter messages by active type/flag/tool filters and search text
   const searchLower = searchText.toLowerCase();
@@ -2125,6 +2184,12 @@ export function SessionEditor() {
 
                     <div className="h-px bg-neutral-800" />
 
+                    {/* Pipeline panel — analyzers + ordered steps + Apply.
+                        Mounts only when there are registered analyzers for the
+                        provider or the user has assembled steps. The dialog
+                        block-reasons surface here through onApplied → setSaveResult. */}
+                    <PipelinePanel onApplied={setSaveResult} />
+
                     {/* Save row — one line, stats left, primary action right, always visible */}
                     <div className="flex items-center justify-between gap-3">
                       <SessionStats
@@ -2135,12 +2200,20 @@ export function SessionEditor() {
                       />
                       <ToolHoverCard info={TOOL_HOVER_INFO.save}>
                         <button
-                          onClick={handleSave}
-                          disabled={markedForRemoval.size === 0 || saving}
+                          onClick={() => void handleSave()}
+                          // [LAW:dataflow-not-control-flow] The same button
+                          // drives both mutation paths (pipeline for Claude
+                          // via `applying`, legacy adapter save for other
+                          // providers via `saving`). The disabled/label
+                          // state reflects whichever is in flight; the
+                          // button doesn't ask which path it's on.
+                          disabled={
+                            markedForRemoval.size === 0 || applying || saving
+                          }
                           className="rounded bg-red-600/80 px-3 py-1 text-sm font-medium text-white transition-colors hover:bg-red-600 disabled:opacity-30"
                         >
-                          {saving
-                            ? "Saving..."
+                          {applying || saving
+                            ? "Applying..."
                             : `Remove ${markedForRemoval.size} & Save`}
                         </button>
                       </ToolHoverCard>
@@ -2445,6 +2518,9 @@ export function SessionEditor() {
                                 key={msg.index}
                                 msg={msg}
                                 marked={markedForRemoval.has(msg.index)}
+                                pipelineEffects={
+                                  pipelineEffectMap.get(msg.index) ?? []
+                                }
                                 typeColor={style?.color ?? FALLBACK_STYLE}
                                 typeLabel={style?.label ?? msg.type}
                                 flagDefs={flagDefs}
@@ -2529,21 +2605,15 @@ export function SessionEditor() {
         <ValidationViolationsDialog
           result={saveResult}
           onCancel={() => setSaveResult(null)}
-          onForceSave={async () => {
-            const result = await save(true);
-            setSaveResult(result);
-          }}
-          saving={saving}
+          onForceSave={() => handleSave(true)}
+          saving={applying || saving}
         />
       )}
       {saveResult?.blockedReason === "live-tail" && (
         <LiveTailBlockedDialog
           onCancel={() => setSaveResult(null)}
-          onForceSave={async () => {
-            const result = await save(true);
-            setSaveResult(result);
-          }}
-          saving={saving}
+          onForceSave={() => handleSave(true)}
+          saving={applying || saving}
         />
       )}
     </div>

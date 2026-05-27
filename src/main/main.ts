@@ -32,6 +32,8 @@ import { loadSettings } from "./settings/store";
 import { registerProvider } from "./sessions/registry";
 import { geminiAdapter } from "./sessions/gemini/adapter";
 import { claudeAdapter } from "./sessions/claude/adapter";
+import { registerAnalyzer } from "./sessions/analyzers/registry";
+import { stripThinkingAnalyzer } from "./sessions/analyzers/strip-thinking";
 import { findPromptctlUrlInArgv, promptctlUrlToHash } from "./deep-link";
 import { startDeepLinkServer, stopDeepLinkServer } from "./deep-link-server";
 import type { Server } from "node:http";
@@ -308,6 +310,7 @@ app.whenReady().then(async () => {
   // Initialize subsystems
   registerProvider(geminiAdapter);
   registerProvider(claudeAdapter);
+  registerAnalyzer(stripThinkingAnalyzer);
 
   // Launch registry: load persisted rows, construct the registry, register
   // IPC handlers. The proxy starts further down — it needs the registry to
