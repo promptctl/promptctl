@@ -30,10 +30,12 @@ import { stopReasonStyle } from "./stop-reason";
 export function ConversationTab({
   chain,
   selectedRequestId,
+  highlightSubstring,
   onSelectRequest,
 }: {
   chain: RequestRecord[] | null;
   selectedRequestId: string;
+  highlightSubstring?: string;
   onSelectRequest?: (requestId: string) => void;
 }) {
   // [LAW:types-are-the-program] The memo key must encode every dimension
@@ -99,6 +101,7 @@ export function ConversationTab({
             entryIndex={idx}
             selectedRequestId={selectedRequestId}
             pairings={pairings}
+            highlightSubstring={highlightSubstring}
             onSelectRequest={onSelectRequest}
           />
         ))
@@ -123,12 +126,14 @@ function TimelineRow({
   entryIndex,
   selectedRequestId,
   pairings,
+  highlightSubstring,
   onSelectRequest,
 }: {
   entry: TimelineEntry;
   entryIndex: number;
   selectedRequestId: string;
   pairings: ReturnType<typeof buildToolPairings>;
+  highlightSubstring?: string;
   onSelectRequest?: (requestId: string) => void;
 }) {
   if (entry.kind === "request_boundary") {
@@ -147,6 +152,7 @@ function TimelineRow({
         entryIndex={entryIndex}
         selectedRequestId={selectedRequestId}
         pairings={pairings}
+        highlightSubstring={highlightSubstring}
         onSelectRequest={onSelectRequest}
       />
     );
@@ -157,6 +163,7 @@ function TimelineRow({
       entryIndex={entryIndex}
       selectedRequestId={selectedRequestId}
       pairings={pairings}
+      highlightSubstring={highlightSubstring}
       onSelectRequest={onSelectRequest}
     />
   );
@@ -227,12 +234,14 @@ function MessageRow({
   entryIndex,
   selectedRequestId,
   pairings,
+  highlightSubstring,
   onSelectRequest,
 }: {
   entry: Extract<TimelineEntry, { kind: "message" }>;
   entryIndex: number;
   selectedRequestId: string;
   pairings: ReturnType<typeof buildToolPairings>;
+  highlightSubstring?: string;
   onSelectRequest?: (requestId: string) => void;
 }) {
   const isSelected = entry.introducedByRequestId === selectedRequestId;
@@ -254,6 +263,7 @@ function MessageRow({
               block={block}
               blockIndex={blockIndex}
               pairings={pairings}
+              highlightSubstring={highlightSubstring}
             />
           ))}
         </div>
@@ -261,7 +271,7 @@ function MessageRow({
         <div className="p-3">
           {renderBlock(
             { type: "text", text: stringifyContent(entry.content) },
-            { index: 0 },
+            { index: 0, highlightSubstring },
           )}
         </div>
       )}
@@ -276,12 +286,14 @@ function AssistantResponseRow({
   entryIndex,
   selectedRequestId,
   pairings,
+  highlightSubstring,
   onSelectRequest,
 }: {
   entry: Extract<TimelineEntry, { kind: "assistant_response" }>;
   entryIndex: number;
   selectedRequestId: string;
   pairings: ReturnType<typeof buildToolPairings>;
+  highlightSubstring?: string;
   onSelectRequest?: (requestId: string) => void;
 }) {
   const isSelected = entry.producedByRequestId === selectedRequestId;
@@ -310,6 +322,7 @@ function AssistantResponseRow({
               block={block}
               blockIndex={blockIndex}
               pairings={pairings}
+              highlightSubstring={highlightSubstring}
             />
           ))}
         </div>
@@ -379,10 +392,12 @@ function BlockWithToolLink({
   block,
   blockIndex,
   pairings,
+  highlightSubstring,
 }: {
   block: unknown;
   blockIndex: number;
   pairings: ReturnType<typeof buildToolPairings>;
+  highlightSubstring?: string;
 }) {
   const rec = asRecord(block);
   const isToolUse = rec?.type === "tool_use" && typeof rec.id === "string";
@@ -405,7 +420,7 @@ function BlockWithToolLink({
       data-tool-use-id={toolUseId ?? undefined}
       data-tool-result-id={resultId ?? undefined}
     >
-      {renderBlock(block, { index: blockIndex })}
+      {renderBlock(block, { index: blockIndex, highlightSubstring })}
       {hasResultLink && toolUseId !== null ? (
         <ToolJumpLink
           attr="data-tool-result-id"

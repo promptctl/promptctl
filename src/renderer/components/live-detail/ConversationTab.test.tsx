@@ -76,6 +76,33 @@ describe("ConversationTab", () => {
     );
   });
 
+  it("highlightSubstring wraps matching text inside conversation block renderers", () => {
+    const rec = makeRequest({
+      requestId: "req-hl",
+      requestBody: {
+        messages: [{ role: "user", content: "find the conv_needle here" }],
+      },
+      assembledResponse: makeAssistant("asst-hl", [
+        { type: "text", text: "echoing conv_needle in the response" },
+      ]),
+    });
+    render(
+      <ConversationTab
+        chain={[rec]}
+        selectedRequestId="req-hl"
+        highlightSubstring="conv_needle"
+        onSelectRequest={undefined}
+      />,
+    );
+    const marks = screen.getAllByTestId("search-highlight");
+    // One in the user message, one in the assistant_response — both
+    // routed through the same block registry as the Request/Response
+    // tabs, so the wrapper appears without any conversation-side wiring
+    // beyond the prop pass-through.
+    expect(marks.length).toBeGreaterThanOrEqual(2);
+    expect(marks.every((m) => m.textContent === "conv_needle")).toBe(true);
+  });
+
   it("renders one message, one assistant response, and one boundary for a 1-request chain", () => {
     const rec = makeRequest({
       requestId: "req-1",
