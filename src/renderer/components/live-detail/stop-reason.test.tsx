@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { setupUser } from "../../../test/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RequestRecord } from "../../../shared/proxy-events";
 import type { LineageInfo } from "./lineage";
@@ -38,7 +38,7 @@ describe("stopReasonStyle", () => {
 
 describe("StopReasonChip", () => {
   it("renders a button when onClick is provided and invokes it", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onClick = vi.fn();
     render(<StopReasonChip stopReason="tool_use" onClick={onClick} />);
     await user.click(screen.getByTestId("stop-reason-chip"));
@@ -59,7 +59,7 @@ describe("StopReasonChip", () => {
 
 describe("ChainStopReasonStrip", () => {
   it("renders one chip per chain entry and selects on click", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onSelect = vi.fn();
     const chain = [
       record("a", "tool_use"),

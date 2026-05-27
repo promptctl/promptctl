@@ -1,6 +1,6 @@
 import { describe, it, expect, vi } from "vitest";
 import { render, screen, cleanup } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { setupUser } from "../../test/user-event";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import type { VersionInfo } from "../../shared/types";
 
@@ -82,7 +82,7 @@ describe("VersionHistoryPanel", () => {
 
   it("Click 'View diff' calls onViewDiff with (idx, head)", async () => {
     const onViewDiff = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <VersionHistoryPanel
         versions={makeVersions(3)}
@@ -99,7 +99,7 @@ describe("VersionHistoryPanel", () => {
 
   it("Click 'Restore' calls onRestore with idx", async () => {
     const onRestore = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <VersionHistoryPanel
         versions={makeVersions(3)}
@@ -138,7 +138,7 @@ describe("VersionHistoryPanel", () => {
 
   it("Click close calls onClose", async () => {
     const onClose = vi.fn();
-    const user = userEvent.setup();
+    const user = setupUser();
     render(
       <VersionHistoryPanel
         versions={makeVersions(1)}

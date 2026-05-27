@@ -1,7 +1,8 @@
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import type { UserEvent } from "@testing-library/user-event";
 import type { RequestRecord } from "../../../shared/proxy-events";
+import { setupUser } from "../../../test/user-event";
 import { FilterChips, optionTestSuffix } from "./FilterChips";
 import { emptyFilters, type RequestFilters } from "./filters";
 
@@ -9,8 +10,11 @@ function optId(key: string, value: string): string {
   return `filter-option-${key}-${optionTestSuffix(value)}`;
 }
 
+let user: UserEvent;
+
 beforeEach(() => {
   cleanup();
+  user = setupUser();
 });
 
 function record(overrides: Partial<RequestRecord> = {}): RequestRecord {
@@ -81,7 +85,7 @@ describe("FilterChips", () => {
       />,
     );
     expect(screen.getByTestId("filter-chip-models")).not.toBeDisabled();
-    await userEvent.click(screen.getByTestId("filter-chip-models"));
+    await user.click(screen.getByTestId("filter-chip-models"));
     const menu = screen.getByTestId("filter-chip-menu-models");
     // Option testid is slug + short hash — collision-free across
     // distinct option values. Tests compose it via optionTestSuffix
@@ -113,13 +117,13 @@ describe("FilterChips", () => {
     expect(chip.getAttribute("data-active")).toBe("true");
     // The selected-but-unobserved value is in the option list so it
     // can be toggled off.
-    await userEvent.click(chip);
+    await user.click(chip);
     const menu = screen.getByTestId("filter-chip-menu-models");
     const selected = within(menu).getByTestId(
       optId("models", "claude-sonnet"),
     );
     expect(selected.getAttribute("aria-checked")).toBe("true");
-    await userEvent.click(selected);
+    await user.click(selected);
     expect(onToggle).toHaveBeenCalledWith("models", "claude-sonnet");
   });
 
@@ -132,9 +136,9 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByTestId("filter-chip-statuses"));
+    await user.click(screen.getByTestId("filter-chip-statuses"));
     expect(screen.getByTestId("filter-chip-menu-statuses")).toBeTruthy();
-    await userEvent.click(screen.getByTestId("filter-chip-errors"));
+    await user.click(screen.getByTestId("filter-chip-errors"));
     expect(screen.queryByTestId("filter-chip-menu-statuses")).toBeNull();
     expect(screen.getByTestId("filter-chip-menu-errors")).toBeTruthy();
   });
@@ -149,8 +153,8 @@ describe("FilterChips", () => {
         onClear={vi.fn()}
       />,
     );
-    await userEvent.click(screen.getByTestId("filter-chip-statuses"));
-    await userEvent.click(screen.getByTestId(optId("statuses", "success")));
+    await user.click(screen.getByTestId("filter-chip-statuses"));
+    await user.click(screen.getByTestId(optId("statuses", "success")));
     expect(onToggle).toHaveBeenCalledWith("statuses", "success");
   });
 
@@ -202,7 +206,7 @@ describe("FilterChips", () => {
     );
     const clear = screen.getByTestId("filter-chips-clear");
     expect(clear).not.toBeDisabled();
-    await userEvent.click(clear);
+    await user.click(clear);
     expect(onClear).toHaveBeenCalled();
   });
 
@@ -217,7 +221,7 @@ describe("FilterChips", () => {
     );
     const chip = screen.getByTestId("filter-chip-statuses");
     expect(chip.getAttribute("aria-haspopup")).toBe("menu");
-    await userEvent.click(chip);
+    await user.click(chip);
     const menu = screen.getByTestId("filter-chip-menu-statuses");
     expect(menu.getAttribute("role")).toBe("menu");
     expect(menu.getAttribute("aria-label")).toBe("Status");
@@ -243,7 +247,7 @@ describe("FilterChips", () => {
     );
     const chip = screen.getByTestId("filter-chip-models");
     expect(chip).not.toBeDisabled();
-    await userEvent.click(chip);
+    await user.click(chip);
     expect(screen.getByTestId("filter-chip-menu-models")).toBeTruthy();
     expect(chip.getAttribute("aria-expanded")).toBe("true");
 
@@ -273,9 +277,9 @@ describe("FilterChips", () => {
         <button data-testid="outside">outside</button>
       </div>,
     );
-    await userEvent.click(screen.getByTestId("filter-chip-statuses"));
+    await user.click(screen.getByTestId("filter-chip-statuses"));
     expect(screen.getByTestId("filter-chip-menu-statuses")).toBeTruthy();
-    await userEvent.click(screen.getByTestId("outside"));
+    await user.click(screen.getByTestId("outside"));
     expect(screen.queryByTestId("filter-chip-menu-statuses")).toBeNull();
   });
 });

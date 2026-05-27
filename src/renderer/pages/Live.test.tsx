@@ -1,12 +1,12 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
 import { Live } from "./Live";
 import { useProxyStore } from "../store/proxy";
 import type { ClientInfo, ProxyEvent } from "../../shared/proxy-events";
 import { optionTestSuffix } from "../components/live-detail/FilterChips";
 import { emptyFilters } from "../components/live-detail/filters";
 import { installElectronMock } from "../../test/electron-mock";
+import { setupUser } from "../../test/user-event";
 
 function optId(key: string, value: string): string {
   return `filter-option-${key}-${optionTestSuffix(value)}`;
@@ -76,7 +76,7 @@ describe("Live", () => {
       "grid-cols-[5rem_3.5rem_3.5rem_5rem_minmax(8rem,1fr)_28rem]",
     );
 
-    const user = userEvent.setup();
+    const user = setupUser();
     await user.click(screen.getByText("Claude @ app"));
     expect(screen.getAllByText(/req-a/).length).toBeGreaterThan(0);
     expect(screen.queryByText(/req-b/)).toBeNull();
@@ -123,7 +123,7 @@ describe("Live", () => {
     expect(buttons[2]).toHaveAttribute("data-lineage", "continuation");
     expect(buttons[2]).toHaveAttribute("data-depth", "2");
 
-    const user = userEvent.setup();
+    const user = setupUser();
     await user.click(screen.getAllByText(/chain-2/)[0]);
     await user.click(screen.getByRole("button", { name: "Diff" }));
     expect(screen.getByTestId("diff-lineage-label")).toHaveTextContent(
@@ -159,6 +159,7 @@ describe("Live", () => {
   });
 
   it("Prompts toggle reveals system-prompt buckets and clicking a bucket filters the list", async () => {
+    const user = setupUser();
     const state = useProxyStore.getState();
     state.upsertClient(client("client-a", "Claude @ app"));
     // Three requests across two distinct system prompts → two buckets.
@@ -176,7 +177,7 @@ describe("Live", () => {
     expect(screen.queryByTestId("prompts-panel")).toBeNull();
 
     // Click the toggle.
-    await userEvent.click(screen.getByTestId("prompts-toggle"));
+    await user.click(screen.getByTestId("prompts-toggle"));
 
     // Panel renders both buckets, most recent first (Beta started at 30).
     const panel = screen.getByTestId("prompts-panel");
@@ -192,9 +193,7 @@ describe("Live", () => {
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(3);
 
     // Filter to Alpha (the second card).
-    await userEvent.click(
-      within(cards[1]).getByTestId("prompt-bucket-filter"),
-    );
+    await user.click(within(cards[1]).getByTestId("prompt-bucket-filter"));
 
     // Only the two Alpha rows remain visible.
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
@@ -205,7 +204,7 @@ describe("Live", () => {
     const alphaCardAfter = within(
       screen.getByTestId("prompts-panel"),
     ).getAllByTestId("prompt-bucket-card")[1];
-    await userEvent.click(
+    await user.click(
       within(alphaCardAfter).getByTestId("prompt-bucket-filter"),
     );
 
@@ -214,6 +213,7 @@ describe("Live", () => {
   });
 
   it("filter chips compose: [Errors: yes] narrows the list to errored records, Clear restores it", async () => {
+    const user = setupUser();
     const state = useProxyStore.getState();
     state.upsertClient(client("client-a", "Claude @ app"));
     // One successful and one errored request — chips should distinguish them.
@@ -230,8 +230,8 @@ describe("Live", () => {
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
 
     // Open Errors chip and click "yes".
-    await userEvent.click(screen.getByTestId("filter-chip-errors"));
-    await userEvent.click(screen.getByTestId(optId("errors", "yes")));
+    await user.click(screen.getByTestId("filter-chip-errors"));
+    await user.click(screen.getByTestId(optId("errors", "yes")));
 
     // Only the errored row remains.
     const rowsAfter = screen.getAllByTestId("live-request-row");
@@ -244,13 +244,14 @@ describe("Live", () => {
     expect(chip.textContent).toContain("yes");
 
     // Clear restores everything.
-    await userEvent.click(screen.getByTestId("filter-chips-clear"));
+    await user.click(screen.getByTestId("filter-chips-clear"));
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
     expect(screen.getByTestId("filter-chip-errors").getAttribute("data-active"))
       .toBe("false");
   });
 
   it("filter chips and the existing prompt-hash filter AND together via visibleRequests", async () => {
+    const user = setupUser();
     const state = useProxyStore.getState();
     state.upsertClient(client("client-a", "Claude @ app"));
     // Two distinct prompts × {success, error} so the cross-filter
@@ -267,27 +268,26 @@ describe("Live", () => {
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(3);
 
     // Filter to the Alpha prompt → 2 rows (alpha-ok + alpha-bad).
-    await userEvent.click(screen.getByTestId("prompts-toggle"));
+    await user.click(screen.getByTestId("prompts-toggle"));
     // Bucket order is most-recent-first and depends on test data, so
     // pick the bucket card by its visible content rather than index.
     const alphaCard = within(screen.getByTestId("prompts-panel"))
       .getAllByTestId("prompt-bucket-card")
       .find((card) => card.textContent?.includes("Alpha"));
     if (alphaCard === undefined) throw new Error("Alpha bucket card missing");
-    await userEvent.click(
-      within(alphaCard).getByTestId("prompt-bucket-filter"),
-    );
+    await user.click(within(alphaCard).getByTestId("prompt-bucket-filter"));
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
 
     // AND-compose with Errors=yes → just alpha-bad.
-    await userEvent.click(screen.getByTestId("filter-chip-errors"));
-    await userEvent.click(screen.getByTestId(optId("errors", "yes")));
+    await user.click(screen.getByTestId("filter-chip-errors"));
+    await user.click(screen.getByTestId(optId("errors", "yes")));
     const remaining = screen.getAllByTestId("live-request-row");
     expect(remaining).toHaveLength(1);
     expect(remaining[0].textContent).toContain("req-alpha-bad");
   });
 
   it("clicking the hash badge expands the bucket to show the full prompt", async () => {
+    const user = setupUser();
     const state = useProxyStore.getState();
     state.upsertClient(client("client-a", "Claude @ app"));
     // A prompt longer than the 480-char collapsed preview cap.
@@ -299,7 +299,7 @@ describe("Live", () => {
     }
 
     render(<Live />);
-    await userEvent.click(screen.getByTestId("prompts-toggle"));
+    await user.click(screen.getByTestId("prompts-toggle"));
 
     const card = screen.getByTestId("prompt-bucket-card");
     const preview = within(card).getByTestId("prompt-bucket-preview");
@@ -310,7 +310,7 @@ describe("Live", () => {
     expect(card.getAttribute("data-expanded")).toBe("false");
 
     // Click the hash badge to expand.
-    await userEvent.click(within(card).getByTestId("prompt-bucket-hash"));
+    await user.click(within(card).getByTestId("prompt-bucket-hash"));
 
     expect(card.getAttribute("data-expanded")).toBe("true");
     const expandedPreview = within(card).getByTestId("prompt-bucket-preview");
@@ -318,7 +318,7 @@ describe("Live", () => {
     expect(expandedPreview.textContent).toContain("PROMPT_TAIL");
 
     // Click again to collapse.
-    await userEvent.click(within(card).getByTestId("prompt-bucket-hash"));
+    await user.click(within(card).getByTestId("prompt-bucket-hash"));
     expect(card.getAttribute("data-expanded")).toBe("false");
     expect(
       within(card).getByTestId("prompt-bucket-preview").textContent,

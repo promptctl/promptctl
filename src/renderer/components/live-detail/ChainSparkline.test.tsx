@@ -1,5 +1,5 @@
 import { cleanup, render, screen } from "@testing-library/react";
-import userEvent from "@testing-library/user-event";
+import { setupUser } from "../../../test/user-event";
 import { afterEach, describe, expect, it, vi } from "vitest";
 import type { RequestRecord } from "../../../shared/proxy-events";
 import { ChainSparkline } from "./ChainSparkline";
@@ -55,7 +55,7 @@ describe("ChainSparkline", () => {
   });
 
   it("invokes onSelectRequest with the clicked bar's requestId", async () => {
-    const user = userEvent.setup();
+    const user = setupUser();
     const onSelect = vi.fn();
     render(
       <ChainSparkline
