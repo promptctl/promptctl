@@ -93,11 +93,20 @@ describe("ProcessInfoPanel", () => {
     expect(invokeCount).toBe(1);
   });
 
-  it("does not poll on a timer — count is steady across wall-clock ticks", async () => {
-    render(<ProcessInfoPanel pane={pane()} />);
-    await waitFor(() => expect(invokeCount).toBe(1));
-    await new Promise((resolve) => setTimeout(resolve, 50));
-    expect(invokeCount).toBe(1);
+  it("does not poll on a timer — advancing fake clock past 5s does not refetch", async () => {
+    vi.useFakeTimers({ shouldAdvanceTime: true });
+    try {
+      render(<ProcessInfoPanel pane={pane()} />);
+      await waitFor(() => expect(invokeCount).toBe(1));
+      // The pre-refactor code polled every 5s; advancing >10s would have
+      // produced at least 2 extra invokes. After the refactor, refetch is
+      // dataflow-driven (pane.id/currentCommand/pid), so the count stays at 1.
+      vi.advanceTimersByTime(12_000);
+      await Promise.resolve();
+      expect(invokeCount).toBe(1);
+    } finally {
+      vi.useRealTimers();
+    }
   });
 
   it("refresh button triggers a refetch when expanded", async () => {
