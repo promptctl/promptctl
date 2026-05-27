@@ -19,6 +19,7 @@ import type {
   ProxyEvent,
   SseEvent,
 } from "../../shared/proxy-events";
+import type { LaunchId } from "../../shared/types";
 import { makeEnvelope, newRequestId } from "./envelope";
 import { proxyEventBus } from "./events";
 
@@ -128,9 +129,18 @@ export function synthesizeEvents(
 
 // Replay a HAR file's entries through the event bus. Returns the entries so
 // the caller can seed the HarRecorder.
+//
+// [LAW:one-source-of-truth] Replay synthesizes a stable `launchId` per
+// HAR file so the launch-keyed projections (sidebar marker, future
+// "Open pane" affordance) treat the replay as a coherent group rather
+// than a sea of untagged rows. The synthetic id is not present in the
+// launch registry, so the registry-driven affordances (Open Pane) are
+// naturally absent — the synthetic id is enough to *cluster*, not to
+// *resolve back to a pane*. Identical files always produce the same id.
 export async function replayHarFile(filePath: string): Promise<HarEntry[]> {
   const entries = await loadHarFile(filePath);
-  const clientId = `replay-${basename(filePath, ".har")}`;
+  const launchId = `replay-${basename(filePath, ".har")}` as LaunchId;
+  const clientId = `launch-${launchId}`;
   proxyEventBus.publishClient({
     clientId,
     pid: null,
@@ -139,7 +149,7 @@ export async function replayHarFile(filePath: string): Promise<HarEntry[]> {
     command: null,
     cwd: filePath,
     lastSeenNs: Number(process.hrtime.bigint()),
-    launchId: null,
+    launchId,
   });
   for (const entry of entries) {
     for (const ev of synthesizeEvents(entry, clientId)) {
