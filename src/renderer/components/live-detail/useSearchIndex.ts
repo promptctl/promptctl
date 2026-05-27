@@ -1,9 +1,9 @@
 // [LAW:one-way-deps] This module sits at the apex of the search
 // dependency edge: it imports from both `search.ts` (pure
-// derivation) and `store/proxy.ts` (state subscription). Neither
-// of those imports back, so the cycle that would otherwise form
+// derivation) and `store/proxy.ts` (state read). Neither of those
+// imports back, so the cycle that would otherwise form
 // (proxy.ts → search.ts → useProxyStore → proxy.ts) is broken by
-// moving the only React + store touchpoint out of search.ts.
+// keeping the React + store touchpoint here.
 //
 // [LAW:single-enforcer] The cache for searchText lives only here.
 // Components consume through the returned SearchIndex; nothing
@@ -11,10 +11,20 @@
 // text. The hook is stable across renders (memoized once) so
 // memo deps on the returned index don't churn.
 
-import { useEffect, useMemo, useRef } from "react";
+import { useMemo, useRef } from "react";
 import type { RequestRecordState } from "../../../shared/proxy-events";
 import { useProxyStore } from "../../store/proxy";
 import { searchText, type SearchIndex } from "./search";
+
+// Cache size at which we sweep stale entries (records whose
+// requestId is no longer in state.requests because the store's
+// MAX_REQUESTS trim evicted them). The factor of 2 means we tolerate
+// at most one trim-worth of stale entries before reclaiming, and the
+// O(cacheSize) sweep is amortized across roughly MAX_REQUESTS inserts
+// — O(1) amortized per `get`. A per-event subscription would have
+// paid the sweep on every appendEvent (i.e. every SSE frame), which
+// is the same work done orders of magnitude more often.
+const PRUNE_THRESHOLD_MULTIPLIER = 2;
 
 // React hook that owns the search-index cache. Cache key is
 // (requestId, state) — once a record reaches a terminal state
@@ -23,21 +33,6 @@ import { searchText, type SearchIndex } from "./search";
 // content is still arriving and any cached value would be stale).
 export function useSearchIndex(): SearchIndex {
   const cacheRef = useRef<Map<string, CacheEntry>>(new Map());
-
-  // Prune cache entries whose record was evicted from the store
-  // (MAX_REQUESTS trim). Subscribing instead of polling means the
-  // cache shape tracks state.requests without per-call overhead in
-  // the hot `get` path.
-  useEffect(() => {
-    const unsub = useProxyStore.subscribe((state, prev) => {
-      if (state.requests === prev.requests) return;
-      const cache = cacheRef.current;
-      for (const id of cache.keys()) {
-        if (!state.requests.has(id)) cache.delete(id);
-      }
-    });
-    return unsub;
-  }, []);
 
   return useMemo<SearchIndex>(
     () => ({
@@ -53,6 +48,7 @@ export function useSearchIndex(): SearchIndex {
         }
         const text = searchText(record);
         cache.set(record.requestId, { state: record.state, text });
+        maybePrune(cache);
         return text;
       },
     }),
@@ -67,4 +63,17 @@ interface CacheEntry {
 
 function isTerminal(state: RequestRecordState): boolean {
   return state === "complete" || state === "errored";
+}
+
+// [LAW:dataflow-not-control-flow] Same code path runs on every
+// `get`; the *data* (cache size relative to the live request map)
+// decides whether the sweep body executes. No subscription, no
+// per-event hook firing — pruning is an amortized side effect of
+// the next `get` after the cache grows past the threshold.
+function maybePrune(cache: Map<string, CacheEntry>): void {
+  const requests = useProxyStore.getState().requests;
+  if (cache.size <= requests.size * PRUNE_THRESHOLD_MULTIPLIER) return;
+  for (const id of [...cache.keys()]) {
+    if (!requests.has(id)) cache.delete(id);
+  }
 }

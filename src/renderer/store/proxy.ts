@@ -149,9 +149,17 @@ export const useProxyStore = create<ProxyStore>((set) => ({
     set({ filters: emptyFilters(), selectedRequestId: null }),
   // Editing the query never clears the selected request — the user
   // is typing to find/refocus; ripping out their selection would
-  // fight that. The row dim/dot cues do the narrowing visually.
+  // fight that. If narrowing drops the selection out of the visible
+  // list, Live's `selectedRecord = requests.find(...) ?? null`
+  // safeguard renders the empty-detail hint, same as if the row
+  // had scrolled offscreen.
   setSearchQuery: (query) => set({ searchQuery: query }),
-  setSearchScope: (scope) => set({ searchScope: scope, selectedRequestId: null }),
+  // Scope changes don't clear selection either: the same safeguard
+  // handles the rare case where flipping to a narrower scope drops
+  // the current selection. When the query is empty, scope changes
+  // are a no-op for visibleRequests — clearing would be a spurious
+  // deselection with no UI justification.
+  setSearchScope: (scope) => set({ searchScope: scope }),
   toggleRequest: (requestId) =>
     set((state) => ({
       selectedRequestId:
