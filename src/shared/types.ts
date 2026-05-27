@@ -274,15 +274,28 @@ export interface SessionValidationViolation {
   summary: string;
   offenders: SessionValidationOffender[];
 }
+// [LAW:one-source-of-truth] One discriminator (`blockedReason`) carries
+// both "was the write refused" and "why". A separate `blocked: boolean`
+// would invite the two fields to drift; the renderer just tests
+// `blockedReason !== null`.
+//
+// Reasons:
+//  - "validation": adapter pre-save validation found one or more
+//    violations and the caller did not pass force=true.
+//  - "live-tail": the active file is currently being appended to by a
+//    running launch's tool process. The block lives in exactly one
+//    place ([LAW:single-enforcer]) — saveSession in editor.ts.
+export type SessionSaveBlockedReason = "validation" | "live-tail";
+
 export interface SessionSaveResult {
   // path the adapter wrote (or would have written, if blocked).
   path: string | null;
   violations: SessionValidationViolation[];
   // True when the editor wrote despite violations (user forced through).
   forced: boolean;
-  // True when the editor refused to write because violations were present
-  // and force was not set. The renderer surfaces the violations dialog.
-  blocked: boolean;
+  // Non-null iff the editor refused to write. Carries the discriminator
+  // the renderer reads to pick which dialog/banner to surface.
+  blockedReason: SessionSaveBlockedReason | null;
 }
 
 // Options for compressToolResults — one operation dispatches truncate vs summarize

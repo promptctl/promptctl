@@ -112,7 +112,7 @@ describe("saveSession pre-save validation", () => {
     const before = await readFile(fp, "utf-8");
     const result = await saveSession([1]);
 
-    expect(result.blocked).toBe(true);
+    expect(result.blockedReason).toBe("validation");
     expect(result.path).toBeNull();
     // Removing the assistant breaks pairing AND the parentUuid chain from u2,
     // so two distinct invariants fire.
@@ -143,7 +143,7 @@ describe("saveSession pre-save validation", () => {
 
     const result = await saveSession([1], undefined, true);
 
-    expect(result.blocked).toBe(false);
+    expect(result.blockedReason).toBeNull();
     expect(result.forced).toBe(true);
     expect(result.path).toBe(fp);
     expect(result.violations.length).toBeGreaterThanOrEqual(1);
@@ -176,7 +176,7 @@ describe("saveSession pre-save validation", () => {
     // Remove u1 (index 0) — no tool_use/tool_result pair is touched, but this
     // DOES break the parentUuid chain from u2 → u1. The validator should flag.
     const r = await saveSession([0]);
-    expect(r.blocked).toBe(true);
+    expect(r.blockedReason).toBe("validation");
     expect(
       r.violations.find((v) => v.invariantId === "parent_uuid_chain"),
     ).toBeDefined();

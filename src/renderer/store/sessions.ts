@@ -129,6 +129,42 @@ function loadPersistedSelection(): PersistedSelection | null {
   }
 }
 
+// [LAW:single-enforcer] Subscribes to "session:tail" broadcasts and
+// reloads the active session's messages whenever the file path the
+// event names matches the currently selected session. Mounted once
+// from App.tsx; returns its own unsub. No other code path consumes
+// session:tail — the store IS the consumer.
+//
+// [LAW:dataflow-not-control-flow] One handler, one branch on data
+// (does the event's filePath match the active session). Reload is
+// unconditional once that branch is taken — the renderer doesn't ask
+// "is this live-tail?" because the watcher only emits for live-tail
+// files in the first place.
+export function initSessionTailSubscription(): () => void {
+  return window.electronAPI.on("session:tail", (...args: unknown[]) => {
+    const payload = args[0] as { filePath: string; size: number };
+    const state = useSessionStore.getState();
+    const sel = state.selectedSession;
+    const provider = state.selectedProvider;
+    // selectedProvider tracks selectedSession 1:1 — both are set
+    // together in selectSession and cleared together in clearSession,
+    // so a non-null session implies a non-null provider. The narrow
+    // is for the compiler; the invariant is the runtime guarantee.
+    if (sel === null || provider === null) return;
+    if (sel.filePath !== payload.filePath) return;
+    void window.electronAPI
+      .invoke("session:load", provider, sel.filePath)
+      .then((messages) => {
+        // Race: user may have switched sessions during the await.
+        // Drop the response if so — otherwise we'd clobber the new
+        // selection's messages with stale content.
+        const after = useSessionStore.getState();
+        if (after.selectedSession?.filePath !== sel.filePath) return;
+        useSessionStore.setState({ messages: messages as MessageSummary[] });
+      });
+  });
+}
+
 export const useSessionStore = create<SessionEditorState>((set, get) => ({
   projects: [],
   sessionsByProject: {},
@@ -378,10 +414,13 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
       undefined,
       force,
     );
-    // Blocked by validation: keep in-memory edit state intact so the user can
-    // review violations and either force-save or deselect the problematic
-    // changes. No reload, no version bump.
-    if (result.blocked) {
+    // Blocked (validation OR live-tail): keep in-memory edit state intact
+    // so the user can review the reason and either force-save, detach from
+    // the live launch, or deselect problematic changes. No reload, no
+    // version bump — the file on disk is untouched in either case.
+    // [LAW:dataflow-not-control-flow] One check; the reason discriminator
+    // is the renderer's concern, not the store's.
+    if (result.blockedReason !== null) {
       set({ saving: false });
       return result;
     }

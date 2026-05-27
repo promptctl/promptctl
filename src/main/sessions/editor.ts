@@ -32,6 +32,61 @@ let activeAdapter: ProviderAdapter | null = null;
 let activeFilePath: string | null = null;
 let activeProvider: ProviderKind | null = null;
 
+// [LAW:single-enforcer] Sole entry point for "is this file being
+// actively written by a live launch?" Every destructive coordinator
+// operation — saveSession, compressToolResults, undo, redo,
+// restoreVersion — consults this lookup via liveTailGate. Production
+// wires it to LaunchRegistry (see main.ts); the default returns null
+// so the editor works fine in tests/contexts that have no registry.
+//
+// [LAW:dataflow-not-control-flow] The lookup is data — a function from
+// file path to optional launch identity. Each gated operation does
+// the same thing: ask, dispatch on the answer. No branching on "do we
+// have a registry" or "is live-tail enabled."
+type LiveTailLookup = (filePath: string) => { launchId: string } | null;
+let liveTailLookup: LiveTailLookup = () => null;
+export function setLiveTailLookup(lookup: LiveTailLookup): void {
+  liveTailLookup = lookup;
+}
+
+// [LAW:single-enforcer] The one place that decides "is this mutation
+// blocked by a live launch?" Every mutating operation calls this; the
+// caller dispatches on the discriminated result (saveSession folds
+// the block into its structured SessionSaveResult, the others throw
+// LiveTailBlockedError so a renderer that bypasses its disabled
+// buttons still cannot truncate a live file).
+//
+// Force=true is the escape hatch — used by saveSession when the user
+// explicitly opts in to overwriting a live file via the Force-save
+// button in LiveTailBlockedDialog.
+type LiveTailGate =
+  | { readonly blocked: true; readonly launchId: string }
+  | { readonly blocked: false };
+
+function liveTailGate(filePath: string, force: boolean): LiveTailGate {
+  if (force) return { blocked: false };
+  const launch = liveTailLookup(filePath);
+  if (launch === null) return { blocked: false };
+  return { blocked: true, launchId: launch.launchId };
+}
+
+// Thrown by undo, redo, restoreVersion, and compressToolResults when
+// the active file is live-tailed. Caught by the IPC handlers (or
+// surfaces as a promise rejection in the renderer's invoke wrapper)
+// so the renderer can render a banner. saveSession folds the block
+// into its result type rather than throwing — different convenience
+// for the same underlying gate decision.
+export class LiveTailBlockedError extends Error {
+  readonly launchId: string;
+  constructor(launchId: string) {
+    super(
+      `Operation blocked: this file is being written by live launch ${launchId}`,
+    );
+    this.name = "LiveTailBlockedError";
+    this.launchId = launchId;
+  }
+}
+
 export async function listAllProjects(): Promise<Project[]> {
   const results = await Promise.all(
     getAllProviders().map((a) => a.listProjects()),
@@ -151,10 +206,37 @@ export async function saveSession(
   force = false,
 ): Promise<SessionSaveResult> {
   const adapter = active();
+  // Destination is the file we'd actually write — outputPath overrides
+  // the active path. The live-tail check runs against the destination
+  // because that's the file that would be clobbered. Save-as to a
+  // different path is therefore not blocked by live-tail on the
+  // source.
+  const destination = outputPath ?? activePath();
+
+  // [LAW:single-enforcer] All destructive operations consult
+  // liveTailGate; saveSession folds a block into its structured
+  // result, the other mutators throw LiveTailBlockedError. One gate,
+  // two dispatch shapes — the renderer wants different surfaces for
+  // "save was refused" (modal with force-save) vs. "undo just isn't
+  // available right now" (button disabled + banner).
+  const gate = liveTailGate(destination, force);
+  if (gate.blocked) {
+    return {
+      path: null,
+      violations: [],
+      forced: false,
+      blockedReason: "live-tail",
+    };
+  }
 
   const violations = validatePreSave(adapter, indicesToRemove);
   if (violations.length > 0 && !force) {
-    return { path: null, violations, forced: false, blocked: true };
+    return {
+      path: null,
+      violations,
+      forced: false,
+      blockedReason: "validation",
+    };
   }
 
   // Capture pre-edit baseline if first edit
@@ -181,7 +263,7 @@ export async function saveSession(
     path: writtenPath,
     violations,
     forced: violations.length > 0,
-    blocked: false,
+    blockedReason: null,
   };
 }
 
@@ -191,6 +273,12 @@ export async function compressToolResults(
   handle?: TaskHandle,
 ): Promise<CompressToolsResult> {
   const adapter = active();
+  // Gate before touching the adapter. Compression rewrites the file
+  // via adapter.saveSession([]) further down, so an ungated path
+  // would silently truncate a live launch's JSONL — same destructive
+  // shape as a save without the structured "blocked" return.
+  const gate = liveTailGate(activePath(), false);
+  if (gate.blocked) throw new LiveTailBlockedError(gate.launchId);
   if (!adapter.compressToolResults) {
     throw new Error(
       `Provider ${adapter.id} does not support tool result compression`,
@@ -229,6 +317,13 @@ export async function listVersions(): Promise<VersionMeta> {
 }
 
 export async function undo(): Promise<MessageSummary[] | null> {
+  // [LAW:single-enforcer] Same gate as save: undo's writeFile call
+  // would clobber a live launch's appended output. Throws so the
+  // renderer can surface the block — but in practice the UI disables
+  // the Undo button while live-tail is active, so this throw is
+  // defense-in-depth for direct IPC / future callers.
+  const gate = liveTailGate(activePath(), false);
+  if (gate.blocked) throw new LiveTailBlockedError(gate.launchId);
   const result = await storeUndo(activePath());
   if (!result) return null;
   await writeFile(activePath(), result.content, "utf-8");
@@ -236,6 +331,8 @@ export async function undo(): Promise<MessageSummary[] | null> {
 }
 
 export async function redo(): Promise<MessageSummary[] | null> {
+  const gate = liveTailGate(activePath(), false);
+  if (gate.blocked) throw new LiveTailBlockedError(gate.launchId);
   const result = await storeRedo(activePath());
   if (!result) return null;
   await writeFile(activePath(), result.content, "utf-8");
@@ -247,6 +344,8 @@ export async function restoreVersion(
 ): Promise<MessageSummary[] | null> {
   const filePath = activePath();
   const provider = activeProviderId();
+  const gate = liveTailGate(filePath, false);
+  if (gate.blocked) throw new LiveTailBlockedError(gate.launchId);
 
   // First write the target version's content as the new file content
   const targetContent = await getVersionContent(filePath, targetIdx);
@@ -291,6 +390,7 @@ export function _resetForTesting(): void {
   activeAdapter = null;
   activeFilePath = null;
   activeProvider = null;
+  liveTailLookup = () => null;
 }
 
 export { listSessions } from "./registry-helpers";

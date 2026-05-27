@@ -28,6 +28,12 @@ interface VersionHistoryPanelProps {
   onClose: () => void;
   onViewDiff: (fromIdx: number, toIdx: number) => void;
   onRestore: (idx: number) => void;
+  // Set when the active file is being appended to by a live launch.
+  // Restore writes the file in place, so it would clobber the live
+  // launch's in-flight output — disable the affordance to make the
+  // block visible. The coordinator-level guard (LiveTailBlockedError
+  // in editor.ts) is defense-in-depth for direct-IPC callers.
+  restoreBlockedReason?: string | null;
 }
 
 export function VersionHistoryPanel({
@@ -36,6 +42,7 @@ export function VersionHistoryPanel({
   onClose,
   onViewDiff,
   onRestore,
+  restoreBlockedReason = null,
 }: VersionHistoryPanelProps) {
   // Newest first
   const ordered = [...versions].sort((a, b) => b.idx - a.idx);
@@ -106,7 +113,8 @@ export function VersionHistoryPanel({
                   <button
                     data-testid={`version-restore-${v.idx}`}
                     onClick={() => onRestore(v.idx)}
-                    disabled={v.idx === head}
+                    disabled={v.idx === head || restoreBlockedReason !== null}
+                    title={restoreBlockedReason ?? undefined}
                     className="rounded px-2 py-0.5 text-xs text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
                   >
                     Restore

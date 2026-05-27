@@ -22,6 +22,9 @@ import type {
 } from "../../shared/types";
 import { ResizableSplit } from "./ResizableSplit";
 import { ValidationViolationsDialog } from "./ValidationViolationsDialog";
+import { LiveTailBlockedDialog } from "./LiveTailBlockedDialog";
+import { LiveLaunchesGroup } from "./LiveLaunchesGroup";
+import { useLaunchStore } from "../store/launches";
 import { VersionHistoryPanel } from "./VersionHistoryPanel";
 import { DiffViewer } from "./DiffViewer";
 import { TaskToast } from "./TaskToast";
@@ -1201,6 +1204,17 @@ function SessionStats({
   );
 }
 
+// Helper: strip the .jsonl extension from a path's basename. Used when
+// synthesizing a SessionInfo for an adopted live-launch file — Claude
+// names its session files <sessionId>.jsonl, so the filename minus
+// extension IS the session id.
+function filenameWithoutExt(p: string): string {
+  const slash = p.lastIndexOf("/");
+  const name = slash >= 0 ? p.slice(slash + 1) : p;
+  const dot = name.lastIndexOf(".");
+  return dot > 0 ? name.slice(0, dot) : name;
+}
+
 // -- Main component --
 
 export function SessionEditor() {
@@ -1251,6 +1265,27 @@ export function SessionEditor() {
     openPeek,
     closePeek,
   } = useSessionStore();
+
+  // [LAW:one-source-of-truth] The launch registry is the truth about
+  // which files are being written by a live launch; this derivation
+  // never caches. Reads from useLaunchStore so the banner updates
+  // immediately when the launch exits or its sessionFilePath changes.
+  //
+  // [LAW:dataflow-not-control-flow] No conditional load path for
+  // "this is a live file" — the editor's pipelines run identically.
+  // The renderer just projects a banner when this value is non-null.
+  const liveTailLaunch = useLaunchStore((s) => {
+    const fp = selectedSession?.filePath;
+    if (!fp) return null;
+    return (
+      s.launches.find(
+        (l) =>
+          l.status === "running" &&
+          l.toolKind === "claude" &&
+          l.sessionFilePath === fp,
+      ) ?? null
+    );
+  });
 
   // Subscribe to the search task's events so the input can show live progress
   // ("47 matches in 12 sessions") while rg streams hits.
@@ -1718,6 +1753,41 @@ export function SessionEditor() {
             isSearchActive={isSearchActive}
           />
           <div className="flex-1 overflow-y-auto">
+            {/* [LAW:dataflow-not-control-flow] The Live launches group is
+                a projection of useLaunchStore — renders only when there
+                are running Claude launches, so for empty/normal cases
+                the sidebar looks exactly as it did before. */}
+            <LiveLaunchesGroup
+              activeFilePath={selectedSession?.filePath ?? null}
+              onAdopt={(launch, sessionFilePath) => {
+                setSaveResult(null);
+                setShowHelp(false);
+                // [LAW:one-type-per-behavior] Adopt synthesizes a
+                // SessionInfo + Project so the launch's file flows
+                // through the same selectSession path a tree-click
+                // would take. The editor knows nothing about live-tail
+                // beyond what derived state pulls from the launch
+                // store; the path through the load pipeline is the
+                // same for both.
+                const synthesizedSession: SessionInfo = {
+                  sessionId: filenameWithoutExt(sessionFilePath),
+                  filePath: sessionFilePath,
+                  summary: `Live: ${launch.cwd}`,
+                  startTime: new Date(launch.startedAt).toISOString(),
+                  lastUpdated: new Date(launch.startedAt).toISOString(),
+                  messageCount: 0,
+                  fileSizeBytes: 0,
+                  previewMessages: [],
+                };
+                const synthesizedProject: Project = {
+                  name: launch.cwd.split("/").pop() ?? launch.cwd,
+                  paths: [],
+                  projectRoot: launch.cwd,
+                  provider: "claude",
+                };
+                selectSession(synthesizedSession, synthesizedProject);
+              }}
+            />
             <SessionTree
               projects={projects}
               sessionsByProject={sessionsByProject}
@@ -1744,6 +1814,11 @@ export function SessionEditor() {
               onClose={() => setShowHistory(false)}
               onViewDiff={handleViewDiff}
               onRestore={handleRestoreVersion}
+              restoreBlockedReason={
+                liveTailLaunch
+                  ? "Blocked: this file is being written by a live launch"
+                  : null
+              }
             />
           }
         >
@@ -1816,7 +1891,11 @@ export function SessionEditor() {
                   )}
                 </div>
               ) : (
-                <div className="flex h-full flex-col gap-3 overflow-hidden">
+                <div
+                  className="flex h-full flex-col gap-3 overflow-hidden"
+                  data-testid="session-editor-main"
+                  data-live-tail={liveTailLaunch ? "true" : "false"}
+                >
                   {/* Header */}
                   <div className="flex shrink-0 items-center justify-between">
                     <div className="flex items-center gap-3">
@@ -1839,7 +1918,7 @@ export function SessionEditor() {
                     </div>
 
                     <div className="flex items-center gap-2">
-                      {saveResult && !saveResult.blocked && (
+                      {saveResult && saveResult.blockedReason === null && (
                         <span className="text-sm text-green-400">
                           Saved (backup created)
                         </span>
@@ -1852,6 +1931,26 @@ export function SessionEditor() {
                       </button>
                     </div>
                   </div>
+
+                  {/* [LAW:dataflow-not-control-flow] One banner site, one
+                      condition. The editor's read paths (load, render,
+                      diff) are invariant to live-tail; the destructive
+                      operations (save, compress, undo, redo, restore)
+                      all consult one gate helper in editor.ts (single
+                      enforcer, multiple consumers). The banner is the
+                      user-facing projection of that gate state. */}
+                  {liveTailLaunch && (
+                    <div
+                      data-testid="live-tail-banner"
+                      className="shrink-0 rounded-md border border-amber-800/60 bg-amber-950/30 px-3 py-2 text-sm text-amber-200"
+                    >
+                      <span className="font-medium">Live tail —</span> this
+                      file is being appended to by a running Claude launch.
+                      The editor refreshes as the file grows. Saves are
+                      blocked until the launch stops (or use Force save to
+                      truncate).
+                    </div>
+                  )}
 
                   {/* Help panel */}
                   {showHelp && activeMetadata && (
@@ -1907,7 +2006,16 @@ export function SessionEditor() {
                         >
                           <button
                             onClick={handleCompressTools}
-                            disabled={llmWorking || messages.length === 0}
+                            disabled={
+                              llmWorking ||
+                              messages.length === 0 ||
+                              liveTailLaunch !== null
+                            }
+                            title={
+                              liveTailLaunch !== null
+                                ? "Blocked: this file is being written by a live launch"
+                                : undefined
+                            }
                             className="rounded bg-emerald-600/20 px-2.5 py-1 text-sm font-medium text-emerald-400 transition-colors hover:bg-emerald-600/30 disabled:opacity-30"
                           >
                             Compress Tools
@@ -1930,7 +2038,12 @@ export function SessionEditor() {
                           <button
                             data-testid="undo-button"
                             onClick={() => undo()}
-                            disabled={!canUndo}
+                            disabled={!canUndo || liveTailLaunch !== null}
+                            title={
+                              liveTailLaunch !== null
+                                ? "Blocked: this file is being written by a live launch"
+                                : undefined
+                            }
                             className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
                           >
                             &#8617; Undo
@@ -1947,7 +2060,12 @@ export function SessionEditor() {
                           <button
                             data-testid="redo-button"
                             onClick={() => redo()}
-                            disabled={!canRedo}
+                            disabled={!canRedo || liveTailLaunch !== null}
+                            title={
+                              liveTailLaunch !== null
+                                ? "Blocked: this file is being written by a live launch"
+                                : undefined
+                            }
                             className="rounded px-2 py-1 text-sm text-neutral-400 hover:bg-neutral-800 disabled:opacity-30"
                           >
                             &#8618; Redo
@@ -2219,7 +2337,9 @@ export function SessionEditor() {
                   )}
 
                   {/* Resume reminder after save */}
-                  {saveResult && !saveResult.blocked && activeMetadata && (
+                  {saveResult &&
+                    saveResult.blockedReason === null &&
+                    activeMetadata && (
                     <div className="shrink-0 rounded-lg border border-green-800/50 bg-green-950/20 px-4 py-3">
                       <p className="text-sm text-neutral-400">
                         Saved. Original backed up. Resume with:
@@ -2399,12 +2519,25 @@ export function SessionEditor() {
         }}
       />
 
-      {/* Pre-save validation surfaced structural violations (broken tool_use/
-          tool_result pairing, orphaned parent refs). User can cancel and fix
-          their selection, or force through for debugging. */}
-      {saveResult?.blocked && (
+      {/* [LAW:dataflow-not-control-flow] One mount site, two dialogs; the
+          discriminator on the save result picks which one. Validation
+          violations and live-tail collisions are both "save was refused"
+          but for different reasons — the user-facing surface differs in
+          tone (red/destructive vs. amber/cautionary) and what action the
+          user is being asked to take. */}
+      {saveResult?.blockedReason === "validation" && (
         <ValidationViolationsDialog
           result={saveResult}
+          onCancel={() => setSaveResult(null)}
+          onForceSave={async () => {
+            const result = await save(true);
+            setSaveResult(result);
+          }}
+          saving={saving}
+        />
+      )}
+      {saveResult?.blockedReason === "live-tail" && (
+        <LiveTailBlockedDialog
           onCancel={() => setSaveResult(null)}
           onForceSave={async () => {
             const result = await save(true);

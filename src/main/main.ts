@@ -12,6 +12,8 @@ import { LaunchRegistry } from "./launch/registry";
 import { loadLaunches, saveLaunches } from "./launch/persistence";
 import { startLaunchCorrelator } from "./launch/correlator";
 import { recoverLaunches } from "./launch/recovery";
+import { LaunchSessionWatcher } from "./launch/session-watcher";
+import { SessionTailWatcher } from "./sessions/tail-watcher";
 import { registerLaunchHandlers } from "./ipc/launch-handlers";
 import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
 import { registerTmuxTopologyHandlers } from "./ipc/tmux-topology-handlers";
@@ -19,6 +21,7 @@ import { registerTmuxPaneHandlers } from "./ipc/tmux-pane-handlers";
 import { registerCommandHandlers } from "./ipc/command-handlers";
 import type { PaneId } from "../shared/types";
 import { registerSessionHandlers } from "./ipc/session-handlers";
+import { setLiveTailLookup } from "./sessions/editor";
 import { registerPromptHandlers } from "./ipc/prompt-handlers";
 import { registerSettingsHandlers } from "./ipc/settings-handlers";
 import { registerLlmHandlers } from "./ipc/llm-handlers";
@@ -109,6 +112,16 @@ const tmuxTopology = new TmuxTopologyTracker({
 // passing handles through every constructor. Initialized inside whenReady
 // after persisted rows are loaded — until then the variable is null.
 let launchRegistry: LaunchRegistry | null = null;
+
+// [LAW:single-enforcer] Sole producer of LaunchRunning.sessionFilePath.
+// Lifecycle tied to the registry it subscribes to: started after the
+// registry is constructed, stopped on app shutdown.
+let launchSessionWatcher: LaunchSessionWatcher | null = null;
+
+// [LAW:single-enforcer] Sole producer of "session:tail" broadcasts.
+// Watches each running launch's sessionFilePath and pushes a tail
+// event whenever the file grows.
+let sessionTailWatcher: SessionTailWatcher | null = null;
 
 // [LAW:locality-or-seam] CommandEngine consumes tmux through three method
 // surfaces; this adapter is the seam between the engine and the singleton
@@ -337,6 +350,52 @@ app.whenReady().then(async () => {
     console.error("[launch] recovery failed:", err);
   });
 
+  // [LAW:single-enforcer] Discover and attach session JSONL files for
+  // every running Claude launch. Subscribes to registry events + walks
+  // existing rows on start (catches launches that recovery just re-
+  // bound). Watches ~/.claude/projects by default; injectable for tests.
+  launchSessionWatcher = new LaunchSessionWatcher({
+    registry: launchRegistry,
+    projectsRoot: path.join(os.homedir(), ".claude", "projects"),
+  });
+  launchSessionWatcher.start();
+
+  // [LAW:single-enforcer] One broadcaster of session:tail. Fans an
+  // event to every window's WebContents so the renderer's session
+  // store can reload if the active session matches the file path.
+  // We don't filter on the main side — the renderer is the only thing
+  // that knows which file it's currently editing, and broadcasting is
+  // cheap compared to plumbing the active-file selection back here.
+  sessionTailWatcher = new SessionTailWatcher({
+    registry: launchRegistry,
+    broadcast: (event) => {
+      for (const win of BrowserWindow.getAllWindows()) {
+        if (!win.webContents.isDestroyed()) {
+          win.webContents.send("session:tail", event);
+        }
+      }
+    },
+  });
+  sessionTailWatcher.start();
+
+  // [LAW:single-enforcer] The save-path live-tail guard consults the
+  // registry through this lookup. One owner of the question "is this
+  // file being appended to by a live launch?" — the registry — and
+  // one consumer — saveSession in editor.ts. No other editor op
+  // branches on the answer.
+  setLiveTailLookup((filePath) => {
+    if (!launchRegistry) return null;
+    for (const launch of launchRegistry.list()) {
+      if (
+        launch.status === "running" &&
+        launch.sessionFilePath === filePath
+      ) {
+        return { launchId: launch.launchId };
+      }
+    }
+    return null;
+  });
+
   registerTmuxControlHandlers(tmuxControl);
   registerTmuxTopologyHandlers(tmuxTopology);
   registerTmuxPaneHandlers({
@@ -397,6 +456,10 @@ app.on("window-all-closed", () => {
 
 app.on("before-quit", async () => {
   commandEngine.stop();
+  launchSessionWatcher?.stop();
+  launchSessionWatcher = null;
+  sessionTailWatcher?.stop();
+  sessionTailWatcher = null;
   tmuxBridge.dispose();
   tmuxTopology.dispose();
   tmuxControl.close();

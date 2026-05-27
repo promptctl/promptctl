@@ -21,6 +21,7 @@ import { LaunchToolDialog } from "./components/LaunchToolDialog";
 import { initCommandSubscription } from "./store/command";
 import { initLaunchSubscription } from "./store/launches";
 import { initProxySubscription } from "./store/proxy";
+import { initSessionTailSubscription } from "./store/sessions";
 import { usePaneKeymapListener } from "./lib/use-pane-keymap";
 
 function TopTab({ to, children }: { to: string; children: React.ReactNode }) {
@@ -165,6 +166,7 @@ export function App() {
 
   useEffect(() => {
     const unsubProxy = initProxySubscription();
+    const unsubSessionTail = initSessionTailSubscription();
     let unsubCommand: (() => void) | undefined;
     let unsubLaunch: (() => void) | undefined;
     // [LAW:no-silent-fallbacks] If the App unmounts before either
@@ -187,6 +189,7 @@ export function App() {
     return () => {
       disposed = true;
       unsubProxy();
+      unsubSessionTail();
       unsubCommand?.();
       unsubLaunch?.();
     };
