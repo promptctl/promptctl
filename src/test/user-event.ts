@@ -17,8 +17,13 @@
 // by importing `setupUser` instead of calling `userEvent.setup()` directly.
 import userEvent, { type UserEvent } from "@testing-library/user-event";
 
+// [LAW:types-are-the-program] `delay` is removed from the surface — callers
+// physically cannot pass it, so the constraint isn't just defaulted, it's
+// unrepresentable. Belt-and-braces: the runtime spread also forces `delay`
+// last in case a future caller reaches us through an untyped path.
 type SetupOptions = Parameters<typeof userEvent.setup>[0];
+type SetupOptionsNoDelay = Omit<NonNullable<SetupOptions>, "delay">;
 
-export function setupUser(options?: SetupOptions): UserEvent {
-  return userEvent.setup({ delay: null, ...options });
+export function setupUser(options?: SetupOptionsNoDelay): UserEvent {
+  return userEvent.setup({ ...options, delay: null });
 }
