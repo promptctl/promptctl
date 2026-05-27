@@ -21,6 +21,7 @@ import { LaunchToolDialog } from "./components/LaunchToolDialog";
 import { initCommandSubscription } from "./store/command";
 import { initLaunchSubscription } from "./store/launches";
 import { initProxySubscription } from "./store/proxy";
+import { usePaneKeymapListener } from "./lib/use-pane-keymap";
 
 function TopTab({ to, children }: { to: string; children: React.ReactNode }) {
   const location = useLocation();
@@ -160,6 +161,8 @@ function LoopsLayout() {
 }
 
 export function App() {
+  usePaneKeymapListener();
+
   useEffect(() => {
     const unsubProxy = initProxySubscription();
     let unsubCommand: (() => void) | undefined;
