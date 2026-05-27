@@ -14,30 +14,30 @@ import {
   type KeyEvent,
   type TmuxCommander,
 } from "tmux-control-mode-js/keymap";
-import { focusIsXtermPane, keyEventFromDom } from "./pane-keymap";
+import {
+  createPaneCommander,
+  focusIsXtermPane,
+  keyEventFromDom,
+  type ProxyExecutor,
+} from "./pane-keymap";
 
-function recordingCommander(): {
-  commander: TmuxCommander;
-  commands: string[];
-  detaches: number;
-} {
+function recordingProxy(): { proxy: ProxyExecutor; commands: string[] } {
   const commands: string[] = [];
-  let detaches = 0;
-  const commander: TmuxCommander = {
+  const proxy: ProxyExecutor = {
     execute(command: string) {
       commands.push(command);
     },
-    detach() {
-      detaches += 1;
-    },
   };
-  return {
-    commander,
-    commands,
-    get detaches() {
-      return detaches;
-    },
-  } as { commander: TmuxCommander; commands: string[]; detaches: number };
+  return { proxy, commands };
+}
+
+function recordingCommander(paneId: string | null = null): {
+  commander: TmuxCommander;
+  commands: string[];
+} {
+  const { proxy, commands } = recordingProxy();
+  const commander = createPaneCommander(proxy, () => paneId);
+  return { commander, commands };
 }
 
 function press(
@@ -193,37 +193,91 @@ describe("unhandled keys in root mode pass through", () => {
   });
 });
 
+describe("Escape while in prefix mode resets to root without firing a command", () => {
+  // resetPrefix() exploits this engine behavior to clear stuck prefix
+  // state when focus leaves the pane. Pinning it here means a library
+  // change that bound Escape (or removed the unbound-in-prefix swallow)
+  // would surface as a failure here before reaching production.
+  it("prefix + Escape → root, no actions emitted", () => {
+    const { commander, commands } = recordingCommander();
+    const binding = bindKeymap(commander, defaultTmuxKeymap());
+
+    press(binding, "C-b");
+    expect(binding.state.mode).toBe("prefix");
+
+    const escape: KeyEvent = {
+      key: "Escape",
+      ctrl: false,
+      alt: false,
+      shift: false,
+      meta: false,
+    };
+    expect(press(binding, escape)).toBe(true);
+    expect(binding.state.mode).toBe("root");
+    expect(commands).toEqual([]);
+  });
+});
+
+describe("commander prepends select-pane -t %X for the focused pane", () => {
+  // [LAW:one-source-of-truth] Without this, untargeted commands act on
+  // whichever pane tmux happened to last touch — not the pane the user
+  // picked. The prepend collapses tmux's per-client current-pane cursor
+  // onto the UI's authoritative selection.
+  it("split-window is preceded by select-pane targeting the focused pane", () => {
+    const { proxy, commands } = recordingProxy();
+    const commander = createPaneCommander(proxy, () => "%7");
+    const binding = bindKeymap(commander, defaultTmuxKeymap());
+    fire(binding, "C-b", "%");
+    expect(commands).toEqual(["select-pane -t %7", "split-window -h"]);
+  });
+
+  it("resize-pane -Z is preceded by select-pane targeting the focused pane", () => {
+    const { proxy, commands } = recordingProxy();
+    const commander = createPaneCommander(proxy, () => "%12");
+    const binding = bindKeymap(commander, defaultTmuxKeymap());
+    fire(binding, "C-b", "z");
+    expect(commands).toEqual(["select-pane -t %12", "resize-pane -Z"]);
+  });
+
+  it("when no pane is selected, no select-pane is prepended", () => {
+    const { proxy, commands } = recordingProxy();
+    const commander = createPaneCommander(proxy, () => null);
+    const binding = bindKeymap(commander, defaultTmuxKeymap());
+    fire(binding, "C-b", "c");
+    expect(commands).toEqual(["new-window"]);
+  });
+});
+
+// [LAW:locality-or-seam] If the library adds a new Action variant, the
+// `satisfies Record<Action["type"], true>` clause below fails to compile
+// — forcing us to revisit the detach no-op and the commander's
+// targeting semantics for the new variant. This is a *type-level*
+// exhaustiveness check, not a runtime length sham: TypeScript verifies
+// every Action variant is enumerated.
+const KNOWN_ACTION_TYPES = {
+  "new-window": true,
+  "next-window": true,
+  "previous-window": true,
+  "last-window": true,
+  "select-window": true,
+  "kill-window": true,
+  split: true,
+  "select-pane": true,
+  "next-pane": true,
+  "kill-pane": true,
+  "zoom-pane": true,
+  "break-pane": true,
+  "swap-pane": true,
+  "resize-pane": true,
+  detach: true,
+  "next-session": true,
+  "previous-session": true,
+  "choose-session": true,
+  "command-prompt": true,
+} as const satisfies Record<Action["type"], true>;
+
 describe("Action union evolution check", () => {
-  // [LAW:locality-or-seam] If the library adds a new Action variant, our
-  // detach no-op in paneCommander() stays valid because every other variant
-  // goes through TmuxCommander.execute. This test exists as the canary: it
-  // pins the set of Action.type strings we currently cope with, so a new
-  // variant fails the test loudly instead of silently slipping through.
-  it("Action union is the set we expect", () => {
-    const actionTypes: readonly Action["type"][] = [
-      "new-window",
-      "next-window",
-      "previous-window",
-      "last-window",
-      "select-window",
-      "kill-window",
-      "split",
-      "select-pane",
-      "next-pane",
-      "kill-pane",
-      "zoom-pane",
-      "break-pane",
-      "swap-pane",
-      "resize-pane",
-      "detach",
-      "next-session",
-      "previous-session",
-      "choose-session",
-      "command-prompt",
-    ];
-    // Exhaustiveness check: TypeScript verifies at compile time that
-    // every Action variant is enumerated above. The runtime expect just
-    // anchors the count so the array can't drift silently.
-    expect(actionTypes).toHaveLength(19);
+  it("the exhaustive map has at least one variant", () => {
+    expect(Object.keys(KNOWN_ACTION_TYPES).length).toBeGreaterThan(0);
   });
 });
