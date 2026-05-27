@@ -4,6 +4,7 @@ import "@xterm/xterm/css/xterm.css";
 import { usePaneSelectionStore } from "../store/pane-selection";
 import { useLaunchStore } from "../store/launches";
 import { useTopology, usePaneStream } from "../tmux/proxy";
+import { usePaneKeymapMode } from "../lib/use-pane-keymap";
 import type { ToolKind, PaneProcesses, PaneId } from "../../shared/types";
 
 const TOOL_COLORS: Record<ToolKind, string> = {
@@ -101,6 +102,7 @@ export function PaneViewer() {
   // The selection store is untouched (user keeps their intent); when the pane
   // comes back or another is picked the stream rebuilds.
   const stream = usePaneStream(pane ?? null);
+  const keymapMode = usePaneKeymapMode();
 
   if (!selectedPaneId || !pane) {
     return (
@@ -131,6 +133,15 @@ export function PaneViewer() {
               className="rounded-full border border-violet-500/30 bg-violet-500/10 px-2 py-0.5 font-mono text-[10px] text-violet-300"
             >
               ↳ launch {launch.launchId.slice(0, 8)}
+            </span>
+          )}
+          {keymapMode === "prefix" && (
+            <span
+              data-testid="loops-keymap-prefix-indicator"
+              title="tmux prefix active — next key is interpreted as a prefix binding"
+              className="rounded-full border border-amber-500/30 bg-amber-500/10 px-2 py-0.5 font-mono text-[10px] text-amber-300"
+            >
+              ⌃B
             </span>
           )}
           <span className="ml-auto text-xs text-neutral-500">
