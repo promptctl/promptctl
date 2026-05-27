@@ -37,11 +37,28 @@ const SHELL_OR_LAUNCHER_COMMS = new Set([
   "iTerm2",
   "WindowServer",
 ]);
-const RESOLVE_DEADLINE_MS = 3000;
-const PEER_LOOKUP_RETRIES = 6;
-const PEER_LOOKUP_BACKOFF_MS = 80;
+// [LAW:dataflow-not-control-flow] No wall-clock race against the resolver.
+// On macOS the bound is composed of lsof/ps exec timeouts × bounded retry
+// count; on Linux the socket→pid path reads /proc directly via readdir +
+// readlink (no exec, bounded by the kernel's fast-path filesystem ops, no
+// explicit timeout). The previous shape raced a 3s deadline; under load
+// lsof would take 700–900ms per call and a shared 600ms exec timeout would
+// kill it prematurely, the retry loop would compound by re-killing slow-
+// but-working lsof, and the outer deadline would fire returning a
+// `socket-<port>` fallback for processes that were findable. The variability
+// we care about is "did the kernel identify the peer", which lives in the
+// resolution's actual return value. The clock has no business voting on that.
+//
+// [LAW:one-type-per-behavior] Per-command timeouts on macOS: lsof scans the
+// kernel socket table (slow under contention) so it gets a generous ceiling;
+// ps is a single-pid lookup (universally fast — tens of ms even under heavy
+// load), so it keeps a tight one. Collapsing both under one constant was the
+// trap that produced the original flake.
+const PEER_LOOKUP_RETRIES = 3;
+const PEER_LOOKUP_BACKOFF_MS = 100;
 const MAX_PARENT_DEPTH = 16;
-const PER_EXEC_TIMEOUT_MS = 600;
+const PS_EXEC_TIMEOUT_MS = 600;
+const LSOF_EXEC_TIMEOUT_MS = 2500;
 
 interface CacheEntry {
   readonly info: ClientInfo;
@@ -65,7 +82,7 @@ export interface ProcessRow {
 function exec(
   cmd: string,
   args: string[],
-  timeout = PER_EXEC_TIMEOUT_MS,
+  timeout: number,
 ): Promise<string> {
   return new Promise((resolve, reject) => {
     execFile(cmd, args, { timeout }, (error, stdout) => {
@@ -79,17 +96,17 @@ function exec(
 }
 
 export async function resolveClientId(socket: net.Socket): Promise<ClientInfo> {
-  // [LAW:dataflow-not-control-flow] Always attempt resolution; only fall back
-  // when the deadline genuinely expires. The previous code raced a 1s timer
-  // against the resolver and returned "unknown" on every slow lsof, which
-  // produced ghost clients for the same real process.
-  const fallback = fallbackClient(socket);
-  return Promise.race([
-    resolveClientInfo(socket).catch(() => fallback),
-    new Promise<ClientInfo>((resolve) =>
-      setTimeout(() => resolve(fallback), RESOLVE_DEADLINE_MS),
-    ),
-  ]);
+  // [LAW:dataflow-not-control-flow] Wait for the resolver. Fallback only when
+  // it tells us — via thrown rejection — that the peer cannot be identified.
+  // The cost is platform-dependent: macOS sums per-command exec timeouts plus
+  // retry backoffs; Linux relies on the kernel's /proc fast-path. Both are
+  // bounded in practice — neither is an open-ended wait on an external
+  // resource — but neither is a single named ceiling either.
+  try {
+    return await resolveClientInfo(socket);
+  } catch {
+    return fallbackClient(socket);
+  }
 }
 
 // Builds a ClientInfo from a launch row. Used by the request-time
@@ -211,7 +228,11 @@ async function consumeCacheHit(pid: number): Promise<ClientInfo | null> {
 
 async function readComm(pid: number): Promise<string | null> {
   try {
-    const stdout = await exec("ps", ["-o", "comm=", "-p", String(pid)]);
+    const stdout = await exec(
+      "ps",
+      ["-o", "comm=", "-p", String(pid)],
+      PS_EXEC_TIMEOUT_MS,
+    );
     return stdout.trim() || null;
   } catch {
     return null;
@@ -247,13 +268,17 @@ async function findMacSocketPid(socket: net.Socket): Promise<number> {
   if (remotePort === undefined || localPort === undefined) {
     throw new Error("socket ports unavailable");
   }
-  const stdout = await exec("lsof", [
-    "-nP",
-    "-iTCP",
-    `-iTCP:${remotePort}`,
-    "-sTCP:ESTABLISHED",
-    "-Fpn",
-  ]);
+  const stdout = await exec(
+    "lsof",
+    [
+      "-nP",
+      "-iTCP",
+      `-iTCP:${remotePort}`,
+      "-sTCP:ESTABLISHED",
+      "-Fpn",
+    ],
+    LSOF_EXEC_TIMEOUT_MS,
+  );
   const entries = parseLsofEntries(stdout);
   const peer = entries.find(
     (entry) =>
@@ -394,7 +419,11 @@ export function __resetPeerCacheForTesting(): void {
 }
 
 async function readProcess(pid: number): Promise<ProcessRow> {
-  const stdout = await exec("ps", ["-o", "ppid=,comm=", "-p", String(pid)]);
+  const stdout = await exec(
+    "ps",
+    ["-o", "ppid=,comm=", "-p", String(pid)],
+    PS_EXEC_TIMEOUT_MS,
+  );
   const trimmed = stdout.trim();
   const [ppidText, ...commParts] = trimmed.split(/\s+/);
   const ppid = Number(ppidText);
@@ -404,7 +433,11 @@ async function readProcess(pid: number): Promise<ProcessRow> {
 
 async function readCommand(pid: number): Promise<string | null> {
   try {
-    const stdout = await exec("ps", ["-o", "command=", "-p", String(pid)]);
+    const stdout = await exec(
+      "ps",
+      ["-o", "command=", "-p", String(pid)],
+      PS_EXEC_TIMEOUT_MS,
+    );
     return stdout.trim() || null;
   } catch {
     return null;
@@ -414,14 +447,11 @@ async function readCommand(pid: number): Promise<string | null> {
 async function readCwd(pid: number): Promise<string | null> {
   try {
     if (platform() === "linux") return await readlink(`/proc/${pid}/cwd`);
-    const stdout = await exec("lsof", [
-      "-p",
-      String(pid),
-      "-a",
-      "-d",
-      "cwd",
-      "-Fn",
-    ]);
+    const stdout = await exec(
+      "lsof",
+      ["-p", String(pid), "-a", "-d", "cwd", "-Fn"],
+      LSOF_EXEC_TIMEOUT_MS,
+    );
     const line = stdout.split("\n").find((part) => part.startsWith("n"));
     return line ? line.slice(1) : null;
   } catch {
