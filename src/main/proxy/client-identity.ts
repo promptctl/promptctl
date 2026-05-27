@@ -37,11 +37,19 @@ const SHELL_OR_LAUNCHER_COMMS = new Set([
   "iTerm2",
   "WindowServer",
 ]);
-const RESOLVE_DEADLINE_MS = 3000;
-const PEER_LOOKUP_RETRIES = 6;
-const PEER_LOOKUP_BACKOFF_MS = 80;
+// [LAW:dataflow-not-control-flow] Bounds on the resolver are encoded only in
+// lsof/ps exec timeouts and a bounded retry count — not in a wall-clock race
+// against the resolver itself. The previous shape raced a 3s deadline against
+// findSocketPidWithRetry; under load lsof would take 700–900ms per call and
+// PER_EXEC_TIMEOUT_MS=600 would kill it prematurely, the retry loop would
+// compound by re-killing slow-but-working lsof, and the outer deadline would
+// fire returning a `socket-<port>` fallback for processes that were findable.
+// The variability we care about is "did lsof identify the peer", which lives
+// in lsof's actual return value. The clock has no business voting on that.
+const PEER_LOOKUP_RETRIES = 3;
+const PEER_LOOKUP_BACKOFF_MS = 100;
 const MAX_PARENT_DEPTH = 16;
-const PER_EXEC_TIMEOUT_MS = 600;
+const PER_EXEC_TIMEOUT_MS = 2500;
 
 interface CacheEntry {
   readonly info: ClientInfo;
@@ -79,17 +87,15 @@ function exec(
 }
 
 export async function resolveClientId(socket: net.Socket): Promise<ClientInfo> {
-  // [LAW:dataflow-not-control-flow] Always attempt resolution; only fall back
-  // when the deadline genuinely expires. The previous code raced a 1s timer
-  // against the resolver and returned "unknown" on every slow lsof, which
-  // produced ghost clients for the same real process.
-  const fallback = fallbackClient(socket);
-  return Promise.race([
-    resolveClientInfo(socket).catch(() => fallback),
-    new Promise<ClientInfo>((resolve) =>
-      setTimeout(() => resolve(fallback), RESOLVE_DEADLINE_MS),
-    ),
-  ]);
+  // [LAW:dataflow-not-control-flow] Wait for the resolver. Fallback only when
+  // it tells us — via thrown rejection — that the peer cannot be identified.
+  // The bound on "how long" lives in PER_EXEC_TIMEOUT_MS × PEER_LOOKUP_RETRIES
+  // (~7.7s worst case), not in an outer wall-clock race.
+  try {
+    return await resolveClientInfo(socket);
+  } catch {
+    return fallbackClient(socket);
+  }
 }
 
 // Builds a ClientInfo from a launch row. Used by the request-time
