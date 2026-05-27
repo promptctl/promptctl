@@ -15,8 +15,6 @@ import { recoverLaunches } from "./launch/recovery";
 import { registerLaunchHandlers } from "./ipc/launch-handlers";
 import { registerTmuxControlHandlers } from "./ipc/tmux-control-handlers";
 import { registerTmuxTopologyHandlers } from "./ipc/tmux-topology-handlers";
-import { TmuxOutputRouter } from "./tmux/output-router";
-import { registerTmuxOutputHandlers } from "./ipc/tmux-output-handlers";
 import { registerTmuxPaneHandlers } from "./ipc/tmux-pane-handlers";
 import { registerCommandHandlers } from "./ipc/command-handlers";
 import type { PaneId } from "../shared/types";
@@ -103,12 +101,6 @@ const tmuxTopology = new TmuxTopologyTracker({
   execute: (cmd) => tmuxControl.execute(cmd),
   subscribeRaw: (name, what, format) =>
     tmuxControl.subscribeRaw(name, what, format),
-});
-const tmuxOutputRouter = new TmuxOutputRouter({
-  onEvent: (event, handler) => tmuxControl.on(event, handler),
-  onConnectionState: (listener) => tmuxControl.onConnectionState(listener),
-  execute: (cmd) => tmuxControl.execute(cmd),
-  setPaneAction: (paneId, action) => tmuxControl.setPaneAction(paneId, action),
 });
 
 // [LAW:one-source-of-truth] Sole authoritative source of launch identity.
@@ -347,7 +339,6 @@ app.whenReady().then(async () => {
 
   registerTmuxControlHandlers(tmuxControl);
   registerTmuxTopologyHandlers(tmuxTopology);
-  registerTmuxOutputHandlers(tmuxOutputRouter);
   registerTmuxPaneHandlers({
     getSnapshot: () => tmuxTopology.snapshot(),
   });
@@ -408,7 +399,6 @@ app.on("before-quit", async () => {
   commandEngine.stop();
   tmuxBridge.dispose();
   tmuxTopology.dispose();
-  tmuxOutputRouter.dispose();
   tmuxControl.close();
   await shutdownProxy();
   if (deepLinkServer) {
