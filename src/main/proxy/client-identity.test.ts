@@ -8,7 +8,7 @@ import {
   parseLsofPid,
   parseLsofPids,
   readLaunchHeader,
-  resolveRequestClient,
+  resolveClientId,
   walkToClientRoot,
   type ProcessRow,
 } from "./client-identity";
@@ -198,12 +198,12 @@ describe("clientInfoFromLaunch", () => {
   });
 });
 
-describe("resolveRequestClient", () => {
+describe("resolveClientId", () => {
   function req(headers: http.IncomingHttpHeaders): http.IncomingMessage {
     return { headers } as unknown as http.IncomingMessage;
   }
   function socket(): net.Socket {
-    // resolveRequestClient only delegates to resolveClientId when the
+    // resolveClientId only delegates to the socket fallback when the
     // header path doesn't hit; we just need a placeholder.
     return { remotePort: 0 } as unknown as net.Socket;
   }
@@ -226,7 +226,7 @@ describe("resolveRequestClient", () => {
 
   it("returns launch-derived ClientInfo when the header matches a known launch", async () => {
     const launch = makeLaunch();
-    const info = await resolveRequestClient(
+    const info = await resolveClientId(
       req({ "x-promptctl-launch": "L-1" }),
       socket(),
       (id) => (id === ("L-1" as LaunchId) ? launch : null),
@@ -250,7 +250,7 @@ describe("resolveRequestClient", () => {
         launchId: null,
       } as const;
     };
-    const info = await resolveRequestClient(
+    const info = await resolveClientId(
       req({}),
       socket(),
       () => null,
@@ -276,7 +276,7 @@ describe("resolveRequestClient", () => {
         launchId: null,
       } as const;
     };
-    await resolveRequestClient(
+    await resolveClientId(
       req({ "x-promptctl-launch": "unknown" }),
       socket(),
       () => null,
@@ -292,7 +292,7 @@ describe("resolveRequestClient", () => {
       throw new Error("should not be called");
     };
     const launch = makeLaunch();
-    const info = await resolveRequestClient(
+    const info = await resolveClientId(
       req({ "x-promptctl-launch": "L-1" }),
       socket(),
       (id) => (id === ("L-1" as LaunchId) ? launch : null),

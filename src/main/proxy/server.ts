@@ -16,7 +16,7 @@ import type {
 } from "../../shared/proxy-events";
 import type { Launch, LaunchId } from "../../shared/types";
 import { ResponseAssembler } from "./assembler";
-import { resolveClientId, resolveRequestClient } from "./client-identity";
+import { resolveBySocket, resolveClientId } from "./client-identity";
 import { makeEnvelope, newRequestId } from "./envelope";
 import { proxyEventBus } from "./events";
 import { parseSseFrame } from "./sse-parser";
@@ -137,11 +137,11 @@ export async function startServer(opts: StartOptions): Promise<RunningServer> {
   );
   // Per-socket cache for the *fallback* ClientInfo (the socket→pid
   // walk result). Identity itself is resolved per request:
-  // resolveRequestClient reads the X-Promptctl-Launch header every
-  // time and consults the launch registry; only when the header is
-  // absent or unknown do we drop to this cached walk. That way a
-  // connection that starts untagged can be tagged by a later request,
-  // and vice versa — the header is the authority.
+  // resolveClientId reads the X-Promptctl-Launch header every time
+  // and consults the launch registry; only when the header is absent
+  // or unknown do we drop to this cached walk. That way a connection
+  // that starts untagged can be tagged by a later request, and vice
+  // versa — the header is the authority.
   // [LAW:single-enforcer] One identity-resolution site per request.
 
   await new Promise<void>((resolve, reject) => {
@@ -183,12 +183,11 @@ async function handleRequest(
   resolveLaunch: (id: LaunchId) => Launch | null,
 ): Promise<void> {
   const requestId = newRequestId();
-  // [LAW:single-enforcer] resolveRequestClient owns the header-or-
-  // fallback decision; we inject a cached fallback closure so the
-  // expensive socket→pid walk runs at most once per connection. The
-  // header path doesn't touch the cache — when it wins, the cache
-  // stays untouched and a header-less follow-up request still gets
-  // resolved correctly.
+  // [LAW:single-enforcer] resolveClientId owns the header-or-fallback
+  // decision; we inject a cached fallback closure so the expensive
+  // socket→pid walk runs at most once per connection. The header path
+  // doesn't touch the cache — when it wins, the cache stays untouched
+  // and a header-less follow-up request still gets resolved correctly.
   //
   // `lastSeenNs` refreshes per request so the Live tab's active-client
   // signal tracks the current request, not the connection's first.
@@ -200,11 +199,11 @@ async function handleRequest(
     const cs = sock as ClientSocket;
     const existing = cs[CLIENT_INFO];
     if (existing) return existing;
-    const promise = resolveClientId(sock);
+    const promise = resolveBySocket(sock);
     cs[CLIENT_INFO] = promise;
     return promise;
   };
-  const resolved = await resolveRequestClient(
+  const resolved = await resolveClientId(
     req,
     req.socket,
     resolveLaunch,

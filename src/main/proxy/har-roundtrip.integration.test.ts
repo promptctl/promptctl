@@ -175,14 +175,17 @@ describe("HAR round-trip", () => {
     expect(replaySummary.url).toBe(liveSummary.url);
     expect(replaySummary.responseStatus).toBe(liveSummary.responseStatus);
     expect(replaySummary.assembledBody).toEqual(liveSummary.assembledBody);
+    // [LAW:one-source-of-truth] Replay synthesizes one launchId per HAR
+    // file so the projection is launch-keyed end-to-end. The clientId
+    // shape matches `clientInfoFromLaunch`: "launch-<launchId>".
     expect(
-      replayEvents.every((event) => event.clientId.startsWith("replay-")),
+      replayEvents.every((event) => event.clientId.startsWith("launch-replay-")),
     ).toBe(true);
-    expect(
-      collectedClients.some(
-        (client) => client.clientId === replayEvents[0]?.clientId,
-      ),
-    ).toBe(true);
+    const replayClient = collectedClients.find(
+      (client) => client.clientId === replayEvents[0]?.clientId,
+    );
+    expect(replayClient).toBeDefined();
+    expect(replayClient?.launchId).toMatch(/^replay-/);
   });
 
   it("appending after replay keeps a single HAR file with growing entries (req #5b)", async () => {

@@ -95,7 +95,12 @@ function exec(
   });
 }
 
-export async function resolveClientId(socket: net.Socket): Promise<ClientInfo> {
+// [LAW:single-enforcer] Socket-walk-only resolver. Internal helper —
+// the public entry is `resolveClientId(req, socket, ...)` below, which
+// composes header attribution with this as the fallback arm. Exported
+// because `server.ts` wraps it in a per-socket cache closure to amortize
+// the lsof/ps cost across multiple requests on one connection.
+export async function resolveBySocket(socket: net.Socket): Promise<ClientInfo> {
   // [LAW:dataflow-not-control-flow] Wait for the resolver. Fallback only when
   // it tells us — via thrown rejection — that the peer cannot be identified.
   // The cost is platform-dependent: macOS sums per-command exec timeouts plus
@@ -135,25 +140,28 @@ export function clientInfoFromLaunch(launch: Launch): ClientInfo {
   };
 }
 
-// Resolves the client identity for an HTTP request. Header-based
-// attribution comes first — when the request carries
-// `X-Promptctl-Launch: <id>` and that id maps to a known launch row,
-// we return that row's ClientInfo. Otherwise we fall back to the
-// existing socket→pid walk and add `launchId: null` to the result.
+// [LAW:single-enforcer] The single public entry point for producing
+// `ClientInfo`. Header-based attribution comes first — when the request
+// carries `X-Promptctl-Launch: <id>` and that id maps to a known launch
+// row, we return that row's `ClientInfo`. Otherwise we fall back to the
+// socket→pid walk via `resolveBySocket`. Consumers never branch on
+// "tagged vs untagged": the variability lives in the value (`launchId`
+// is non-null on tagged traffic, null on untagged), not in which
+// resolver was called.
 //
 // [LAW:dataflow-not-control-flow] Same shape returned on every path —
 // the variability is in which input was authoritative, not in whether
 // the resolver produced output.
 //
-// The `socketFallback` parameter is injectable so unit tests can drive
-// the fallback path without invoking the real socket walk (which does
-// real lsof/ps and is slow / environment-sensitive). Production omits
-// it and the default points at `resolveClientId`.
-export async function resolveRequestClient(
+// The `socketFallback` parameter is injectable so callers can wrap the
+// per-connection socket walk in a cache (server.ts) and unit tests can
+// drive the fallback path without invoking the real socket walk (which
+// runs lsof/ps and is slow / environment-sensitive).
+export async function resolveClientId(
   req: http.IncomingMessage,
   socket: net.Socket,
   resolveLaunch: (id: LaunchId) => Launch | null,
-  socketFallback: (socket: net.Socket) => Promise<ClientInfo> = resolveClientId,
+  socketFallback: (socket: net.Socket) => Promise<ClientInfo> = resolveBySocket,
 ): Promise<ClientInfo> {
   const header = readLaunchHeader(req);
   if (header !== null) {

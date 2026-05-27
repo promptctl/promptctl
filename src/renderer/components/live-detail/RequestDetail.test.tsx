@@ -1,4 +1,6 @@
 import { cleanup, render, screen, within } from "@testing-library/react";
+import type { ReactElement } from "react";
+import { MemoryRouter } from "react-router";
 import { beforeEach, describe, expect, it, vi } from "vitest";
 import type { RequestRecord } from "../../../shared/proxy-events";
 import {
@@ -7,6 +9,13 @@ import {
 } from "../../../test/electron-mock";
 import { setupUser } from "../../../test/user-event";
 import { RequestDetail } from "./RequestDetail";
+
+// [LAW:locality-or-seam] OpenPaneButton (inside RequestDetail) calls
+// useNavigate from react-router; tests need a Router in scope. The
+// memory variant has no URL side-effects so each test starts clean.
+function renderDetail(ui: ReactElement): ReturnType<typeof render> {
+  return render(<MemoryRouter>{ui}</MemoryRouter>);
+}
 
 let electron: MockElectronAPI;
 
@@ -19,7 +28,7 @@ describe("RequestDetail", () => {
   it("renders overview, request, response, timeline, and raw projections", async () => {
     const user = setupUser();
     const record = requestRecord();
-    render(<RequestDetail record={record} />);
+    renderDetail(<RequestDetail record={record} />);
 
     expect(screen.getByText("complete")).toBeInTheDocument();
     expect(screen.getByTestId("usage-pill-input")).toHaveTextContent("in10");
@@ -83,7 +92,7 @@ describe("RequestDetail", () => {
       }
     ).scrollIntoView = scrollSpy;
     try {
-      const { rerender } = render(
+      const { rerender } = renderDetail(
         <RequestDetail record={record} highlightQuery="" />,
       );
       // No query → no auto-scroll yet, even on tab switch.
@@ -92,7 +101,11 @@ describe("RequestDetail", () => {
 
       // Activating a query that matches "Hello response" must scroll the
       // first <mark> into view on the active (Response) tab.
-      rerender(<RequestDetail record={record} highlightQuery="hello" />);
+      rerender(
+        <MemoryRouter>
+          <RequestDetail record={record} highlightQuery="hello" />
+        </MemoryRouter>,
+      );
       expect(scrollSpy).toHaveBeenCalled();
       const lastCallTarget = (scrollSpy.mock.contexts.at(-1) ??
         null) as HTMLElement | null;
@@ -128,7 +141,7 @@ describe("RequestDetail", () => {
       state: "errored" as const,
     };
 
-    render(<RequestDetail record={record} />);
+    renderDetail(<RequestDetail record={record} />);
 
     expect(screen.getByText("Request failed")).toBeInTheDocument();
     expect(

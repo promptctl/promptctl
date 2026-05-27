@@ -1,5 +1,6 @@
 import { beforeEach, describe, expect, it } from "vitest";
 import { cleanup, render, screen, within } from "@testing-library/react";
+import { MemoryRouter } from "react-router";
 import { Live } from "./Live";
 import { useProxyStore } from "../store/proxy";
 import type { ClientInfo, ProxyEvent } from "../../shared/proxy-events";
@@ -7,6 +8,16 @@ import { optionTestSuffix } from "../components/live-detail/FilterChips";
 import { emptyFilters } from "../components/live-detail/filters";
 import { installElectronMock } from "../../test/electron-mock";
 import { setupUser } from "../../test/user-event";
+
+// [LAW:locality-or-seam] Live embeds RequestDetail, whose OpenPaneButton
+// calls useNavigate. Wrap in MemoryRouter so the hook resolves.
+function renderLive(): ReturnType<typeof render> {
+  return render(
+    <MemoryRouter>
+      <Live />
+    </MemoryRouter>,
+  );
+}
 
 function optId(key: string, value: string): string {
   return `filter-option-${key}-${optionTestSuffix(value)}`;
@@ -46,7 +57,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
 
     expect(screen.getByText("Claude @ app")).toBeTruthy();
     expect(screen.getByText("Codex @ app")).toBeTruthy();
@@ -113,7 +124,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
 
     const rows = screen.getAllByTestId("live-request-row");
     expect(rows).toHaveLength(3);
@@ -144,7 +155,7 @@ describe("Live", () => {
     };
     state.upsertClient(tagged);
 
-    render(<Live />);
+    renderLive();
 
     const markers = screen.queryAllByTestId("live-launch-marker");
     // One marker, attached to the tagged client's tab.
@@ -173,7 +184,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
 
     // Panel is hidden by default.
     expect(screen.queryByTestId("prompts-panel")).toBeNull();
@@ -226,7 +237,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
 
     // Both rows visible with no filter applied.
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
@@ -266,7 +277,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(3);
 
     // Filter to the Alpha prompt → 2 rows (alpha-ok + alpha-bad).
@@ -300,7 +311,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
     await user.click(screen.getByTestId("prompts-toggle"));
 
     const card = screen.getByTestId("prompt-bucket-card");
@@ -338,7 +349,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
 
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(2);
 
@@ -369,7 +380,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
 
     // Scope to client-a — client-b's match is filtered out.
     await user.click(screen.getByText("Claude @ app"));
@@ -394,7 +405,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
 
     await user.type(screen.getByTestId("search-input"), "mid-stream");
     expect(screen.queryAllByTestId("live-request-row")).toHaveLength(0);
@@ -427,7 +438,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
     await user.type(screen.getByTestId("search-input"), "first");
     expect(screen.getAllByTestId("live-request-row")).toHaveLength(1);
 
@@ -453,7 +464,7 @@ describe("Live", () => {
       useProxyStore.getState().appendEvent(event);
     }
 
-    render(<Live />);
+    renderLive();
     await user.type(
       screen.getByTestId("search-input"),
       "distinctive_marker_token",
