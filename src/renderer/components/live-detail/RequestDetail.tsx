@@ -114,6 +114,7 @@ export function RequestDetail({
           <ConversationTab
             chain={chain}
             selectedRequestId={record.requestId}
+            highlightSubstring={highlightQuery}
             onSelectRequest={onSelectRequest}
           />
         )}
