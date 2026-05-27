@@ -580,10 +580,14 @@ export const useSessionStore = create<SessionEditorState>((set, get) => ({
     ) {
       return;
     }
+    // Don't pre-populate analyzerRunning here — runAnalyzer marks each id
+    // running on entry. Pre-populating would redundantly write the same Set
+    // membership the first runAnalyzer call's set() produces, triggering an
+    // extra render for no information gain.
     set({
       analyzerMetadata: metadata,
       analyzerResults: {},
-      analyzerRunning: new Set(metadata.map((m) => m.id)),
+      analyzerRunning: new Set(),
     });
     await Promise.all(metadata.map((m) => get().runAnalyzer(m.id)));
   },

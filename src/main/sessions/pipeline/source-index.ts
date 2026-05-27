@@ -31,6 +31,14 @@ export function buildSourceIndexToUuid(source: string): Map<number, string> {
 // Variant that takes a precomputed source-index map. Ops receive the
 // map from runPipeline (built once per pipeline run) and use this to
 // resolve their targets without re-parsing the source content.
+//
+// If a target index has no uuid in the map (uuid-less visible line —
+// rare; Claude Code's writer assigns uuids to every visible message),
+// the op no-ops on that target. We log a warning so the regression is
+// visible in dev rather than silent. The pipeline architecture is
+// uuid-anchored by design — supporting position-anchored ops for
+// uuid-less lines would conflict with the cross-step-ordering
+// invariant uuids give us, and is out of scope for slice 1.
 export function targetUuidsFromIndex(
   sourceIndex: Map<number, string>,
   targets: number[],
@@ -38,7 +46,13 @@ export function targetUuidsFromIndex(
   const out = new Set<string>();
   for (const idx of targets) {
     const uuid = sourceIndex.get(idx);
-    if (typeof uuid === "string") out.add(uuid);
+    if (typeof uuid === "string") {
+      out.add(uuid);
+    } else {
+      console.warn(
+        `[pipeline] target index ${idx} has no uuid in source; op will skip it`,
+      );
+    }
   }
   return out;
 }
