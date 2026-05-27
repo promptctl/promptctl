@@ -17,7 +17,10 @@ import type {
 } from "../../shared/types";
 import { useLaunchStore } from "../store/launches";
 import { setupUser } from "../../test/user-event";
-import { WorkshopLaunchList } from "./WorkshopLaunchList";
+import {
+  WorkshopLaunchList,
+  launchDetailRoute,
+} from "./WorkshopLaunchList";
 
 function runningClaude(over: Partial<LaunchRunning> = {}): LaunchRunning {
   return {
@@ -188,6 +191,22 @@ describe("WorkshopLaunchList", () => {
     expect(screen.getByTestId("location-search").textContent).toBe(
       "?launchId=L-kbd",
     );
+  });
+
+  it("encodes special characters in launchIds — defense at the URL boundary", () => {
+    // The brand on LaunchId admits arbitrary strings (synthetic ids
+    // from HAR replays are derived from filename basenames, and can
+    // carry `&`, spaces, etc.). launchDetailRoute is the single URL-
+    // shape site, so the encoding lives there once and every callsite
+    // gets safe routes for free.
+    const id = "replay-foo & bar baz" as LaunchId;
+    const route = launchDetailRoute(id);
+    expect(route).toBe("/workshop?launchId=replay-foo+%26+bar+baz");
+    // Round-trip: URLSearchParams.get decodes it back to the original.
+    const recovered = new URLSearchParams(route.split("?")[1]).get(
+      "launchId",
+    );
+    expect(recovered).toBe(id);
   });
 
   it("surfaces sessionFilePath when present on a running/exited row", () => {

@@ -192,6 +192,14 @@ function relativeTime(epochMs: number): string {
 // deep link. Internal row clicks AND every cross-tab "Open in
 // Workshop" button (Live's RequestDetail, Loops' PaneViewer) all go
 // through this — change the URL shape once, every callsite follows.
+//
+// The brand on `LaunchId` constrains semantics, not character set: the
+// registry's UUID generator produces clean ids, but synthetic-id paths
+// (e.g. HAR replay derives ids from filename basenames in
+// src/main/proxy/har-replayer.ts) can carry `&` or spaces. Routing
+// through URLSearchParams absorbs that variability at the boundary,
+// so no callsite has to remember to encode.
 export function launchDetailRoute(launchId: LaunchId): string {
-  return `/workshop?launchId=${launchId}`;
+  const params = new URLSearchParams({ launchId });
+  return `/workshop?${params.toString()}`;
 }
