@@ -36,7 +36,7 @@ export async function launchElectronApp(
     throw new Error(
       [
         `Packaged Electron build not found at ${executablePath}.`,
-        `Run \`npm run package\` once before \`npm run test:e2e\`.`,
+        `Run \`pnpm run package\` once before \`pnpm run test:e2e\`.`,
         `(Building inside Playwright globalSetup is intentionally avoided —`,
         ` electron-forge package is slow enough that we let CI/dev gate it.)`,
       ].join("\n"),

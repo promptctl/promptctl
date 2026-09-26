@@ -11,7 +11,7 @@ import { assertDevWrapperEnv } from "./scripts/dev/wrapper-guard";
 
 const config: ForgeConfig = {
   // Hot-restart of the Electron main process is wired into scripts/dev.ts
-  // (the wrapper that `npm start` runs). It spawns electron-forge as a child,
+  // (the wrapper that `pnpm start` runs). It spawns electron-forge as a child,
   // bridges stdin both ways, and runs a Vite watcher on main/preload sources
   // — when the watcher's writeBundle fires, it sends `rs\n` to Forge's stdin.
   //

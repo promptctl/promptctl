@@ -2,7 +2,7 @@
 //
 // Integration tests for TmuxTopologyTracker against a real tmux binary,
 // driven through the mesh-aware TmuxControlConnection. Run unconditionally
-// with the default `npm test`.
+// with the default `pnpm test`.
 //
 // Isolation: unique `-L <socket>` per test, prefix `promptctl-tmux-topology-`
 // so this suite can run alongside the others without colliding with the

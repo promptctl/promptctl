@@ -68,7 +68,7 @@ The Context Workshop tab in promptctl switches to the current session.
 ## Troubleshooting
 
 - **`promptctl not running`:** the port file `~/.promptctl/deep-link-port`
-  is missing. Start promptctl (`npm start` in its repo, or launch the
+  is missing. Start promptctl (`pnpm start` in its repo, or launch the
   packaged app).
 - **`could not find Claude Code JSONL in ancestor processes`:** the script
   walked 20 PPID levels without finding a Claude Code process with an open

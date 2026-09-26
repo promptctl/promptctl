@@ -202,7 +202,7 @@ export function Settings() {
           <p className="mt-1 text-sm text-neutral-500">
             Used only by the offline tokenizer calibration harness (
             <code className="rounded bg-neutral-800 px-1.5 py-0.5 text-xs text-neutral-300">
-              npm run tokens:calibrate
+              pnpm run tokens:calibrate
             </code>
             ). The count_tokens endpoint is free to call but rate-limited, so
             the app never uses it at runtime — only once to learn

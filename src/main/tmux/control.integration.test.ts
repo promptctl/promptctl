@@ -1,7 +1,7 @@
 // @vitest-environment node
 //
 // Integration tests for TmuxControlConnection's flat mesh against a real
-// tmux binary. Run unconditionally with the default `npm test` — tmux is a
+// tmux binary. Run unconditionally with the default `pnpm test` — tmux is a
 // hard project requirement (README boundaries) and integration regressions
 // must surface in the same loop as unit regressions.
 //

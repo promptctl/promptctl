@@ -15,8 +15,8 @@ Two committed artifact pairs describe the on-disk shape of AI coding-assistant c
 ## Regeneration
 
 ```sh
-npm run schema:extract         # writes both providers
-npm run schema:check           # exits non-zero if committed artifacts drift from corpus
+pnpm run schema:extract         # writes both providers
+pnpm run schema:check           # exits non-zero if committed artifacts drift from corpus
 ```
 
 The extractor lives at [`scripts/schema/`](../../scripts/schema/). It reads:

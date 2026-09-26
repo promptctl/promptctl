@@ -14,7 +14,7 @@
     "lint:fix": "eslint src/ --fix",
     "format": "prettier --write 'src/**/*.{ts,tsx,css,html}'",
     "format:check": "prettier --check 'src/**/*.{ts,tsx,css,html}'",
-    "test": "vitest run && npm run test:e2e",
+    "test": "vitest run && pnpm run test:e2e",
     "test:unit": "vitest run",
     "test:watch": "vitest",
     "pretest:e2e": "electron-forge package",
@@ -31,9 +31,9 @@
   },
   "license": "MIT",
   "dependencies": {
+    "@promptctl/pane-terminal": "link:../tmux-control-mode-js/packages/pane-terminal",
     "@types/diff": "^7.0.2",
     "@uiw/react-textarea-code-editor": "^3.1.1",
-    "@promptctl/pane-terminal": "file:../tmux-control-mode-js/packages/pane-terminal",
     "@vscode/ripgrep": "^1.17.1",
     "@xterm/xterm": "^5.5.0",
     "diff": "^9.0.0",
@@ -43,7 +43,7 @@
     "react-dom": "^19.2.4",
     "react-router": "^7.13.1",
     "tiktoken": "^1.0.22",
-    "tmux-control-mode-js": "file:../tmux-control-mode-js",
+    "tmux-control-mode-js": "link:../tmux-control-mode-js",
     "undici": "^8.1.0",
     "zustand": "^5.0.12"
   },
@@ -56,6 +56,7 @@
     "@electron-forge/plugin-auto-unpack-natives": "^7.11.1",
     "@electron-forge/plugin-fuses": "^7.11.1",
     "@electron-forge/plugin-vite": "^7.11.1",
+    "@electron-forge/shared-types": "^7.11.1",
     "@electron/fuses": "^1.8.0",
     "@eslint/js": "^10.0.1",
     "@playwright/test": "^1.59.1",
@@ -78,6 +79,16 @@
     "tsx": "^4.21.0",
     "typescript": "^5.9.3",
     "typescript-eslint": "^8.57.1",
+    "vite": "^8.0.1",
     "vitest": "^4.1.0"
+  },
+  "packageManager": "pnpm@10.28.2",
+  "pnpm": {
+    "onlyBuiltDependencies": [
+      "@vscode/ripgrep",
+      "electron",
+      "electron-winstaller",
+      "esbuild"
+    ]
   }
 }

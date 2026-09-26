@@ -14,7 +14,7 @@ describe("assertDevWrapperEnv", () => {
   });
 
   it("throws with a remediation message when the sentinel is missing", () => {
-    expect(() => assertDevWrapperEnv({})).toThrow(/npm start/);
+    expect(() => assertDevWrapperEnv({})).toThrow(/pnpm start/);
     expect(() => assertDevWrapperEnv({})).toThrow(/scripts\/dev\.ts/);
   });
 

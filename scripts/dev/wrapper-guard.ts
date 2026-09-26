@@ -8,7 +8,7 @@ export const DEV_WRAPPER_SENTINEL = "1";
 export function assertDevWrapperEnv(env: NodeJS.ProcessEnv): void {
   if (env[DEV_WRAPPER_ENV_VAR] !== DEV_WRAPPER_SENTINEL) {
     throw new Error(
-      "Refusing to start: launch dev with `npm start` (which runs scripts/dev.ts).\n" +
+      "Refusing to start: launch dev with `pnpm start` (which runs scripts/dev.ts).\n" +
         "Direct `electron-forge start` skips the main-process hot-restart watcher,\n" +
         "leaving you editing main-process code with no automatic reload.\n" +
         `If you really need to bypass, set ${DEV_WRAPPER_ENV_VAR}=${DEV_WRAPPER_SENTINEL} explicitly.`,

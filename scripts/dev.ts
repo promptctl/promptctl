@@ -1,4 +1,4 @@
-// Entry script for `npm start`.
+// Entry script for `pnpm start`.
 //
 // Spawns electron-forge as a child, bridges stdin both ways (so the user can
 // still type `rs` to restart manually), and runs a Vite watcher in this
@@ -34,7 +34,7 @@ const OUT_DIR = path.join(PROJECT_ROOT, ".vite", "build");
 
 if (!existsSync(FORGE_BIN)) {
   console.error(`[dev] electron-forge binary not found at ${FORGE_BIN}`);
-  console.error(`[dev] run \`npm install\` first.`);
+  console.error(`[dev] run \`pnpm install\` first.`);
   process.exit(1);
 }
 

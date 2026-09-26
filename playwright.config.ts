@@ -1,5 +1,5 @@
 // [LAW:single-enforcer] One Playwright config; all e2e tests inherit from it.
-// E2E specs run unconditionally as part of `npm test` — tmux is a hard
+// E2E specs run unconditionally as part of `pnpm test` — tmux is a hard
 // project requirement (see README boundaries) and `pretest:e2e` packages
 // the app fresh, so there is no environment in which gating these tests
 // behind an opt-in env var would surface a real signal. Hiding e2e

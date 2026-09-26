@@ -2,4 +2,4 @@
 
 # Run the application in dev mode
 dev:
-    npm start
+    pnpm start

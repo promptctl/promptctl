@@ -56,8 +56,8 @@ Capture and display output from controlled processes. Stream it live in the UI. 
 ## Development
 
 ```sh
-npm start          # dev with HMR
-npm test           # run tests
-npm run typecheck  # type check
-npm run lint       # lint
+pnpm start          # dev with HMR
+pnpm test           # run tests
+pnpm run typecheck  # type check
+pnpm run lint       # lint
 ```

@@ -7,25 +7,25 @@ See also: @AGENTS.md — agent commit discipline + lit issue-tracker integration
 ## Commands
 
 ```sh
-npm start                  # tsx scripts/dev.ts — Electron Forge with main+preload Vite watcher and auto-restart
-npm test                   # FULL gate: vitest (unit + tmux integration) + Playwright e2e (auto-packages first). Runs unconditionally — no opt-in env var.
-npm run test:unit          # vitest only (unit + tmux integration, no e2e) — fast inner loop while iterating
-npm run test:watch         # vitest watch mode
-npx vitest run <path>      # single file, e.g. src/main/tasks/runner.test.ts
-npx vitest run -t "<name>" # tests whose name matches a substring
-npm run test:e2e           # playwright; pretest:e2e re-runs `electron-forge package` so it can never target a stale binary
-npm run typecheck          # tsc --noEmit
-npm run lint               # eslint src/
-npm run format             # prettier --write
-npm run package            # electron-forge package (unsigned, platform-native)
-npm run schema:extract     # regenerate session-format schemas under docs/session-formats/
-npm run schema:check       # CI guard: schemas reflect current source roots
-npm run tokens:validate    # validate tiktoken estimator against an API-billed JSONL
+pnpm start                       # tsx scripts/dev.ts — Electron Forge with main+preload Vite watcher and auto-restart
+pnpm test                        # FULL gate: vitest (unit + tmux integration) + Playwright e2e (auto-packages first). Runs unconditionally — no opt-in env var.
+pnpm run test:unit               # vitest only (unit + tmux integration, no e2e) — fast inner loop while iterating
+pnpm run test:watch              # vitest watch mode
+pnpm exec vitest run <path>      # single file, e.g. src/main/tasks/runner.test.ts
+pnpm exec vitest run -t "<name>" # tests whose name matches a substring
+pnpm run test:e2e                # playwright; pretest:e2e re-runs `electron-forge package` so it can never target a stale binary
+pnpm run typecheck               # tsc --noEmit
+pnpm run lint                    # eslint src/
+pnpm run format                  # prettier --write
+pnpm run package                 # electron-forge package (unsigned, platform-native)
+pnpm run schema:extract          # regenerate session-format schemas under docs/session-formats/
+pnpm run schema:check            # CI guard: schemas reflect current source roots
+pnpm run tokens:validate         # validate tiktoken estimator against an API-billed JSONL
 ```
 
-`justfile` exposes `just dev` as an alias for `npm start`.
+`justfile` exposes `just dev` as an alias for `pnpm start`.
 
-**`npm test` is the gate that must pass before every commit.** Unit + tmux integration + Playwright e2e — all unconditional. tmux is a hard project requirement (see README boundaries), so the historical `TMUX_INTEGRATION=1` opt-in served no purpose except hiding regressions until the next slice tripped over them. It is gone. The `pretest:e2e` script forces a fresh `electron-forge package` so e2e can never target stale code — that footgun cost real time during the 77e.1.4 slice.
+**`pnpm test` is the gate that must pass before every commit.** Unit + tmux integration + Playwright e2e — all unconditional. tmux is a hard project requirement (see README boundaries), so the historical `TMUX_INTEGRATION=1` opt-in served no purpose except hiding regressions until the next slice tripped over them. It is gone. The `pretest:e2e` script forces a fresh `electron-forge package` so e2e can never target stale code — that footgun cost real time during the 77e.1.4 slice.
 
 **Convention split:** vitest owns `*.test.ts(x)` (units) and `*.integration.test.ts` (real-tmux integration). Playwright owns `*.spec.ts` under `tests/e2e/`.
 
@@ -101,6 +101,6 @@ Subsystems wired in `src/main/main.ts::app.whenReady`:
 - `tests/e2e/` — Playwright `*.spec.ts` (gated on `TMUX_INTEGRATION=1`).
 - `scripts/` — `dev.ts` (the wrapper that runs Forge + Vite watcher), `schema/` (session-format schema extraction), `validate-tokens.ts`.
 - `docs/anthropic-api/` — reference material for Anthropic features (context editing, prompt caching, memory tool, context windows).
-- `docs/session-formats/` — generated session-format schemas; CI guards via `npm run schema:check`.
+- `docs/session-formats/` — generated session-format schemas; CI guards via `pnpm run schema:check`.
 - `prompts/` (in-repo) — prompt library, edited via the in-app `PromptLibrary` UI and checked into git so prompts travel with the repo.
 - `~/.promptctl/` (user's home, not in-repo) — runtime state: `settings.json`, `commands.json`, `versions/`, `proxy-recordings/`, `deep-link-port`.
